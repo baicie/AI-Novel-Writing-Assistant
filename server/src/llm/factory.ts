@@ -19,6 +19,7 @@ import {
 import { attachLLMUsageTracking } from "./usageTracking";
 import { resolveModel, toStructuredOutputStrategy, type TaskType } from "./modelRouter";
 import {
+  buildProviderSessionHeaders,
   getProviderEnvApiKey,
   getProviderEnvModel,
   isBuiltInProvider,
@@ -386,7 +387,20 @@ export function buildOpenAICompatibleDefaultHeaders(
   };
 }
 
+// LangChain rewrites defaultHeaders and always installs its own User-Agent, so provider identity
+// headers have to be applied on the outgoing request itself.
+function withRequestHeaders(headers: Record<string, string>): typeof fetch {
+  return (input, init) => {
+    const merged = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(headers)) {
+      merged.set(name, value);
+    }
+    return fetch(input, { ...init, headers: merged });
+  };
+}
+
 export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions): ChatOpenAI {
+  const sessionHeaders = buildProviderSessionHeaders(resolved.provider, resolved.promptMeta?.novelId);
   const llm = resolved.requestProtocol === "anthropic"
     ? createAnthropicLLM({
       apiKey: resolved.apiKey,
@@ -395,6 +409,7 @@ export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions)
       temperature: resolved.temperature,
       maxTokens: resolved.maxTokens,
       timeoutMs: resolved.timeoutMs,
+      headers: sessionHeaders,
     }) as ChatOpenAI
     : new ChatOpenAI({
       apiKey: resolved.apiKey ?? "ollama",
@@ -409,6 +424,7 @@ export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions)
       configuration: {
         baseURL: resolved.baseURL,
         defaultHeaders: buildOpenAICompatibleDefaultHeaders(resolved.authMode, resolved.apiKey),
+        ...(sessionHeaders ? { fetch: withRequestHeaders(sessionHeaders) } : {}),
       },
     });
   const meta = {

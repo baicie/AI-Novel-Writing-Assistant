@@ -14,6 +14,7 @@ interface AnthropicLLMOptions {
   temperature: number;
   maxTokens?: number;
   timeoutMs?: number;
+  headers?: Record<string, string>;
 }
 
 type AnthropicRole = "user" | "assistant";
@@ -155,6 +156,7 @@ export function createAnthropicLLM(options: AnthropicLLMOptions): {
         method: "POST",
         signal: controller.signal,
         headers: {
+          ...options.headers,
           "content-type": "application/json",
           "x-api-key": options.apiKey ?? "",
           "anthropic-version": process.env.ANTHROPIC_VERSION ?? "2023-06-01",

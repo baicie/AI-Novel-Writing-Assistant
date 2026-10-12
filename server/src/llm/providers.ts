@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import {
   LLM_PROVIDERS,
   isBuiltinLLMProvider,
@@ -15,7 +16,14 @@ export interface ProviderConfig {
   envModelKey?: string;
   maxTokens?: number;
   requiresApiKey?: boolean;
+  // Requests go through Chat Completions, so models served only over the Responses API cannot be called.
+  responsesOnlyModelPrefixes?: string[];
+  // The gateway expects the app's own user agent and routes/caches by a stable session id in this header.
+  sessionHeader?: string;
 }
+
+const CLIENT_USER_AGENT = "BizNovelStudio (+https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant)";
+const processSessionId = randomUUID();
 
 export const PROVIDERS: Record<BuiltinLLMProvider, ProviderConfig> = {
   deepseek: {
@@ -130,6 +138,28 @@ export const PROVIDERS: Record<BuiltinLLMProvider, ProviderConfig> = {
     envBaseURLKey: "GEMINI_BASE_URL",
     envModelKey: "GEMINI_MODEL",
   },
+  "opencode-go": {
+    name: "OpenCode Go",
+    baseURL: "https://opencode.ai/zen/go/v1",
+    defaultModel: "deepseek-v4.1-flash",
+    models: [
+      "deepseek-v4.1-flash",
+      "deepseek-v4-pro",
+      "kimi-k3",
+      "kimi-k2.6",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "qwen3.8-max",
+      "qwen3.8-flash",
+      "minimax-m3",
+      "mimo-v2.6-pro",
+    ],
+    envKey: "OPENCODE_GO_API_KEY",
+    envBaseURLKey: "OPENCODE_GO_BASE_URL",
+    envModelKey: "OPENCODE_GO_MODEL",
+    responsesOnlyModelPrefixes: ["grok-"],
+    sessionHeader: "x-opencode-session",
+  },
   ollama: {
     name: "Ollama",
     baseURL: "http://127.0.0.1:11434/v1",
@@ -217,4 +247,30 @@ export function providerRequiresApiKey(provider: LLMProvider): boolean {
     return false;
   }
   return PROVIDERS[provider].requiresApiKey !== false;
+}
+
+export function isProviderModelCallable(provider: LLMProvider, model: string): boolean {
+  if (!isBuiltInProvider(provider)) {
+    return true;
+  }
+  const normalizedModel = model.trim().toLowerCase();
+  return !(PROVIDERS[provider].responsesOnlyModelPrefixes ?? [])
+    .some((prefix) => normalizedModel.startsWith(prefix));
+}
+
+export function buildProviderSessionHeaders(
+  provider: LLMProvider,
+  sessionKey?: string | null,
+): Record<string, string> | undefined {
+  const sessionHeader = isBuiltInProvider(provider) ? PROVIDERS[provider].sessionHeader : undefined;
+  if (!sessionHeader) {
+    return undefined;
+  }
+  const normalizedKey = sessionKey?.trim();
+  return {
+    "User-Agent": CLIENT_USER_AGENT,
+    [sessionHeader]: normalizedKey
+      ? createHash("sha256").update(normalizedKey).digest("hex").slice(0, 32)
+      : processSessionId,
+  };
 }
