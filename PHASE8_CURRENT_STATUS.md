@@ -37,6 +37,18 @@ node --max-old-space-size=6144 node_modules/typescript/lib/tsc.js -p tsconfig.js
 
 使用临时库运行 `server/scripts/run-tests.cjs integration`：238 项中 236 通过、0 失败、2 跳过。
 
+## 第 1 天清单实测（Node 22.12.0，2026-10-13）
+
+| 清单项 | 结果 | 说明 |
+| --- | --- | --- |
+| 任务 1 类型检查 `pnpm run typecheck` | 通过，退出码 0 | 覆盖 shared、server、client、desktop |
+| 任务 2 `pnpm run lint` | 通过，退出码 0 | 三个包均为 `tsc --noEmit` |
+| 任务 3 格式检查 | 无法执行 | 仓库没有 `format:check` 脚本，清单该项不适用 |
+| 任务 4 文档审查 | 仅完成清单校验 | `pnpm run check:docs-manifest` 通过；逐篇人工审查未做 |
+| 任务 6 `pnpm install --prod` | 有意跳过 | 该命令会移除开发依赖并破坏构建环境 |
+| 任务 7 `pnpm run build` | 通过，退出码 0 | 约 40 秒；有 1 条大 chunk 体积告警，不影响构建 |
+| 任务 8 备份 | 有意跳过 | 清单脚本复制 `src/`，本仓库没有该目录，且 `backups/` 已被误提交；备份应改用 `git` 提交或 `db:restore` 相关流程 |
+
 ## 待办
 
 1. `directorSimplificationGuard`：阶段 6 依赖阶段 4。阶段 4 的动作表（计划文档 S4 决策点）尚未获得人工确认，`resolve_checkpoint` 也尚未实现，因此需先确认动作表。
