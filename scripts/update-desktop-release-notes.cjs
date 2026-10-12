@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const https = require("node:https");
 const path = require("node:path");
 
+const { isDevDesktopVersion, isStableDesktopVersion, normalizeDesktopVersion } = require("./desktop-version.cjs");
 const repoRoot = path.resolve(__dirname, "..");
 const desktopPackagePath = path.join(repoRoot, "desktop", "package.json");
 const releaseNotesPath = path.join(repoRoot, "docs", "releases", "release-notes.md");
@@ -49,7 +50,7 @@ function printHelp() {
 function readDesktopVersion() {
   const packageJson = JSON.parse(fs.readFileSync(desktopPackagePath, "utf8"));
   const version = typeof packageJson.version === "string" ? packageJson.version.trim() : "";
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  if (!isStableDesktopVersion(version)) {
     throw new Error(
       `desktop/package.json version must be stable semver like 0.3.3, got ${version || "(empty)"}.`,
     );
@@ -57,12 +58,21 @@ function readDesktopVersion() {
   return version;
 }
 
-function resolveReleaseTag(version) {
-  const refName = firstNonEmpty(process.env.GITHUB_REF_NAME);
-  if (/^v\d+\.\d+\.\d+$/.test(refName)) {
-    return refName;
+function resolveReleaseTarget() {
+  const refVersion = normalizeDesktopVersion(firstNonEmpty(process.env.GITHUB_REF_NAME));
+  if (isDevDesktopVersion(refVersion)) {
+    return {
+      version: refVersion,
+      tagName: `v${refVersion}`,
+    };
   }
-  return `v${version}`;
+
+  const version = readDesktopVersion();
+  const refName = firstNonEmpty(process.env.GITHUB_REF_NAME);
+  return {
+    version,
+    tagName: /^v\d+\.\d+\.\d+$/.test(refName) ? refName : `v${version}`,
+  };
 }
 
 function extractVersionReleaseNoteBlock(markdown, version) {
@@ -181,8 +191,7 @@ async function main() {
     return;
   }
 
-  const version = readDesktopVersion();
-  const tagName = resolveReleaseTag(version);
+  const { version, tagName } = resolveReleaseTarget();
   const releaseNotes = extractReleaseNotesForVersion(fs.readFileSync(releaseNotesPath, "utf8"), version);
   const body = buildReleaseBody(version, releaseNotes);
 

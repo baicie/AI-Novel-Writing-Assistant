@@ -15,6 +15,23 @@ interface DesktopUpdaterOptions {
   updateChannel: string;
   isPackaged: boolean;
   isPortable: boolean;
+  appPath: string;
+}
+
+function requiresManualMacUpdate(options: DesktopUpdaterOptions): boolean {
+  if (process.platform !== "darwin" || !options.isPackaged) {
+    return false;
+  }
+
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(options.appPath, "package.json"), "utf8")) as {
+      aiNovelDesktop?: { macAutoUpdate?: boolean };
+    };
+    return packageJson.aiNovelDesktop?.macAutoUpdate !== true;
+  } catch (error) {
+    logDesktopError("desktop.updater.mac-metadata", error);
+    return true;
+  }
 }
 
 function markUpdaterSnapshot(snapshot: ReturnType<typeof createUpdaterSnapshot>): void {
@@ -27,6 +44,10 @@ function isUpdaterSupported(options: DesktopUpdaterOptions): boolean {
   }
 
   if (options.isPortable) {
+    return false;
+  }
+
+  if (requiresManualMacUpdate(options)) {
     return false;
   }
 
@@ -44,7 +65,9 @@ export function initializeDesktopUpdater(options: DesktopUpdaterOptions): Deskto
     ? "开发环境不下载安装包，请在正式安装版中检查更新。"
     : options.isPortable
       ? "便携版需要下载新版安装包后手动替换。"
-      : !hasFeedConfig
+      : requiresManualMacUpdate(options)
+        ? "macOS 版请到发布页下载与你电脑芯片对应的新版安装包（Apple 芯片选 arm64，Intel 芯片选 x64），拖入“应用程序”文件夹替换即可，创作数据会保留。"
+        : !hasFeedConfig
         ? "此安装包未配置版本更新通道。"
         : "桌面版更新已被运行环境关闭。";
 
@@ -84,7 +107,7 @@ export function initializeDesktopUpdater(options: DesktopUpdaterOptions): Deskto
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
-  autoUpdater.allowPrerelease = options.updateChannel === "beta";
+  autoUpdater.allowPrerelease = options.updateChannel === "beta" || options.updateChannel === "dev";
 
   autoUpdater.on("checking-for-update", () => {
     appendDesktopLog("desktop.updater", "Checking GitHub Releases for desktop updates.");
