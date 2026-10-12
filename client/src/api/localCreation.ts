@@ -102,3 +102,41 @@ export function shouldUseLocalGeneration(novelId: string): boolean {
     return false;
   }
 }
+
+/**
+ * 本地模式 AI 修正生成 - 【留作后续完善】
+ * 
+ * 当前作为占位函数，返回错误提示。
+ * 后续可集成真正的本地 Tauri 生成逻辑。
+ * 
+ * @throws 提示本地 AI 修正功能正在开发中
+ */
+export async function handleLocalAiRevision(
+  novelId: string,
+  chapterId: string,
+  request: unknown, // 接受任意类型的请求
+): Promise<unknown> {
+  console.info("[Local Mode] Attempted AI revision - feature not yet implemented in local mode");
+  throw new Error(
+    "本地模式暂不支持 AI 修正。请切换到云模式或联系开发人员。"
+  );
+}
+
+/**
+ * 本地模式光标续写生成 - 【留作后续完善】
+ * 
+ * 当前作为占位函数，返回错误提示。
+ * 后续可集成真正的本地 Tauri 生成逻辑。
+ * 
+ * @throws 提示本地续写功能正在开发中
+ */
+export async function handleLocalCursorContinuation(
+  novelId: string,
+  chapterId: string,
+  request: unknown, // 接受任意类型的请求
+): Promise<unknown> {
+  console.info("[Local Mode] Attempted cursor continuation - feature not yet implemented in local mode");
+  throw new Error(
+    "本地模式暂不支持续写。请切换到云模式或联系开发人员。"
+  );
+}

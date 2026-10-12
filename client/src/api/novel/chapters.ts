@@ -161,3 +161,35 @@ export async function generateChapterExecutionContract(
   );
   return data;
 }
+
+/**
+ * 【新增】章节 AI 修正 - 支持本地和云模式的路由包装函数
+ */
+export async function previewChapterAiRevisionWithRouting(
+  novelId: string,
+  chapterId: string,
+  payload: ChapterEditorAiRevisionRequest,
+) {
+  const { shouldUseLocalGeneration, handleLocalAiRevision } = await import("@/api/localCreation");
+  
+  if (shouldUseLocalGeneration(novelId)) {
+    return handleLocalAiRevision(novelId, chapterId, payload);
+  }
+  return previewChapterAiRevision(novelId, chapterId, payload);
+}
+
+/**
+ * 【新增】光标续写 - 支持本地和云模式的路由包装函数
+ */
+export async function previewChapterCursorContinuationWithRouting(
+  novelId: string,
+  chapterId: string,
+  payload: ChapterEditorCursorContinuationRequest,
+) {
+  const { shouldUseLocalGeneration, handleLocalCursorContinuation } = await import("@/api/localCreation");
+  
+  if (shouldUseLocalGeneration(novelId)) {
+    return handleLocalCursorContinuation(novelId, chapterId, payload);
+  }
+  return previewChapterCursorContinuation(novelId, chapterId, payload);
+}
