@@ -65,6 +65,21 @@ impl NovelRepository for SqliteKernel {
         })
     }
 
+    async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError> {
+        let rows = sqlx::query(
+            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.protection, c.updated_at, r.version AS official_version, r.content AS content
+             FROM chapter c
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE c.novel_id = ?
+             ORDER BY c.sort_order",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter().map(chapter_from_row).collect()
+    }
+
     async fn get_chapter(
         &self,
         novel_id: &str,

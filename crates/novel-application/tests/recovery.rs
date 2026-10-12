@@ -8,7 +8,9 @@ use novel_application::{
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_llm::UnconfiguredProvider;
 use novel_storage_sqlite::SqliteKernel;
-use novel_testkit::{FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds};
+use novel_testkit::{
+    BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds,
+};
 use novel_workflow::{book_scope, chapter_scope};
 use sqlx::Row;
 
@@ -30,6 +32,7 @@ async fn runtime(
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults,
+        secrets: Arc::new(novel_application::NoModelSecrets),
         owner: "test-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -281,6 +284,7 @@ async fn saturated_worker_does_not_start_work() {
         Arc::new(SequentialIds::new()),
         Arc::new(EventHub::new()),
         Arc::new(novel_application::NoFault),
+        Arc::new(novel_application::NoModelSecrets),
         "limited".into(),
         1_000,
         0,
@@ -386,4 +390,74 @@ async fn knowledge_search_keeps_trace_to_ids() {
         .unwrap();
     assert!(!trace.query_summary.contains("这段正文"));
     assert!(!trace.chunk_ids.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let llm: Arc<BlockingMockLlm> = Arc::new(BlockingMockLlm::new("不会被用到"));
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        llm: llm.clone(),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(novel_application::NoModelSecrets),
+        owner: "test-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime
+        .director
+        .create_novel("可取消的书", "说明")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    seed_ready_for_draft(&kernel, &novel.id, &chapter.id).await;
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "open-cancel".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: None,
+            max_automatic_retries: 0,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+        })
+        .await
+        .unwrap();
+    let run_id = opened.run_id.clone();
+    let worker_for_tick = runtime.worker.clone();
+    let tick = tokio::spawn(async move { worker_for_tick.tick().await });
+    // 等 Worker 进入 LLM 调用，再取消
+    for _ in 0..50 {
+        if llm.calls() == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(llm.calls(), 1, "tick should reach the LLM before cancel");
+    runtime.worker.cancel_generation(&run_id);
+    let outcome = tick.await.unwrap().unwrap();
+    match outcome {
+        TickOutcome::Advanced { status, run_id: id } => {
+            assert_eq!(status, "cancelled", "want cancelled, got {status}");
+            assert_eq!(id, run_id);
+        }
+        other => panic!("expected Advanced(cancelled), got {other:?}"),
+    }
 }

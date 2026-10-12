@@ -240,10 +240,25 @@ impl FaultInjector for NoFault {
 }
 
 #[async_trait]
+pub trait ModelSecrets: Send + Sync {
+    async fn api_key(&self, provider: &str) -> Result<Option<String>, PortError>;
+}
+
+pub struct NoModelSecrets;
+
+#[async_trait]
+impl ModelSecrets for NoModelSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
 pub trait NovelRepository: Send + Sync {
     async fn list_novels(&self) -> Result<Vec<NovelSummary>, PortError>;
     async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError>;
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
+    async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
     async fn get_chapter(
         &self,
         novel_id: &str,

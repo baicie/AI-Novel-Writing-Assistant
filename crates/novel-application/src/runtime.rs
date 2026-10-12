@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::director::DirectorService;
 use crate::hub::EventHub;
-use crate::ports::{Clock, FaultInjector, Ids, NovelRepository, WorkflowRepository};
+use crate::ports::{Clock, FaultInjector, Ids, ModelSecrets, NovelRepository, WorkflowRepository};
 use crate::worker::Worker;
 use novel_llm::LlmProvider;
 
@@ -19,6 +19,7 @@ pub struct RuntimeDeps {
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn Ids>,
     pub faults: Arc<dyn FaultInjector>,
+    pub secrets: Arc<dyn ModelSecrets>,
     pub owner: String,
     pub lease_ms: i64,
     pub concurrency: usize,
@@ -41,6 +42,7 @@ impl Runtime {
             deps.ids,
             hub.clone(),
             deps.faults,
+            deps.secrets,
             deps.owner,
             deps.lease_ms,
             deps.concurrency,

@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use novel_domain::{
     ChapterProtection, ControlEvent, PauseKind, RunPause, StopSignalKind, ensure_can_promote,
@@ -10,14 +11,15 @@ use novel_workflow::{
     StepScope, StepSpec, book_scope, chapter_scope, decide, find_step, next_action,
     production_plan,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::dto::{GenerationEvent, event_from_stored};
 use crate::error::AppError;
 use crate::hash::sha256_hex;
 use crate::hub::EventHub;
 use crate::ports::{
-    ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, NewArtifact, NewAttempt, NewCandidate,
-    NewInvocation, NovelRepository, PromoteOutcome, WorkflowRepository,
+    ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, ModelSecrets, NewArtifact, NewAttempt,
+    NewCandidate, NewInvocation, NovelRepository, PromoteOutcome, WorkflowRepository,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,10 +40,32 @@ pub struct Worker {
     ids: Arc<dyn Ids>,
     hub: Arc<EventHub>,
     faults: Arc<dyn FaultInjector>,
+    secrets: Arc<dyn ModelSecrets>,
+    cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
     gate: Arc<ConcurrencyGate>,
     running: Arc<AtomicBool>,
     owner: String,
     lease_ms: i64,
+}
+
+impl Clone for Worker {
+    fn clone(&self) -> Self {
+        Self {
+            novels: self.novels.clone(),
+            runs: self.runs.clone(),
+            llm: self.llm.clone(),
+            clock: self.clock.clone(),
+            ids: self.ids.clone(),
+            hub: self.hub.clone(),
+            faults: self.faults.clone(),
+            secrets: self.secrets.clone(),
+            cancels: self.cancels.clone(),
+            gate: self.gate.clone(),
+            running: self.running.clone(),
+            owner: self.owner.clone(),
+            lease_ms: self.lease_ms,
+        }
+    }
 }
 
 impl Worker {
@@ -54,6 +78,7 @@ impl Worker {
         ids: Arc<dyn Ids>,
         hub: Arc<EventHub>,
         faults: Arc<dyn FaultInjector>,
+        secrets: Arc<dyn ModelSecrets>,
         owner: String,
         lease_ms: i64,
         concurrency: usize,
@@ -66,6 +91,8 @@ impl Worker {
             ids,
             hub,
             faults,
+            secrets,
+            cancels: Arc::new(Mutex::new(HashMap::new())),
             gate: Arc::new(ConcurrencyGate::new(concurrency)),
             running: Arc::new(AtomicBool::new(true)),
             owner,
@@ -75,6 +102,12 @@ impl Worker {
 
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
+    }
+
+    pub fn cancel_generation(&self, run_id: &str) {
+        if let Some(token) = self.cancels.lock().expect("cancel map").get(run_id) {
+            token.cancel();
+        }
     }
 
     pub fn running_flag(&self) -> Arc<AtomicBool> {
@@ -251,6 +284,20 @@ impl Worker {
         }
         let prompt = draft_prompt(&claimed.contract, &chapter.title)?;
         let summary = summarize(&prompt);
+        let api_key = self
+            .secrets
+            .api_key(&claimed.contract.provider)
+            .await?
+            .unwrap_or_default();
+        let cancel = CancellationToken::new();
+        self.cancels
+            .lock()
+            .expect("cancel map")
+            .insert(claimed.run_id.clone(), cancel.clone());
+        let _cancel_guard = CancelRegistration {
+            run_id: claimed.run_id.clone(),
+            cancels: self.cancels.clone(),
+        };
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let hub = self.hub.clone();
         let run_for_tokens = claimed.run_id.clone();
@@ -272,11 +319,11 @@ impl Worker {
                     model: claimed.contract.model.clone(),
                     prompt,
                     endpoint: claimed.contract.endpoint.clone(),
-                    api_key: String::new(),
+                    api_key,
                     allow_localhost_http: claimed.contract.allow_localhost_http,
                 },
                 sender,
-                tokio_util::sync::CancellationToken::new(),
+                cancel,
             )
             .await;
         let _ = forward.await;
@@ -291,9 +338,23 @@ impl Worker {
                         self.clock.now_ms(),
                     )
                     .await?;
+                if matches!(error, novel_llm::LlmError::Cancelled) {
+                    let reason = error.to_string();
+                    return self
+                        .write(
+                            claimed,
+                            ControlEvent::Cancel,
+                            "run_cancelled",
+                            Some("draft".into()),
+                            &serde_json::json!({ "reason": reason }).to_string(),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await;
+                }
                 let signal = match error {
                     novel_llm::LlmError::RateLimit => StopSignalKind::Budget,
-                    novel_llm::LlmError::Cancelled => StopSignalKind::ApprovalRequired,
                     _ => StopSignalKind::ProviderUnavailable,
                 };
                 let reason = error.to_string();
@@ -665,6 +726,20 @@ fn invocation(
             .completion_tokens
             .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
         status: "succeeded".into(),
+    }
+}
+
+struct CancelRegistration {
+    run_id: String,
+    cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl Drop for CancelRegistration {
+    fn drop(&mut self) {
+        self.cancels
+            .lock()
+            .expect("cancel map")
+            .remove(&self.run_id);
     }
 }
 

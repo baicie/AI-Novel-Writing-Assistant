@@ -111,32 +111,43 @@ pub fn map_sql(error: sqlx::Error) -> PortError {
 }
 
 async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
+    const SCRIPTS: &[(&str, &str)] = &[
+        ("0001", include_str!("../../../migrations/0001_init.sql")),
+        ("0002", include_str!("../../../migrations/0002_model_setup.sql")),
+    ];
+    for (version, script) in SCRIPTS {
+        if migration_applied(pool, version).await? {
+            continue;
+        }
+        let mut tx = pool.begin().await.map_err(map_sql)?;
+        for statement in split_sql(script) {
+            sqlx::query(&statement)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        }
+        tx.commit().await.map_err(map_sql)?;
+    }
+    Ok(())
+}
+
+async fn migration_applied(pool: &SqlitePool, version: &str) -> Result<bool, PortError> {
     let ready: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migration'",
     )
     .fetch_one(pool)
     .await
     .map_err(map_sql)?;
-    if ready > 0 {
-        let applied: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM schema_migration WHERE version = '0001'")
-                .fetch_one(pool)
-                .await
-                .map_err(map_sql)?;
-        if applied > 0 {
-            return Ok(());
-        }
+    if ready == 0 {
+        return Ok(false);
     }
-    let script = include_str!("../../../migrations/0001_init.sql");
-    let mut tx = pool.begin().await.map_err(map_sql)?;
-    for statement in split_sql(script) {
-        sqlx::query(&statement)
-            .execute(tx.deref_mut())
+    let applied: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM schema_migration WHERE version = ?")
+            .bind(version)
+            .fetch_one(pool)
             .await
             .map_err(map_sql)?;
-    }
-    tx.commit().await.map_err(map_sql)?;
-    Ok(())
+    Ok(applied > 0)
 }
 
 fn split_sql(script: &str) -> Vec<String> {

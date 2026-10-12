@@ -125,6 +125,12 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tokens: tokio::sync::mpsc::UnboundedSender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
+        if request.api_key.trim().is_empty() {
+            return Err(LlmError::Unavailable {
+                billed: false,
+                reason: "还没有填写模型密钥".into(),
+            });
+        }
         authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
         let body = serde_json::json!({
             "model": request.model,
@@ -194,5 +200,32 @@ mod tests {
     fn redacts_keys_without_turning_unknown_usage_into_zero() {
         assert_eq!(redact_secrets("key sk-abc123 tail"), "key sk-*** tail");
         assert_eq!(TokenUsage::unknown().prompt_tokens, None);
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_rejects_empty_api_key_before_hitting_the_endpoint() {
+        let provider = OpenAiCompatibleProvider::new();
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let result = provider
+            .generate(
+                LlmRequest {
+                    request_id: "req".into(),
+                    model: "gpt-test".into(),
+                    prompt: "hello".into(),
+                    endpoint: "https://example.com/v1/chat/completions".into(),
+                    api_key: String::new(),
+                    allow_localhost_http: false,
+                },
+                sender,
+                CancellationToken::new(),
+            )
+            .await;
+        match result {
+            Err(LlmError::Unavailable { billed, reason }) => {
+                assert!(!billed);
+                assert!(reason.contains("模型密钥"), "unexpected reason: {reason}");
+            }
+            other => panic!("expected Unavailable error, got {other:?}"),
+        }
     }
 }

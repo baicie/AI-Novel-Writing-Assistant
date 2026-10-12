@@ -18,10 +18,10 @@ pub use hub::EventHub;
 pub use knowledge::assemble_context;
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite, FaultInjector,
-    Ids, KnowledgeRepository, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument,
-    NewEmbedding, NewInvocation, NewNovel, NoFault, NovelRepository, OpenRunRecord, PromoteOutcome,
-    RetrievalTrace, SaveChapterRecord, SearchHit, StoredEvent, SystemClock, UuidIds,
-    WorkflowRepository,
+    Ids, KnowledgeRepository, ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter,
+    NewDocument, NewEmbedding, NewInvocation, NewNovel, NoFault, NoModelSecrets, NovelRepository,
+    OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveChapterRecord, SearchHit, StoredEvent,
+    SystemClock, UuidIds, WorkflowRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use worker::{ConcurrencyGate, TickOutcome, Worker};

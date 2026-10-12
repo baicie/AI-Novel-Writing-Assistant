@@ -148,3 +148,97 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn list_chapters_returns_them_in_sort_order_with_the_official_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    let novel = NovelRepository::create_novel(
+        &kernel,
+        novel_application::NewNovel {
+            id: "n".into(),
+            title: "次序".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let _second = NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "c-2".into(),
+            novel_id: novel.id.clone(),
+            title: "第二章".into(),
+            sort_order: 2,
+            now_ms: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let first = NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "c-1".into(),
+            novel_id: novel.id.clone(),
+            title: "第一章".into(),
+            sort_order: 1,
+            now_ms: 3,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: novel.id.clone(),
+            chapter_id: first.id.clone(),
+            expected_version: 0,
+            title: "第一章".into(),
+            content: "初始正文".into(),
+            revision_id: "rev-1".into(),
+            artifact_id: "art-1".into(),
+            content_sha256: "hash-1".into(),
+            now_ms: 4,
+        },
+    )
+    .await
+    .unwrap();
+    let chapters = NovelRepository::list_chapters(&kernel, &novel.id)
+        .await
+        .unwrap();
+    assert_eq!(chapters.len(), 2);
+    assert_eq!(chapters[0].id, first.id);
+    assert_eq!(chapters[0].sort_order, 1);
+    assert_eq!(chapters[0].content, "初始正文");
+    assert_eq!(chapters[0].official_version, 1);
+    assert_eq!(chapters[1].id, "c-2");
+    assert_eq!(chapters[1].content, "");
+    assert_eq!(chapters[1].official_version, 0);
+}
+
+#[tokio::test]
+async fn model_setup_round_trip_keeps_endpoint_model_and_local_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .save_model_setup("https://example.com/v1/chat/completions", "gpt-test", false, 1)
+        .await
+        .unwrap();
+    let loaded = kernel.load_model_setup().await.unwrap().unwrap();
+    assert_eq!(loaded.endpoint, "https://example.com/v1/chat/completions");
+    assert_eq!(loaded.model, "gpt-test");
+    assert!(!loaded.allow_localhost_http);
+    assert_eq!(loaded.secret_ref, novel_storage_sqlite::MODEL_SECRET_REF);
+    kernel
+        .save_model_setup("http://127.0.0.1:8080/v1/chat/completions", "gpt-test", true, 2)
+        .await
+        .unwrap();
+    let updated = kernel.load_model_setup().await.unwrap().unwrap();
+    assert_eq!(updated.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
+    assert!(updated.allow_localhost_http);
+}

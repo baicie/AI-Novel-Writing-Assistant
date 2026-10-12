@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use novel_application::{Clock, FaultInjector, Ids};
@@ -98,6 +99,56 @@ impl LlmProvider for MockLlm {
             text: self.text.clone(),
             usage: self.usage.clone(),
         })
+    }
+}
+
+pub struct BlockingMockLlm {
+    calls: AtomicUsize,
+    text: String,
+}
+
+impl BlockingMockLlm {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            text: text.into(),
+        }
+    }
+
+    pub fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl LlmProvider for BlockingMockLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            streaming: true,
+            structured_output: false,
+            tool_call: false,
+            reasoning: false,
+            context_limit: 8_000,
+        }
+    }
+
+    async fn generate(
+        &self,
+        _request: LlmRequest,
+        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, novel_llm::LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        tokio::select! {
+            _ = cancel.cancelled() => Err(novel_llm::LlmError::Cancelled),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let _ = tokens.send(self.text.clone());
+                Ok(LlmResponse {
+                    text: self.text.clone(),
+                    usage: TokenUsage::unknown(),
+                })
+            }
+        }
     }
 }
 

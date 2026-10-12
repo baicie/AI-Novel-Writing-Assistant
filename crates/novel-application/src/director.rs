@@ -105,6 +105,10 @@ impl DirectorService {
         Ok(self.novels.get_chapter(novel_id, chapter_id).await?)
     }
 
+    pub async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, AppError> {
+        Ok(self.novels.list_chapters(novel_id).await?)
+    }
+
     pub async fn save_chapter(
         &self,
         novel_id: &str,
