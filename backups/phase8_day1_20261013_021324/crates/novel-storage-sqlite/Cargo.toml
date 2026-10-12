@@ -1,0 +1,24 @@
+[package]
+name = "novel-storage-sqlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+novel-application.workspace = true
+novel-context.workspace = true
+novel-domain.workspace = true
+novel-prompt.workspace = true
+novel-workflow.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+sha2.workspace = true
+hex.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

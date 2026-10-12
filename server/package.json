@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "pnpm run dev:api",
     "dev:api": "node scripts/ensure-dev-prisma.cjs && node scripts/stop-stale-dev-server.cjs && ts-node-dev --respawn --transpile-only src/app.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "node build.mjs",
     "start": "node dist/app.js",
     "start:api": "node dist/app.js",
     "typecheck": "pnpm prisma:generate && tsc -p tsconfig.json --noEmit",
@@ -71,6 +71,7 @@
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
     "@types/node": "^25.3.3",
+    "esbuild": "^0.28.2",
     "prisma": "^7.4.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
