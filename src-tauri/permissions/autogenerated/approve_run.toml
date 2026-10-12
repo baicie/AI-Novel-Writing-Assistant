@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-run"
+description = "Enables the approve_run command without any pre-configured scope."
+commands.allow = ["approve_run"]
+
+[[permission]]
+identifier = "deny-approve-run"
+description = "Denies the approve_run command without any pre-configured scope."
+commands.deny = ["approve_run"]

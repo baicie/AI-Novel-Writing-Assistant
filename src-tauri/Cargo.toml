@@ -1,0 +1,26 @@
+[package]
+name = "novel-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Biz Novel Studio local kernel"
+
+[lib]
+name = "novel_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dirs = "6"
+novel-application.workspace = true
+novel-llm.workspace = true
+novel-platform.workspace = true
+novel-storage-sqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tokio.workspace = true
+tracing.workspace = true

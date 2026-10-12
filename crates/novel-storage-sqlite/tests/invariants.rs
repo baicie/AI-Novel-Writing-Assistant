@@ -1,0 +1,150 @@
+use std::fs;
+use std::path::Path;
+
+use novel_application::{NovelRepository, WorkflowRepository};
+use novel_storage_sqlite::{SqliteKernel, import_legacy};
+use sqlx::Row;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+async fn connect(path: &Path, create: bool) -> sqlx::SqlitePool {
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(path)
+                .create_if_missing(create),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn chapter_round_trip_keeps_one_hundred_thousand_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    let novel = NovelRepository::create_novel(
+        &kernel,
+        novel_application::NewNovel {
+            id: "n".into(),
+            title: "长章".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let chapter = NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "c".into(),
+            novel_id: novel.id.clone(),
+            title: "第一章".into(),
+            sort_order: 1,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let content = "字".repeat(100_000);
+    let saved = NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: novel.id.clone(),
+            chapter_id: chapter.id.clone(),
+            expected_version: 0,
+            title: "第一章".into(),
+            content: content.clone(),
+            revision_id: "rev".into(),
+            artifact_id: "art".into(),
+            content_sha256: "hash".into(),
+            now_ms: 2,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.content.chars().count(), 100_000);
+    assert_eq!(saved.content, content);
+    let conflict = NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: novel.id,
+            chapter_id: chapter.id,
+            expected_version: 0,
+            title: "第一章".into(),
+            content: "新的".into(),
+            revision_id: "rev-2".into(),
+            artifact_id: "art-2".into(),
+            content_sha256: "hash-2".into(),
+            now_ms: 3,
+        },
+    )
+    .await;
+    assert!(conflict.is_err());
+}
+
+#[tokio::test]
+async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("legacy.sqlite");
+    let target = dir.path().join("next.sqlite");
+    let pool = connect(&source, true).await;
+    sqlx::query("CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, secretNote TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO Novel (id, title, description, status, secretNote) VALUES ('n1','旧书','简介','draft','不要丢')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE Chapter (id TEXT PRIMARY KEY, novelId TEXT, title TEXT, content TEXT, \"order\" INTEGER)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','n1','第一章','旧正文',1)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE DirectorNextRun (id TEXT PRIMARY KEY, novelId TEXT, planVersion TEXT, contractJson TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO DirectorNextRun (id, novelId, planVersion, contractJson) VALUES ('r1','n1','old-plan','{}')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE DirectorNextRunControl (runId TEXT PRIMARY KEY, novelId TEXT, version INTEGER, status TEXT, pauseJson TEXT, failureReason TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO DirectorNextRunControl (runId, novelId, version, status, pauseJson, failureReason) VALUES ('r1','n1',4,'running',NULL,NULL)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE ImageJob (id TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let before = fs::read(&source).unwrap();
+    let report = import_legacy(&source, &target, 10).await.unwrap();
+    let after = fs::read(&source).unwrap();
+    assert_eq!(before, after);
+    assert!(
+        report
+            .unsupported
+            .iter()
+            .any(|item| item.column.as_deref() == Some("secretNote"))
+    );
+    assert!(
+        report
+            .unsupported
+            .iter()
+            .any(|item| item.table == "ImageJob")
+    );
+    assert_eq!(report.runs_paused_for_review, 1);
+    let kernel = SqliteKernel::open(&target).await.unwrap();
+    let chapter = NovelRepository::get_chapter(&kernel, "n1", "c1")
+        .await
+        .unwrap();
+    assert_eq!(chapter.content, "旧正文");
+    assert_eq!(chapter.protection, "user_edited");
+    let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = 'r1'")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap()
+        .try_get("status")
+        .unwrap();
+    assert_eq!(status, "paused");
+    let again = import_legacy(&source, &target, 11).await.unwrap();
+    assert_eq!(again.novels, 1);
+    assert_eq!(again.chapters, 1);
+    let _ = WorkflowRepository::remote_call_count(&kernel, "r1", "draft")
+        .await
+        .unwrap();
+}
