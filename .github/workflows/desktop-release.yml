@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "v*"
+      - "!v*-dev.*"
       - "desktop-v*"
 
 permissions:
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   publish-release:
-    if: ${{ startsWith(github.ref_name, 'desktop-v') || !contains(github.ref_name, '-') }}
+    if: ${{ !contains(github.ref_name, '-dev.') && (startsWith(github.ref_name, 'desktop-v') || !contains(github.ref_name, '-')) }}
     runs-on: windows-latest
     env:
       AI_NOVEL_RELEASE_CHANNEL: release

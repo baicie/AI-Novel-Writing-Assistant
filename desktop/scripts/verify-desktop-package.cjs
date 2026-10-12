@@ -3,6 +3,7 @@ const { execFileSync } = require("node:child_process");
 const { createRequire } = require("node:module");
 const path = require("node:path");
 
+const { parseDevDesktopVersion } = require("../../scripts/desktop-version.cjs");
 const desktopDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopDir, "..");
 const electronBuilderPackageJson = require.resolve("electron-builder/package.json", { paths: [desktopDir] });
@@ -173,6 +174,20 @@ function verifyPackagedTarget(target, sourceSqliteMigrations) {
   assertExists(unpackedAppArchive, `${target.label} packaged app archive`);
   assertExists(unpackedWindowIcon, `${target.label} packaged desktop window icon`);
   assertExists(unpackedUpdateConfig, `${target.label} packaged updater feed configuration`);
+
+  const expectedDevVersion = process.env.AI_NOVEL_DESKTOP_VERSION?.trim()
+    ? parseDevDesktopVersion(process.env.AI_NOVEL_DESKTOP_VERSION)
+    : "";
+  if (expectedDevVersion) {
+    const packagedPackageJson = JSON.parse(asar.extractFile(unpackedAppArchive, "package.json").toString("utf8"));
+    if (packagedPackageJson.version !== expectedDevVersion) {
+      throw new Error(`${target.label} package version is ${packagedPackageJson.version || "(empty)"}, expected ${expectedDevVersion}.`);
+    }
+    const updaterConfigSource = fs.readFileSync(unpackedUpdateConfig, "utf8");
+    if (!updaterConfigSource.includes("channel: dev") || !updaterConfigSource.includes("releaseType: prerelease")) {
+      throw new Error(`${target.label} updater feed must stay on the dev prerelease channel.`);
+    }
+  }
 
   const packagedFiles = new Set(asar.listPackage(unpackedAppArchive).map((entry) => entry.replace(/^[\\/]/, "").replace(/\\/g, "/")));
   const packagedEntries = Array.from(packagedFiles);

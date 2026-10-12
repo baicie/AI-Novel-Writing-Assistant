@@ -107,7 +107,7 @@ export function initializeDesktopUpdater(options: DesktopUpdaterOptions): Deskto
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowDowngrade = false;
-  autoUpdater.allowPrerelease = options.updateChannel === "beta";
+  autoUpdater.allowPrerelease = options.updateChannel === "beta" || options.updateChannel === "dev";
 
   autoUpdater.on("checking-for-update", () => {
     appendDesktopLog("desktop.updater", "Checking GitHub Releases for desktop updates.");

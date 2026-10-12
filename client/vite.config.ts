@@ -1,7 +1,13 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+const require = createRequire(import.meta.url);
+const { parseDevDesktopVersion } = require("../scripts/desktop-version.cjs") as {
+  parseDevDesktopVersion: (value: string) => string;
+};
 
 interface DesktopPackageJson {
   version?: unknown;
@@ -48,6 +54,11 @@ function resolveDevProxyTarget(): string {
 }
 
 function resolveDesktopAppVersion(): string {
+  const devVersion = process.env.AI_NOVEL_DESKTOP_VERSION?.trim();
+  if (devVersion) {
+    return parseDevDesktopVersion(devVersion);
+  }
+
   const desktopPackagePath = path.resolve(__dirname, "../desktop/package.json");
   const packageJson = JSON.parse(fs.readFileSync(desktopPackagePath, "utf8")) as DesktopPackageJson;
   const version = typeof packageJson.version === "string" ? packageJson.version.trim() : "";

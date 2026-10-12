@@ -9,6 +9,8 @@
 - `desktop/package.json` 的 `version` 是桌面客户端唯一版本源。
 - 前端网页开发态从 Vite 注入的 `VITE_APP_VERSION` 读取该版本，桌面运行态优先读取 Electron runtime 提供的 `appVersion`。
 - 正式发布 tag 必须是 `vX.Y.Z`，并且 `X.Y.Z` 必须等于 `desktop/package.json` 的 `version`。
+- 开发包 tag 必须是 `vX.Y.Z-dev.N`，例如 `v0.5.8-dev.1`。它只触发开发包工作流，GitHub Release 保持预发布，不能标成 Latest，也不能拿来代替正式版 `vX.Y.Z`。
+- `desktop/package.json` 继续只保存稳定版本。开发包版本来自 tag，打包时写入安装包，不回写这个文件。
 - 不在 UI、README 或发布脚本中硬编码另一个客户端版本号。
 - GitHub 桌面发布 workflow 必须使用 Node 24 运行时和 Node 24 代际的官方 action，不再依赖 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` 去强制旧 Node 20 action。
 - 桌面更新状态以 Electron runtime 投影为唯一事实来源；工作区顶部入口、更新弹窗、启动页和系统设置只负责以不同密度展示同一份状态，不各自推断更新结果。
@@ -22,10 +24,13 @@
 3. 合入 `main` 后运行 `node scripts/trigger-desktop-release.cjs --dry-run`，确认工作区、分支和 tag 规则都通过。
 4. 只使用与 `desktop/package.json` 对齐的 `vX.Y.Z` tag 触发正式 GitHub Release。
 
+开发包不走上面的正式发布步骤。在包含开发包工作流的提交上运行 `node scripts/trigger-desktop-dev-release.cjs X.Y.Z-dev.N`，推送 `vX.Y.Z-dev.N`。下一次开发包递增 N，例如 `0.5.8-dev.2`；进入正式版时再把 `desktop/package.json` bump 到对应的稳定版本 `X.Y.Z`。
+
 ## Failure Modes
 
 - 如果界面顶部显示版本和安装包文件名不一致，先检查打包所用 commit 的 `desktop/package.json`，不要在前端组件里补一个临时版本。
-- 如果 GitHub Release tag 已存在，不能复用同一个版本重新上传；应继续 bump 到新的 `X.Y.Z`。
+- 如果 GitHub Release tag 已存在，不能复用同一个版本重新上传；应继续 bump 到新的 `X.Y.Z`。开发包同样不能复用已有的 `vX.Y.Z-dev.N`。
+- 如果 `vX.Y.Z-dev.N` 触发了正式版工作流，说明 tag 过滤失效。正式版工作流必须忽略 `-dev.`，避免开发包覆盖 `latest.yml`。
 - 如果发版前只更新 release notes 但没有 bump 桌面版本，自动更新链路会把新包识别成旧版本，必须先修正版本源再发布。
 - 如果 GitHub Actions 提示某个 action 仍在使用 Node 20，应优先升级该 action 的 major 版本，而不是重新加入强制运行时环境变量。
 

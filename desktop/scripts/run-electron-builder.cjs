@@ -156,7 +156,8 @@ function normalizeBuildEnvironment(sourceEnv, args) {
   }
 
   const hasSigning = Boolean(signing.link || signing.identityName);
-  if (!releaseChannel.startsWith("beta") && !hasSigning && !allowUnsignedRelease) {
+  const allowsUnsignedChannel = releaseChannel === "dev" || releaseChannel.startsWith("beta");
+  if (!allowsUnsignedChannel && !hasSigning && !allowUnsignedRelease) {
     throw new Error(
       `Public ${targetPlatform === "mac" ? "macOS" : "Windows"} desktop releases require signing material. Provide CSC_LINK first, or explicitly allow an unsigned release.`,
     );

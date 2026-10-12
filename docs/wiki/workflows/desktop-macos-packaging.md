@@ -47,6 +47,7 @@
 - `desktop/scripts/verify-desktop-package.cjs`：`--platform mac` 时逐芯片校验包结构与 Mach-O 架构。
 - `desktop/src/runtime/updater.ts`、`desktop/src/main.ts`：macOS 手动更新判定与窗口生命周期。
 - `.github/workflows/desktop-release.yml`、`.github/workflows/desktop-beta-release.yml`：macOS 发布 job。
+- `.github/workflows/desktop-dev-release.yml`：`vX.Y.Z-dev.N` 开发包。macOS 仍在同一个 job 里同时打 arm64 和 x64，更新清单是 `dev-mac.yml`，不覆盖正式版的 `latest-mac.yml`。
 
 ## Source Documents
 

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execSync } = require("node:child_process");
+const { parseDevDesktopVersion } = require("../../scripts/desktop-version.cjs");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const desktopDir = path.resolve(__dirname, "..");
@@ -56,11 +57,29 @@ function replaceFileContents(targetPath, contents) {
   fs.writeFileSync(targetPath, contents, "utf8");
 }
 
+function applyDevVersionOverride() {
+  const releaseChannel = (process.env.AI_NOVEL_RELEASE_CHANNEL || "").trim().toLowerCase();
+  if (releaseChannel !== "dev") {
+    return "";
+  }
+
+  const version = parseDevDesktopVersion(process.env.AI_NOVEL_DESKTOP_VERSION);
+  const packageJsonPath = path.join(appDir, "package.json");
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  packageJson.version = version;
+  replaceFileContents(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  return version;
+}
+
 function writeDesktopUpdaterConfig() {
   const releaseChannel = (process.env.AI_NOVEL_RELEASE_CHANNEL || "beta").trim().toLowerCase();
-  const releaseType = releaseChannel === "beta" ? "prerelease" : "release";
-  const owner = (process.env.AI_NOVEL_GITHUB_OWNER || "ExplosiveCoderflome").trim();
-  const repo = (process.env.AI_NOVEL_GITHUB_REPO || "AI-Novel-Writing-Assistant").trim();
+  const isDevRelease = releaseChannel === "dev";
+  const releaseType = releaseChannel === "beta" || isDevRelease ? "prerelease" : "release";
+  const owner = (process.env.AI_NOVEL_GITHUB_OWNER || (isDevRelease ? "" : "ExplosiveCoderflome")).trim();
+  const repo = (process.env.AI_NOVEL_GITHUB_REPO || (isDevRelease ? "" : "AI-Novel-Writing-Assistant")).trim();
+  if (!owner || !repo) {
+    throw new Error("Dev desktop packages require AI_NOVEL_GITHUB_OWNER and AI_NOVEL_GITHUB_REPO.");
+  }
   const config = [
     "provider: github",
     `owner: ${owner}`,
@@ -207,6 +226,7 @@ function main() {
     appDir,
   ]);
 
+  const devVersion = applyDevVersionOverride();
   copyDirectory(clientSourceDir, clientTargetDir);
   writeDesktopUpdaterConfig();
   syncPrismaRuntime();
@@ -227,6 +247,9 @@ function main() {
     "embedded generated Prisma client",
   );
 
+  if (devVersion) {
+    console.log(`[stage:desktop] dev package version ${devVersion}`);
+  }
   console.log(`[stage:desktop] app staged at ${appDir}`);
   console.log(`[stage:desktop] renderer resources staged at ${clientTargetDir}`);
 }
