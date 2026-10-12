@@ -38,3 +38,4 @@
 - `desktop/src/main.ts`：桌面运行态把 Electron `app.getVersion()` 注入 renderer。
 - `desktop/src/runtime/updater.ts`：检查、下载和安装状态的事实来源。
 - `scripts/bump-desktop-version.cjs` 与 `scripts/trigger-desktop-release.cjs`：版本推进与正式发布 tag 校验。
+- macOS 分芯片产物、签名与更新规则见 [macOS 桌面打包与分芯片产物规则](./desktop-macos-packaging.md)。

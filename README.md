@@ -8,7 +8,7 @@
 <p align="center"><sub>Open-source AI novel writing assistant and long-form production studio.</sub></p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=Windows%20%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-17556b?style=flat-square" alt="AGPL-3.0 许可证" /></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-3C873A?style=flat-square" alt="Monorepo · pnpm workspace" /></a>
 </p>
@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载 Windows 桌面版</strong></a> ·
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载桌面版（Windows / macOS）</strong></a> ·
   <a href="https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/">项目介绍与文档</a> ·
   <a href="#快速开始">第一次使用</a> ·
   <a href="#源码运行">源码运行</a> ·
@@ -49,33 +49,13 @@
 
 ## 最新更新
 
-### 2026-10-11
+### 2026-10-12
 
 #### 新增
 
-- 正式版本 `v0.5.6` 聚合正文候选局部采纳、半自动导演步骤校准和本章版本安全入口，继续完善正文编辑与半自动创作的可控性。
-- 正式版本 `v0.5.5` 完善章节问题卡来源页闭环：可完成“定位、修改、保存、确认已处理、重新分析”，没有可靠对应问题的 AI 建议不会被误标为已解决。
-- 正式版本 `v0.5.4` 增加正文光标 AI 续写：可选择继续下一段、生成过渡、增加对话、环境描写、心理描写或推进冲突，并先比较多个候选再写回正文。
-
-#### 优化
-
-- 正式版本 `v0.5.7` 提供正文快捷保存与历史正文保护，并修复章节资料整理和重复序号的卷规划保存问题，发布包可从 GitHub Releases 获取。
-- 半自动导演停在步骤审核时，可以从步骤清单选择其他已有结果重新完善或生成，并带上自己的调整要求；生成后回到审核节点确认，再继续后续流程。
-- 正文 AI 候选会把连续的删除、新增合并为一个替换项，支持只选择需要采纳的改动写回正文，未选部分保留原文，减少反复手动修整。
-- 正文编辑器新增“本章版本”入口，可以在当前页面预览历史正文并载入编辑区；保存前不会改动已保存正文，避免为了找回一章内容而误恢复整本小说。
-- 正文编辑器支持 `Ctrl/Cmd+S` 快捷保存，接受 AI 修改后本章版本列表会立即更新，连续修改时少一次来回操作。
-- 从历史版本载入正文后，首次保存会先保护当前已保存内容，载入前的正文仍可回看，版本调整更安心。
-- 正式版本 `v0.5.3` 聚合正文编辑草稿保护、AI 按需诊断和半自动导演修改回填，发布包可从 GitHub Releases 获取。
-- 正文编辑器会保留未保存草稿和外部新版本，AI 改写候选只在原文未变化时应用；保存或接受修改后不会自动重复触发章节诊断，作者可按需重新分析本章。
-- 半自动导演停在步骤确认时，章节执行台会在正文上下文中提供“确认本章修改并继续”，作者保存正文后可直接把修改交还给导演推进。
-- 正式版本 `v0.5.2` 聚合自动导演的用量统计、角色出场安排、参考仿写版本选择和模型设置优化，发布包可从 GitHub Releases 获取。
-- 正式版本 `v0.5.1` 聚合本轮自动导演稳定性与用量优化，发布包可从 GitHub Releases 获取。
-- 自动导演按章节统计正文 AI 用量时，会把服务后续章节的规划调用单独计算，不再让规划 Token 挤占当前章节的正文预算；章节资产整理切换备用模型时减少重复生成，降低不必要的 AI 用量；达到预算时仍保留已保存正文和恢复位置。
-
-#### 修复
-
-- 章节资料整理对模型输出的数字格式更兼容，伏笔漏写标题时保留已有线索，减少格式差异导致的创作中断。
-- 卷规划保存时会提示重复的卷序号或本卷章节序号，并保留已有规划，便于调整后重新保存。
+- 桌面版提供 macOS 安装包，按芯片分为 Apple 芯片（文件名带 `mac-arm64`）和 Intel 芯片（文件名带 `mac-x64`）两个版本，可在 GitHub Releases 按自己的电脑选择下载。
+- macOS 版关闭窗口后应用会留在程序坞，点击程序坞图标即可回到写作工作区；需要完全退出时使用 `Cmd+Q`。
+- 未经 Apple 开发者签名的 macOS 版会在系统设置的更新区说明如何下载对应芯片的新版并替换应用，创作数据保持不变。
 
 完整历史更新见 [版本更新说明](./docs/releases/release-notes.md)。
 
@@ -137,12 +117,16 @@ V2 单章安全上限为 **100,000 Tokens**，累计包含该章的生成、检�
 
 ### 下载安装
 
-普通写作使用推荐 Windows 桌面版，无需安装 Node.js、pnpm 或手动启动服务端。
+普通写作推荐使用桌面版（Windows / macOS），无需安装 Node.js、pnpm 或手动启动服务端。
 
 | 选择 | 下载文件 | 适合谁 |
 | --- | --- | --- |
-| 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
-| 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
+| Windows 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
+| Windows 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
+| macOS Apple 芯片 | `Biz-Novel-Studio-<版本>-mac-arm64.dmg` | M1 / M2 / M3 / M4 等 Apple 芯片的 Mac |
+| macOS Intel 芯片 | `Biz-Novel-Studio-<版本>-mac-x64.dmg` | Intel 处理器的 Mac |
+
+不确定自己的 Mac 是哪种芯片：点击屏幕左上角苹果菜单 →“关于本机”，“芯片”一栏写着 Apple M 系列就选 Apple 芯片版，“处理器”一栏写着 Intel 就选 Intel 版。打开 `.dmg` 后把应用拖入“应用程序”文件夹即可。如果首次打开时系统提示无法验证开发者，请到“系统设置 → 隐私与安全性”中点击“仍要打开”。
 
 **[前往最新桌面版下载页 →](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest)**
 

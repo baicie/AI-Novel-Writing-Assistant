@@ -24,12 +24,23 @@ const allowUnsignedRelease =
     process.env.AI_NOVEL_ALLOW_UNSIGNED_RELEASE,
     process.env.AI_NOVEL_ALLOW_UNSIGNED_WINDOWS_RELEASE,
   ).toLowerCase() === "true";
-const hasWindowsSigningMaterial = Boolean(windowsSigningLink);
+const macSigningIdentityName = firstNonEmpty(process.env.CSC_NAME, process.env.AI_NOVEL_MAC_CSC_NAME);
+const hasSigningMaterial = Boolean(windowsSigningLink || macSigningIdentityName);
+const hasMacSigningMaterial = Boolean(firstNonEmpty(process.env.CSC_LINK) || macSigningIdentityName);
+const hasMacNotarizeCredentials = Boolean(
+  firstNonEmpty(process.env.APPLE_TEAM_ID)
+  && (
+    (firstNonEmpty(process.env.APPLE_ID) && firstNonEmpty(process.env.APPLE_APP_SPECIFIC_PASSWORD))
+    || (firstNonEmpty(process.env.APPLE_API_KEY) && firstNonEmpty(process.env.APPLE_API_KEY_ID) && firstNonEmpty(process.env.APPLE_API_ISSUER))
+  ),
+);
 const builderIconPath = path.join("builder", "app-icon.ico");
+const builderMacIconPath = path.join("builder", "app-icon.png");
+const builderMacEntitlementsPath = path.join("builder", "entitlements.mac.plist");
 
-if (!isBetaRelease && !hasWindowsSigningMaterial && !allowUnsignedRelease) {
+if (!isBetaRelease && !hasSigningMaterial && !allowUnsignedRelease) {
   throw new Error(
-    "Public Windows desktop releases require signing material. Provide CSC_LINK/WIN_CSC_LINK, or explicitly opt in to an unsigned release.",
+    "Public desktop releases require signing material. Provide CSC_LINK/WIN_CSC_LINK (or CSC_NAME on macOS), or explicitly opt in to an unsigned release.",
   );
 }
 
@@ -69,6 +80,10 @@ module.exports = {
   nativeRebuilder: "sequential",
   extraMetadata: {
     main: "dist/main.js",
+    aiNovelDesktop: {
+      // Squirrel.Mac only installs updates signed by the same Developer ID, so ad-hoc builds must update manually.
+      macAutoUpdate: hasMacSigningMaterial,
+    },
   },
   publish: [
     {
@@ -111,5 +126,30 @@ module.exports = {
   },
   portable: {
     artifactName: "${productName}-${version}-portable-${arch}.${ext}",
+  },
+  mac: {
+    icon: builderMacIconPath,
+    category: "public.app-category.productivity",
+    // electron-updater picks the Apple Silicon package by the `arm64` marker in the file name.
+    artifactName: "${productName}-${version}-mac-${arch}.${ext}",
+    // `-` is ad-hoc signing: Apple Silicon refuses to launch fully unsigned binaries.
+    ...(hasMacSigningMaterial ? {} : { identity: "-" }),
+    hardenedRuntime: hasMacSigningMaterial,
+    entitlements: builderMacEntitlementsPath,
+    entitlementsInherit: builderMacEntitlementsPath,
+    notarize: hasMacSigningMaterial && hasMacNotarizeCredentials,
+    target: [
+      {
+        target: "dmg",
+        arch: ["arm64", "x64"],
+      },
+      {
+        target: "zip",
+        arch: ["arm64", "x64"],
+      },
+    ],
+  },
+  dmg: {
+    artifactName: "${productName}-${version}-mac-${arch}.${ext}",
   },
 };

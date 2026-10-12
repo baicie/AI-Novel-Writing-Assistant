@@ -39,7 +39,7 @@ export function getDesktopUpdaterHint(updater: DesktopUpdaterSnapshot): string {
     if (!updater.isPackaged) {
       return "开发环境不会下载安装包，正式安装版可在这里检查和安装更新。";
     }
-    return "此安装包暂时无法连接版本更新服务。";
+    return updater.message.trim() || "此安装包暂时无法连接版本更新服务。";
   }
 
   switch (updater.status) {
