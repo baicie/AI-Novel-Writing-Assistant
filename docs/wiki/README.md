@@ -20,6 +20,7 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 - [当前模型选择与厂商默认模型边界](./architecture/model-selection.md)
 - [多模型网关厂商接入边界](./architecture/llm-gateway-providers.md)
 - [配置项归属与可见性规范](./architecture/configuration-conventions.md)
+- [Docker 自托管部署边界](./architecture/docker-self-host.md)
 
 ### Workflows
 

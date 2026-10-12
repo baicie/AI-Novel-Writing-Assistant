@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-export type AppRuntimeMode = "web" | "desktop";
+export type AppRuntimeMode = "web" | "desktop" | "selfhost";
 
 const APP_NAME = "AI-Novel-Writing-Assistant-v2";
 const SERVER_ROOT = path.resolve(__dirname, "..", "..");
@@ -31,7 +31,14 @@ function resolveDefaultDesktopAppDataDir(): string {
 }
 
 export function resolveAppRuntimeMode(): AppRuntimeMode {
-  return process.env.AI_NOVEL_RUNTIME?.trim().toLowerCase() === "desktop" ? "desktop" : "web";
+  const configuredMode = process.env.AI_NOVEL_RUNTIME?.trim().toLowerCase();
+  return configuredMode === "desktop" || configuredMode === "selfhost" ? configuredMode : "web";
+}
+
+// Desktop and self-hosted servers own one app data directory for the database, logs and generated
+// images, and upgrade their SQLite database on startup. Electron-only behavior must not key on this.
+export function isSelfContainedRuntime(mode: AppRuntimeMode = resolveAppRuntimeMode()): boolean {
+  return mode !== "web";
 }
 
 export function resolveAppDataRoot(): string {
@@ -47,19 +54,19 @@ export function resolveWorkspaceRoot(): string {
 }
 
 export function resolveDataRoot(): string {
-  return resolveAppRuntimeMode() === "desktop"
+  return isSelfContainedRuntime()
     ? path.join(resolveAppDataRoot(), "data")
     : resolveServerRoot();
 }
 
 export function resolveLogsRoot(): string {
-  return resolveAppRuntimeMode() === "desktop"
+  return isSelfContainedRuntime()
     ? path.join(resolveAppDataRoot(), "logs")
     : path.join(resolveWorkspaceRoot(), ".logs");
 }
 
 export function resolveGeneratedImagesRoot(): string {
-  return resolveAppRuntimeMode() === "desktop"
+  return isSelfContainedRuntime()
     ? path.join(resolveAppDataRoot(), "storage", "generated-images")
     : path.join(resolveServerRoot(), "storage", "generated-images");
 }

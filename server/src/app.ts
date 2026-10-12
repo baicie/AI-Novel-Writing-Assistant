@@ -10,6 +10,8 @@ import morgan from "morgan";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { ensureRuntimeDatabaseReady } from "./db/runtimeMigrations";
 import { errorHandler } from "./middleware/errorHandler";
+import { accessGateMiddleware, isAccessGateEnabled } from "./platform/access/accessSession";
+import accessRouter from "./routes/access";
 import { loadProviderApiKeys } from "./llm/factory";
 import astrologyRouter from "./routes/astrology";
 import agentCatalogRouter from "./routes/agentCatalog";
@@ -101,6 +103,7 @@ export function createApp() {
     : [];
 
   const allowLan = parseEnvFlag(process.env.ALLOW_LAN, process.env.NODE_ENV !== "production");
+  app.set("trust proxy", 1);
   app.use(
     cors({
       origin: (origin, callback) => {
@@ -128,7 +131,9 @@ export function createApp() {
     return `${method} ${url} ${status} ${responseTime} ms - ${contentLength}${errorSuffix}`;
   }));
   app.use(express.json({ limit: jsonBodyLimit }));
+  app.use(accessGateMiddleware);
 
+  app.use("/api/access", accessRouter);
   app.use("/api/health", healthRouter);
   app.use("/api/agent-catalog", agentCatalogRouter);
   app.use("/api/agent-runs", agentRunsRouter);
@@ -377,6 +382,12 @@ function initializeBackgroundServices(): BackgroundServicesHandle {
 }
 
 export async function startServer(options?: ServerStartOptions): Promise<StartedServer> {
+  if (process.env.NODE_ENV === "production" && !isAccessGateEnabled()) {
+    console.warn("[access] ACCESS_PASSWORD 未设置，网页和接口不要求访问密码。");
+  }
+  if (process.env.ACCESS_PASSWORD?.trim() === "change-me-before-deploy") {
+    console.warn("[access] 访问密码仍是示例值，请改成只有你知道的密码。");
+  }
   scheduleLogRetentionCleanup();
   await ensureRuntimeDatabaseReady();
 

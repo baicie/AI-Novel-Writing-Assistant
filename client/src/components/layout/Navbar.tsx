@@ -8,6 +8,7 @@ import LiveExecutionDialog from "@/components/liveExecution/LiveExecutionDialog"
 import ProjectGithubLink from "@/components/layout/ProjectGithubLink";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import DesktopReleaseNotesDialog from "@/components/layout/DesktopReleaseNotesDialog";
+import { useAccessSession } from "@/components/layout/AccessGate";
 import { Button } from "@/components/ui/button";
 import {
   AUTO_DIRECTOR_MOBILE_CLASSES,
@@ -23,6 +24,7 @@ interface NavbarProps {
 export default function Navbar(props: NavbarProps) {
   const { workspaceNavMode, onWorkspaceNavModeChange } = props;
   const { openQuickSetup } = useCreationSetup();
+  const accessSession = useAccessSession();
   const location = useLocation();
   const isHome = location.pathname === "/";
   const showWorkspaceToggle = Boolean(workspaceNavMode && onWorkspaceNavModeChange);
@@ -57,6 +59,11 @@ export default function Navbar(props: NavbarProps) {
         ) : null}
         <LiveExecutionDialog />
         <ThemeToggle />
+        {accessSession.required ? (
+          <Button type="button" size="sm" variant="ghost" onClick={() => void accessSession.logout()}>
+            退出
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"

@@ -35,6 +35,7 @@
   <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载 Windows 桌面版</strong></a> ·
   <a href="https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/">项目介绍与文档</a> ·
   <a href="#快速开始">第一次使用</a> ·
+  <a href="#用-docker-部署到服务器">Docker 部署</a> ·
   <a href="#源码运行">源码运行</a> ·
   <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/issues">问题反馈</a>
 </p>
@@ -43,7 +44,7 @@
 
 你只需要先有一个想法。这个工作台会帮你把方向、人物、世界和章节接起来，在创作过程中保留正文、设定与进度。长篇由自动导演持续推进，短篇走独立的完整成稿流程。它面向第一次写小说的人，也为需要维护长期资料、研究 AI 创作流程的作者与开发者提供更细的工具。
 
-**桌面版适合直接开始写作；源码版适合开发和自行部署。** 模型需要使用你自己的 API 配置，知识库检索可按需启用。
+**桌面版适合直接开始写作；源码版适合开发和自行部署；服务器可用 Docker 一键部署后用浏览器打开。** 模型需要使用你自己的 API 配置，知识库检索可按需启用。
 
 [最新更新](#最新更新) · [能做什么](#现在已经能做什么) · [导演版本与模式](#导演版本与运行模式) · [Token 缓存优化](#token-缓存与调用优化) · [功能预览](#功能预览) · [文档导航](#文档导航) · [参与项目](#参与项目)
 
@@ -55,6 +56,8 @@
 
 - 模型与厂商新增 OpenCode Go：订阅后填入一个 API Key，就能在 DeepSeek、Kimi、GLM、Qwen、MiniMax 等模型之间切换，默认推荐额度充足的 DeepSeek V4.1 Flash；模型列表只展示可以直接用于写作的模型。
 - 使用 OpenCode Go 时，同一本小说的连续生成会归入同一会话，更容易命中缓存、节省订阅额度。
+- 支持用 Docker 把工作台部署到服务器：启动后用浏览器打开页面即可写作，模型密钥在网页里填写；知识库检索可按需一并启用。
+- 服务器部署可以设置访问密码。打开网页前先输入密码，桌面版和未设置密码的本地开发仍直接进入。
 
 #### 修复
 
@@ -327,6 +330,7 @@ V1 与 V2 分别编排这条链，已保存的小说资料可以复用。章节�
 | 你想了解什么 | 从这里开始 |
 | --- | --- |
 | 下载、模型准备与第一次启动 | [安装与准备](./docs/public/installation.md) · [模型设置](./docs/public/modules/system-settings.md) |
+| 部署到服务器并用浏览器打开 | [Docker 部署](#用-docker-部署到服务器) · [安装与准备](./docs/public/installation.md) |
 | V2 的首次创作与模式选择 | [本文快速开始](#快速开始) · [版本与运行模式](#导演版本与运行模式) |
 | 短篇生成与后续修改 | [短篇使用路径](#写一篇完整短篇) · [短篇工作流开发说明](./docs/wiki/workflows/creation-studio-short-story.md) |
 | Token 缓存优化与消耗统计 | [缓存与调用优化](#token-缓存与调用优化) · [AI 用量读法](#ai-用量怎么看) |
@@ -337,6 +341,24 @@ V1 与 V2 分别编排这条链，已保存的小说资料可以复用。章节�
 | 历史更新与后续方向 | [完整更新记录](./docs/releases/release-notes.md) · [当前路线图](./TASK.md) |
 
 也可以在[在线文档站](https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/)搜索模块与使用问题。
+
+## 用 Docker 部署到服务器
+
+服务器上安装 Docker 后，可以把工作台跑起来，用浏览器打开页面，不必安装 Node.js。
+
+```bash
+git clone https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant.git
+cd AI-Novel-Writing-Assistant
+cp infra/docker/.env.example .env
+```
+
+编辑 `.env`，把数据库密码和 `ACCESS_PASSWORD` 改成你自己的密码，然后启动：
+
+```bash
+docker compose up -d --build
+```
+
+浏览器访问 `http://服务器IP:8080`，输入访问密码后，在「模型与厂商」填写 API Key。需要知识库检索时再加上 `--profile rag`。完整说明、备份和访问控制见 [安装与准备](./docs/public/installation.md)。
 
 ## 源码运行
 
