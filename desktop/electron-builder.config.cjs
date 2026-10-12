@@ -101,6 +101,7 @@ module.exports = {
       owner: githubOwner,
       repo: githubRepo,
       releaseType: isPrereleaseChannel ? "prerelease" : "release",
+      ...(isDevRelease ? { channel: "dev" } : {}),
     },
   ],
   electronUpdaterCompatibility: ">=2.16",

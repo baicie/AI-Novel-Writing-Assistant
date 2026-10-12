@@ -36,7 +36,8 @@
 
 - `ENOTEMPTY: rename .../Electron.app -> .../Biz Novel Studio.app`：上一轮打包失败时另一个架构仍在后台继续写入 `build/dist`。确认没有残留的 electron-builder 进程后删除 `desktop/build/dist` 再重跑 `pnpm verify:desktop-package:mac:reuse-stage`。
 - 校验报 `better-sqlite3 native module is built for [arm64], expected x86_64`：跨芯片重建失败，优先检查 electron-builder 日志中 `@electron/rebuild arch=x64` 是否下载到了 prebuild，而不是去改校验脚本。
-- 本地用 Node 26 构建时 `better-sqlite3` 编译失败、服务端 `tsc` 内存溢出：本地打包请使用与 CI 一致的 Node 24，并设置 `NODE_OPTIONS=--max-old-space-size=8192`。
+- 本地用 Node 26 构建时 `better-sqlite3` 编译失败、服务端 `tsc` 内存溢出：本地打包请使用与 CI 一致的 Node 24，并设置 `NODE_OPTIONS=--max-old-space-size=8192`。GitHub macOS runner 上的服务端构建同样会超出默认堆内存，macOS job 的构建步骤必须带上这个 `NODE_OPTIONS`。
+- 开发包的更新清单必须是 `dev.yml` / `dev-mac.yml`。如果 Release 里出现 `latest.yml`，说明 publish channel 没有设成 `dev`，开发版客户端会找不到更新，也不能让这份清单冒充正式通道。
 - 用户反馈"更新检查不可用"：如果是 ad-hoc 包，这是预期行为；如果已签名仍不可用，检查 app `package.json` 的 `aiNovelDesktop.macAutoUpdate` 是否为 `true`。
 
 ## Related Modules

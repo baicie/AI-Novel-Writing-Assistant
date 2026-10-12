@@ -115,6 +115,8 @@ jobs:
         run: python desktop/scripts/generate-desktop-icons.py
 
       - name: Build and stage desktop app
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: pnpm stage:desktop
 
       - name: Verify packaged macOS layout for Apple Silicon and Intel
