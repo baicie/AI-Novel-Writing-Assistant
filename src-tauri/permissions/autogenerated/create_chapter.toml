@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-chapter"
+description = "Enables the create_chapter command without any pre-configured scope."
+commands.allow = ["create_chapter"]
+
+[[permission]]
+identifier = "deny-create-chapter"
+description = "Denies the create_chapter command without any pre-configured scope."
+commands.deny = ["create_chapter"]

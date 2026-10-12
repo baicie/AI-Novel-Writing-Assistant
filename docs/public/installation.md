@@ -84,6 +84,38 @@ pnpm --filter @ai-novel/site dev
 
 源码运行适合开发和调试；普通写作使用优先选择桌面版。
 
+## 用 Docker 部署到服务器
+
+把工作台放到一台已安装 Docker 的服务器上，可以用浏览器直接打开页面。不需要在服务器上安装 Node.js。
+
+1. 安装 [Docker Engine](https://docs.docker.com/engine/install/) 和 Compose 插件。
+2. 克隆仓库并复制环境模板：
+
+```bash
+git clone https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant.git
+cd AI-Novel-Writing-Assistant
+cp infra/docker/.env.example .env
+```
+
+3. 编辑 `.env`，把 `POSTGRES_PASSWORD` 和 `ACCESS_PASSWORD` 改成你自己的密码。数据库密码不要使用 `@:/%#` 等特殊字符。`ACCESS_PASSWORD` 是打开网页时要输入的访问密码；留空则不启用登录页。
+4. 构建并启动：
+
+```bash
+docker compose up -d --build
+```
+
+5. 浏览器打开 `http://服务器IP:8080`，输入访问密码。进入后到「模型与厂商」填写 API Key 并做连接测试。页面右上角可以退出，这台浏览器需要重新输入密码。
+
+默认不开启知识库检索。需要检索时：
+
+```bash
+docker compose --profile rag up -d
+```
+
+然后在网页的向量设置里把 Qdrant 地址设为 `http://qdrant:6333`。
+
+这套部署把数据库和生成图片放在 Docker 数据卷里。升级前先备份；不要使用 `docker compose down -v`，那会删除小说数据。访问密码只保护这一个部署入口，公网暴露时仍请用防火墙或 VPN 限制谁能连到服务器。
+
 ## 安装后建议
 
 安装完成后，先做三件事：

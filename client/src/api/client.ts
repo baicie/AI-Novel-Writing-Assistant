@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { API_BASE_URL, API_TIMEOUT_MS } from "@/lib/constants";
+import { notifyAccessRequired } from "@/components/layout/AccessGate";
 import { toast } from "@/components/ui/toast";
 
 export interface ApiHttpError extends Error {
@@ -17,6 +18,7 @@ declare module "axios" {
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: API_TIMEOUT_MS,
+  withCredentials: true,
 });
 
 const AUTO_DISMISS_SERVER_ERROR_TOAST = {
@@ -29,6 +31,10 @@ apiClient.interceptors.response.use(
   (error: AxiosError<ApiResponse<unknown>>) => {
     const status = error.response?.status;
     const backendError = error.response?.data?.error;
+    if (status === 401 && backendError === "ACCESS_REQUIRED") {
+      notifyAccessRequired();
+      return Promise.reject(Object.assign(new Error("请先输入访问密码。"), { status }));
+    }
     const backendMessage = error.response?.data?.message;
     const silentErrorStatuses = error.config?.silentErrorStatuses ?? [];
     const source = error.response?.data as (ApiResponse<unknown> & {sourceRoute?: unknown; sourceActionLabel?: unknown}) | undefined;

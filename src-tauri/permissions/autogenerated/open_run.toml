@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-run"
+description = "Enables the open_run command without any pre-configured scope."
+commands.allow = ["open_run"]
+
+[[permission]]
+identifier = "deny-open-run"
+description = "Denies the open_run command without any pre-configured scope."
+commands.deny = ["open_run"]

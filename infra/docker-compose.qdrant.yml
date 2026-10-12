@@ -1,4 +1,5 @@
-version: "3.9"
+# 仅给本机源码开发单独起 Qdrant。
+# 服务器 Docker 部署请用仓库根目录 docker-compose.yml，并加上 --profile rag。
 
 services:
   qdrant:

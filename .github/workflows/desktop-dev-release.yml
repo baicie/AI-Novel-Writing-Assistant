@@ -1,0 +1,147 @@
+name: Desktop Dev Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "开发包版本，例如 0.5.8-dev.1"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*-dev.*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-dev:
+    if: ${{ github.ref_type != 'tag' || contains(github.ref_name, '-dev.') }}
+    runs-on: windows-latest
+    env:
+      AI_NOVEL_RELEASE_CHANNEL: dev
+      AI_NOVEL_DESKTOP_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+      AI_NOVEL_GITHUB_OWNER: ${{ github.repository_owner }}
+      AI_NOVEL_GITHUB_REPO: ${{ github.event.repository.name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.6.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install desktop icon tooling
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Regenerate desktop icon assets
+        run: python desktop/scripts/generate-desktop-icons.py
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build and stage desktop app
+        run: pnpm stage:desktop
+
+      - name: Verify database migrations
+        run: pnpm --filter @ai-novel/server exec node --test tests/prismaMigrationCompleteness.test.js tests/runtimeMigrations.test.js
+
+      - name: Verify packaged desktop layout
+        run: pnpm verify:desktop-package:reuse-stage
+
+      - name: Publish Windows dev package to GitHub Releases
+        run: pnpm publish:desktop:dev:reuse-stage
+
+      - name: Update GitHub release notes
+        run: node scripts/update-desktop-release-notes.cjs
+
+  # Both chips are built in one job so electron-builder writes a single dev-mac.yml covering arm64 and x64.
+  publish-mac-dev:
+    needs: publish-dev
+    runs-on: macos-15
+    env:
+      AI_NOVEL_RELEASE_CHANNEL: dev
+      AI_NOVEL_DESKTOP_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+      AI_NOVEL_GITHUB_OWNER: ${{ github.repository_owner }}
+      AI_NOVEL_GITHUB_REPO: ${{ github.event.repository.name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.6.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install desktop icon tooling
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Regenerate desktop icon assets
+        run: python desktop/scripts/generate-desktop-icons.py
+
+      - name: Build and stage desktop app
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: pnpm stage:desktop
+
+      - name: Verify packaged macOS layout for Apple Silicon and Intel
+        run: pnpm verify:desktop-package:mac:reuse-stage
+
+      - name: Publish macOS dev package (Apple Silicon + Intel) to GitHub Releases
+        run: pnpm publish:desktop:mac:dev:reuse-stage
+
+      - name: Upload Apple Silicon artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-arm64-dev
+          path: |
+            desktop/build/dist/*-mac-arm64.dmg
+            desktop/build/dist/*-mac-arm64.zip
+          if-no-files-found: error
+
+      - name: Upload Intel artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-x64-dev
+          path: |
+            desktop/build/dist/*-mac-x64.dmg
+            desktop/build/dist/*-mac-x64.zip
+          if-no-files-found: error

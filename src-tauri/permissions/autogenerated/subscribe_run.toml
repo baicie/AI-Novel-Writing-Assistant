@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-run"
+description = "Enables the subscribe_run command without any pre-configured scope."
+commands.allow = ["subscribe_run"]
+
+[[permission]]
+identifier = "deny-subscribe-run"
+description = "Denies the subscribe_run command without any pre-configured scope."
+commands.deny = ["subscribe_run"]

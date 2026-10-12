@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Biz Novel Studio",
+  "version": "0.1.0",
+  "identifier": "com.ai-novel.studio",
+  "build": {
+    "frontendDist": "./frontend",
+    "devUrl": "http://127.0.0.1:5173"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset: data:; style-src 'self' 'unsafe-inline'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Biz Novel Studio",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.png"]
+  }
+}

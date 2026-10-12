@@ -17,8 +17,11 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 
 - [模块边界与文档治理](./architecture/module-boundaries.md)
 - [自动导演新内核事实层边界](./architecture/director-next-fact-layer.md)
+- [本地 Rust 创作内核](./architecture/rust-native-kernel.md)
 - [当前模型选择与厂商默认模型边界](./architecture/model-selection.md)
+- [多模型网关厂商接入边界](./architecture/llm-gateway-providers.md)
 - [配置项归属与可见性规范](./architecture/configuration-conventions.md)
+- [Docker 自托管部署边界](./architecture/docker-self-host.md)
 
 ### Workflows
 
@@ -36,6 +39,8 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 - [拆书工作流](./workflows/book-analysis-workflow.md)
 - [图片生成确认与统一运行时](./workflows/image-generation-confirmation-runtime.md)
 - [Creative Hub 边界](./workflows/creative-hub-boundary.md)
+- [桌面版本号与发布标识规则](./workflows/desktop-release-versioning.md)
+- [macOS 桌面打包与分芯片产物规则](./workflows/desktop-macos-packaging.md)
 
 ### Prompts
 

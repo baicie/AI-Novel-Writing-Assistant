@@ -87,8 +87,42 @@ function firstNonEmpty(...values) {
   return "";
 }
 
+function resolveTargetPlatform(args) {
+  if (args.includes("--mac") || args.includes("-m")) {
+    return "mac";
+  }
+  return "win";
+}
+
+function resolveSigningSources(env, targetPlatform) {
+  if (targetPlatform === "mac") {
+    return {
+      link: firstNonEmpty(env.CSC_LINK, env.MAC_CSC_LINK, env.AI_NOVEL_MAC_CSC_LINK),
+      password: firstNonEmpty(env.CSC_KEY_PASSWORD, env.MAC_CSC_KEY_PASSWORD, env.AI_NOVEL_MAC_CSC_KEY_PASSWORD),
+      identityName: firstNonEmpty(env.CSC_NAME, env.AI_NOVEL_MAC_CSC_NAME),
+    };
+  }
+
+  return {
+    link: firstNonEmpty(
+      env.CSC_LINK,
+      env.WIN_CSC_LINK,
+      env.AI_NOVEL_WINDOWS_CSC_LINK,
+      env.AI_NOVEL_WINDOWS_CSC_FILE,
+    ),
+    password: firstNonEmpty(
+      env.CSC_KEY_PASSWORD,
+      env.WIN_CSC_KEY_PASSWORD,
+      env.AI_NOVEL_WINDOWS_CSC_KEY_PASSWORD,
+      env.AI_NOVEL_WINDOWS_CSC_PASSWORD,
+    ),
+    identityName: "",
+  };
+}
+
 function normalizeBuildEnvironment(sourceEnv, args) {
   const env = { ...sourceEnv };
+  const targetPlatform = resolveTargetPlatform(args);
   const releaseChannel = firstNonEmpty(env.AI_NOVEL_RELEASE_CHANNEL, "beta").toLowerCase();
   const isPublishRequested = args.includes("--publish");
   const allowUnsignedRelease =
@@ -97,34 +131,35 @@ function normalizeBuildEnvironment(sourceEnv, args) {
       env.AI_NOVEL_ALLOW_UNSIGNED_WINDOWS_RELEASE,
     ).toLowerCase() === "true";
 
-  const signingLink = firstNonEmpty(
-    env.CSC_LINK,
-    env.WIN_CSC_LINK,
-    env.AI_NOVEL_WINDOWS_CSC_LINK,
-    env.AI_NOVEL_WINDOWS_CSC_FILE,
-  );
-  const signingPassword = firstNonEmpty(
-    env.CSC_KEY_PASSWORD,
-    env.WIN_CSC_KEY_PASSWORD,
-    env.AI_NOVEL_WINDOWS_CSC_KEY_PASSWORD,
-    env.AI_NOVEL_WINDOWS_CSC_PASSWORD,
-  );
+  const signing = resolveSigningSources(env, targetPlatform);
   const githubToken = firstNonEmpty(env.GH_TOKEN, env.GITHUB_TOKEN, env.AI_NOVEL_GITHUB_TOKEN);
 
-  if (signingLink) {
-    env.CSC_LINK = signingLink;
+  for (const key of ["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME"]) {
+    if (!firstNonEmpty(env[key])) {
+      delete env[key];
+    }
   }
-  if (signingPassword) {
-    env.CSC_KEY_PASSWORD = signingPassword;
+  if (signing.link) {
+    env.CSC_LINK = signing.link;
+  }
+  if (signing.password) {
+    env.CSC_KEY_PASSWORD = signing.password;
+  }
+  if (signing.identityName) {
+    env.CSC_NAME = signing.identityName;
+  }
+  if (targetPlatform === "mac" && !signing.link && !signing.identityName) {
+    env.CSC_IDENTITY_AUTO_DISCOVERY = "false";
   }
   if (githubToken) {
     env.GH_TOKEN = githubToken;
   }
 
-  const hasSigning = Boolean(signingLink);
-  if (!releaseChannel.startsWith("beta") && !hasSigning && !allowUnsignedRelease) {
+  const hasSigning = Boolean(signing.link || signing.identityName);
+  const allowsUnsignedChannel = releaseChannel === "dev" || releaseChannel.startsWith("beta");
+  if (!allowsUnsignedChannel && !hasSigning && !allowUnsignedRelease) {
     throw new Error(
-      "Public Windows desktop releases require signing material. Provide CSC_LINK/WIN_CSC_LINK first, or explicitly allow an unsigned release.",
+      `Public ${targetPlatform === "mac" ? "macOS" : "Windows"} desktop releases require signing material. Provide CSC_LINK first, or explicitly allow an unsigned release.`,
     );
   }
 
@@ -133,7 +168,7 @@ function normalizeBuildEnvironment(sourceEnv, args) {
   }
 
   console.log(
-    `[dist:desktop] releaseChannel=${releaseChannel} publish=${isPublishRequested ? "yes" : "no"} signing=${hasSigning ? "configured" : allowUnsignedRelease ? "unsigned-opt-in" : "unsigned-beta"}`,
+    `[dist:desktop] platform=${targetPlatform} releaseChannel=${releaseChannel} publish=${isPublishRequested ? "yes" : "no"} signing=${hasSigning ? "configured" : allowUnsignedRelease ? "unsigned-opt-in" : "unsigned-beta"}`,
   );
 
   return env;

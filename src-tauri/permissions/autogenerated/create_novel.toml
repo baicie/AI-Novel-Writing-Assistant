@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-novel"
+description = "Enables the create_novel command without any pre-configured scope."
+commands.allow = ["create_novel"]
+
+[[permission]]
+identifier = "deny-create-novel"
+description = "Denies the create_novel command without any pre-configured scope."
+commands.deny = ["create_novel"]

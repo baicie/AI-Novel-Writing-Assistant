@@ -1,0 +1,17 @@
+{
+  "sourceCommit": "8e848e6e",
+  "description": "旧版 Prisma SQLite 导入到本地创作内核时允许读取的表和列。未列出的表或列必须出现在导入报告里，不能静默丢弃。",
+  "imported": {
+    "Novel": ["id", "title", "description", "status"],
+    "Chapter": ["id", "novelId", "title", "content", "order"],
+    "DirectorNextRun": ["id", "novelId", "planVersion", "contractJson"],
+    "DirectorNextRunControl": ["runId", "novelId", "version", "status", "pauseJson", "failureReason"]
+  },
+  "rules": [
+    "旧库以只读方式和 query_only 打开，导入过程不写旧库。",
+    "非空章节正文导入为 user_edited，新内核不能直接覆盖。",
+    "旧的 running 运行导入为 paused，并带上 migration_review_required，不能自动重放。",
+    "无法识别的运行状态不能当成成功，必须暂停等待人工查看。",
+    "同一旧编号再次导入时通过 legacy_id_map 跳过，不产生重复小说、章节或运行。"
+  ]
+}

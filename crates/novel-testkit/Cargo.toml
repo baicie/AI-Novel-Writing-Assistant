@@ -1,0 +1,13 @@
+[package]
+name = "novel-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+novel-application.workspace = true
+novel-llm.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }

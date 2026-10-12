@@ -65,6 +65,7 @@ function providerDescription(provider: QuickSetupProviderOption): string {
   if (provider.id === "deepseek") return "推荐 DeepSeek Flash，兼顾中文长篇质量与响应速度";
   if (provider.id === "ollama") return "使用本机模型，不要求 API Key";
   if (provider.id === "openai") return "适合通用规划、正文与结构化任务";
+  if (provider.id === "opencode-go") return "订阅 OpenCode Go 后，一个 API Key 可切换 DeepSeek、Kimi、GLM、Qwen 等模型";
   return provider.configured ? "已有配置，可以直接检测并设为全局默认" : "配置后可用于整条小说生产链";
 }
 

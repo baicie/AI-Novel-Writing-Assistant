@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ainovel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-before-deploy}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_novel}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ainovel} -d ${POSTGRES_DB:-ai_novel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      ALLOW_LAN: "false"
+      AI_NOVEL_DATABASE_MODE: postgresql
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ainovel}:${POSTGRES_PASSWORD:-change-me-before-deploy}@postgres:5432/${POSTGRES_DB:-ai_novel}
+      DIRECTOR_NEXT_ENABLED: ${DIRECTOR_NEXT_ENABLED:-true}
+      RAG_ENABLED: ${RAG_ENABLED:-false}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      API_JSON_LIMIT: ${API_JSON_LIMIT:-5mb}
+      IMAGE_STORAGE_DRIVER: local
+      IMAGE_STORAGE_ROOT: /app/storage/generated-images
+      ACCESS_PASSWORD: ${ACCESS_PASSWORD:-}
+    volumes:
+      - api_storage:/app/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
+    profiles: ["rag"]
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+volumes:
+  postgres_data:
+  api_storage:
+  qdrant_storage:

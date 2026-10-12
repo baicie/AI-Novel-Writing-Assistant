@@ -8,7 +8,7 @@
 <p align="center"><sub>Open-source AI novel writing assistant and long-form production studio.</sub></p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=Windows%20%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-17556b?style=flat-square" alt="AGPL-3.0 许可证" /></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-3C873A?style=flat-square" alt="Monorepo · pnpm workspace" /></a>
 </p>
@@ -32,9 +32,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载 Windows 桌面版</strong></a> ·
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载桌面版（Windows / macOS）</strong></a> ·
   <a href="https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/">项目介绍与文档</a> ·
   <a href="#快速开始">第一次使用</a> ·
+  <a href="#用-docker-部署到服务器">Docker 部署</a> ·
   <a href="#源码运行">源码运行</a> ·
   <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/issues">问题反馈</a>
 </p>
@@ -43,39 +44,37 @@
 
 你只需要先有一个想法。这个工作台会帮你把方向、人物、世界和章节接起来，在创作过程中保留正文、设定与进度。长篇由自动导演持续推进，短篇走独立的完整成稿流程。它面向第一次写小说的人，也为需要维护长期资料、研究 AI 创作流程的作者与开发者提供更细的工具。
 
-**桌面版适合直接开始写作；源码版适合开发和自行部署。** 模型需要使用你自己的 API 配置，知识库检索可按需启用。
+**桌面版适合直接开始写作；源码版适合开发和自行部署；服务器可用 Docker 一键部署后用浏览器打开。** 模型需要使用你自己的 API 配置，知识库检索可按需启用。
 
 [最新更新](#最新更新) · [能做什么](#现在已经能做什么) · [导演版本与模式](#导演版本与运行模式) · [Token 缓存优化](#token-缓存与调用优化) · [功能预览](#功能预览) · [文档导航](#文档导航) · [参与项目](#参与项目)
 
 ## 最新更新
 
-### 2026-10-11
+### 2026-10-13
 
 #### 新增
 
-- 正式版本 `v0.5.6` 聚合正文候选局部采纳、半自动导演步骤校准和本章版本安全入口，继续完善正文编辑与半自动创作的可控性。
-- 正式版本 `v0.5.5` 完善章节问题卡来源页闭环：可完成“定位、修改、保存、确认已处理、重新分析”，没有可靠对应问题的 AI 建议不会被误标为已解决。
-- 正式版本 `v0.5.4` 增加正文光标 AI 续写：可选择继续下一段、生成过渡、增加对话、环境描写、心理描写或推进冲突，并先比较多个候选再写回正文。
+- 桌面应用新增本地创作内核：基于 Rust 的离线创作引擎，支持模型密钥安全保存、章节列表查询和生成中取消。
+- 模型密钥可以保存在系统凭据中（macOS 使用 Keychain，开发环境使用内存存储），避免重复输入；API Key 缺失时系统会提前拒绝请求。
+- 创作工作台可以查询本书已保存的所有章节，支持按顺序浏览内容版本和官方版本号。
+- 章节生成中途可以点击取消按钮立即停止，已生成的内容会保留为草稿，不会丢失。
 
-#### 优化
+### 2026-10-12
 
-- 正式版本 `v0.5.7` 提供正文快捷保存与历史正文保护，并修复章节资料整理和重复序号的卷规划保存问题，发布包可从 GitHub Releases 获取。
-- 半自动导演停在步骤审核时，可以从步骤清单选择其他已有结果重新完善或生成，并带上自己的调整要求；生成后回到审核节点确认，再继续后续流程。
-- 正文 AI 候选会把连续的删除、新增合并为一个替换项，支持只选择需要采纳的改动写回正文，未选部分保留原文，减少反复手动修整。
-- 正文编辑器新增“本章版本”入口，可以在当前页面预览历史正文并载入编辑区；保存前不会改动已保存正文，避免为了找回一章内容而误恢复整本小说。
-- 正文编辑器支持 `Ctrl/Cmd+S` 快捷保存，接受 AI 修改后本章版本列表会立即更新，连续修改时少一次来回操作。
-- 从历史版本载入正文后，首次保存会先保护当前已保存内容，载入前的正文仍可回看，版本调整更安心。
-- 正式版本 `v0.5.3` 聚合正文编辑草稿保护、AI 按需诊断和半自动导演修改回填，发布包可从 GitHub Releases 获取。
-- 正文编辑器会保留未保存草稿和外部新版本，AI 改写候选只在原文未变化时应用；保存或接受修改后不会自动重复触发章节诊断，作者可按需重新分析本章。
-- 半自动导演停在步骤确认时，章节执行台会在正文上下文中提供“确认本章修改并继续”，作者保存正文后可直接把修改交还给导演推进。
-- 正式版本 `v0.5.2` 聚合自动导演的用量统计、角色出场安排、参考仿写版本选择和模型设置优化，发布包可从 GitHub Releases 获取。
-- 正式版本 `v0.5.1` 聚合本轮自动导演稳定性与用量优化，发布包可从 GitHub Releases 获取。
-- 自动导演按章节统计正文 AI 用量时，会把服务后续章节的规划调用单独计算，不再让规划 Token 挤占当前章节的正文预算；章节资产整理切换备用模型时减少重复生成，降低不必要的 AI 用量；达到预算时仍保留已保存正文和恢复位置。
+#### 新增
+
+- 模型与厂商新增 OpenCode Go：订阅后填入一个 API Key，就能在 DeepSeek、Kimi、GLM、Qwen、MiniMax 等模型之间切换，默认推荐额度充足的 DeepSeek V4.1 Flash；模型列表只展示可以直接用于写作的模型。
+- 使用 OpenCode Go 时，同一本小说的连续生成会归入同一会话，更容易命中缓存、节省订阅额度。
+- 支持用 Docker 把工作台部署到服务器：启动后用浏览器打开页面即可写作，模型密钥在网页里填写；知识库检索可按需一并启用。
+- 服务器部署可以设置访问密码。打开网页前先输入密码，桌面版和未设置密码的本地开发仍直接进入。
+- 桌面版提供 macOS 安装包，按芯片分为 Apple 芯片（文件名带 `mac-arm64`）和 Intel 芯片（文件名带 `mac-x64`）两个版本，可在 GitHub Releases 按自己的电脑选择下载。
+- macOS 版关闭窗口后应用会留在程序坞，点击程序坞图标即可回到写作工作区；需要完全退出时使用 `Cmd+Q`。
+- 未经 Apple 开发者签名的 macOS 版会在系统设置的更新区说明如何下载对应芯片的新版并替换应用，创作数据保持不变。
+- 桌面开发包使用独立版本号，例如 `0.5.8-dev.1`，和正式版分开下载，不会替换已经发布的正式版。
 
 #### 修复
 
-- 章节资料整理对模型输出的数字格式更兼容，伏笔漏写标题时保留已有线索，减少格式差异导致的创作中断。
-- 卷规划保存时会提示重复的卷序号或本卷章节序号，并保留已有规划，便于调整后重新保存。
+- 自定义模型厂商的鉴权方式选择“x-api-key”或“无需鉴权”时，连接测试和正式生成只按所选方式发送密钥，避免第三方接口因多出的 Bearer 密钥拒绝请求。
 
 完整历史更新见 [版本更新说明](./docs/releases/release-notes.md)。
 
@@ -137,12 +136,16 @@ V2 单章安全上限为 **100,000 Tokens**，累计包含该章的生成、检�
 
 ### 下载安装
 
-普通写作使用推荐 Windows 桌面版，无需安装 Node.js、pnpm 或手动启动服务端。
+普通写作推荐使用桌面版（Windows / macOS），无需安装 Node.js、pnpm 或手动启动服务端。
 
 | 选择 | 下载文件 | 适合谁 |
 | --- | --- | --- |
-| 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
-| 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
+| Windows 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
+| Windows 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
+| macOS Apple 芯片 | `Biz-Novel-Studio-<版本>-mac-arm64.dmg` | M1 / M2 / M3 / M4 等 Apple 芯片的 Mac |
+| macOS Intel 芯片 | `Biz-Novel-Studio-<版本>-mac-x64.dmg` | Intel 处理器的 Mac |
+
+不确定自己的 Mac 是哪种芯片：点击屏幕左上角苹果菜单 →“关于本机”，“芯片”一栏写着 Apple M 系列就选 Apple 芯片版，“处理器”一栏写着 Intel 就选 Intel 版。打开 `.dmg` 后把应用拖入“应用程序”文件夹即可。如果首次打开时系统提示无法验证开发者，请到“系统设置 → 隐私与安全性”中点击“仍要打开”。
 
 **[前往最新桌面版下载页 →](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest)**
 
@@ -344,6 +347,7 @@ V1 与 V2 分别编排这条链，已保存的小说资料可以复用。章节�
 | 你想了解什么 | 从这里开始 |
 | --- | --- |
 | 下载、模型准备与第一次启动 | [安装与准备](./docs/public/installation.md) · [模型设置](./docs/public/modules/system-settings.md) |
+| 部署到服务器并用浏览器打开 | [Docker 部署](#用-docker-部署到服务器) · [安装与准备](./docs/public/installation.md) |
 | V2 的首次创作与模式选择 | [本文快速开始](#快速开始) · [版本与运行模式](#导演版本与运行模式) |
 | 短篇生成与后续修改 | [短篇使用路径](#写一篇完整短篇) · [短篇工作流开发说明](./docs/wiki/workflows/creation-studio-short-story.md) |
 | Token 缓存优化与消耗统计 | [缓存与调用优化](#token-缓存与调用优化) · [AI 用量读法](#ai-用量怎么看) |
@@ -354,6 +358,24 @@ V1 与 V2 分别编排这条链，已保存的小说资料可以复用。章节�
 | 历史更新与后续方向 | [完整更新记录](./docs/releases/release-notes.md) · [当前路线图](./TASK.md) |
 
 也可以在[在线文档站](https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/)搜索模块与使用问题。
+
+## 用 Docker 部署到服务器
+
+服务器上安装 Docker 后，可以把工作台跑起来，用浏览器打开页面，不必安装 Node.js。
+
+```bash
+git clone https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant.git
+cd AI-Novel-Writing-Assistant
+cp infra/docker/.env.example .env
+```
+
+编辑 `.env`，把数据库密码和 `ACCESS_PASSWORD` 改成你自己的密码，然后启动：
+
+```bash
+docker compose up -d --build
+```
+
+浏览器访问 `http://服务器IP:8080`，输入访问密码后，在「模型与厂商」填写 API Key。需要知识库检索时再加上 `--profile rag`。完整说明、备份和访问控制见 [安装与准备](./docs/public/installation.md)。
 
 ## 源码运行
 

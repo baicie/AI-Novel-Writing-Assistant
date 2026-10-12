@@ -45,6 +45,7 @@ let serverHealthy = false;
 let mainWindowShown = false;
 let bootstrapFailed = false;
 let initialUpdateCheckScheduled = false;
+let appQuitting = false;
 
 function relaunchApp(extraArgs?: string[]): void {
   app.relaunch({ args: extraArgs ?? createSanitizedRelaunchArgs() });
@@ -94,6 +95,7 @@ function initializeDesktopUpdaterController(): void {
     updateChannel: resolveDesktopUpdateChannel(),
     isPackaged: app.isPackaged,
     isPortable: isPortableDesktopRuntime(),
+    appPath: app.getAppPath(),
   });
 }
 
@@ -372,6 +374,12 @@ async function bootstrapDesktopApp(): Promise<void> {
 
   const port = await resolveDesktopServerPort({ isPackaged: app.isPackaged });
   mainWindow = createMainWindow(port);
+  mainWindow.on("close", (event) => {
+    if (process.platform === "darwin" && !appQuitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
     mainWindowShown = false;
@@ -434,6 +442,8 @@ function registerDesktopIpcHandlers(): void {
     return desktopUpdaterStore.getSnapshot();
   });
   ipcMain.handle("desktop:quit-and-install", () => {
+    // Squirrel.Mac closes windows before emitting before-quit, so the hide-on-close guard must be lifted first.
+    appQuitting = true;
     updaterController?.quitAndInstall();
     return true;
   });
@@ -616,7 +626,12 @@ app.on("window-all-closed", () => {
   }
 });
 
+app.on("activate", () => {
+  focusExistingWindow();
+});
+
 app.on("before-quit", () => {
+  appQuitting = true;
   if (stopServer) {
     void stopServer();
   }
