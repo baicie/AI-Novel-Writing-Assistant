@@ -124,9 +124,13 @@ function createSatisfiedBookAnalysisSourceCacheSchema(database) {
 }
 
 function withDesktopRuntime(databasePath, run) {
+  return withRuntime("desktop", databasePath, run);
+}
+
+function withRuntime(runtimeMode, databasePath, run) {
   const previousRuntime = process.env.AI_NOVEL_RUNTIME;
   const previousDatabaseUrl = process.env.DATABASE_URL;
-  process.env.AI_NOVEL_RUNTIME = "desktop";
+  process.env.AI_NOVEL_RUNTIME = runtimeMode;
   process.env.DATABASE_URL = `file:${databasePath}`;
 
   return Promise.resolve()
@@ -151,6 +155,48 @@ function createTempDatabaseFile() {
   const databasePath = path.join(tempDir, "runtime-migrations.db");
   return { tempDir, databasePath };
 }
+
+test("ensureRuntimeDatabaseReady builds a fresh self-hosted database from the bundled migrations", async () => {
+  const { tempDir, databasePath } = createTempDatabaseFile();
+
+  try {
+    await withRuntime("selfhost", databasePath, () => ensureRuntimeDatabaseReady());
+
+    const verifyDb = new Database(databasePath, { readonly: true });
+    try {
+      const appliedMigrationNames = verifyDb.prepare(
+        `SELECT migration_name
+         FROM "_prisma_migrations"
+         WHERE finished_at IS NOT NULL
+           AND rolled_back_at IS NULL`,
+      ).all()
+        .map((row) => row.migration_name)
+        .sort((left, right) => left.localeCompare(right));
+
+      assert.deepEqual(appliedMigrationNames, allMigrationNames);
+      assert.ok(verifyDb.prepare(
+        `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Novel'`,
+      ).get());
+      assert.equal(verifyDb.pragma("integrity_check", { simple: true }), "ok");
+    } finally {
+      verifyDb.close();
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("ensureRuntimeDatabaseReady leaves web runtime databases to the Prisma CLI", async () => {
+  const { tempDir, databasePath } = createTempDatabaseFile();
+
+  try {
+    await withRuntime("web", databasePath, () => ensureRuntimeDatabaseReady());
+
+    assert.equal(fs.existsSync(databasePath), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("ensureRuntimeDatabaseReady finishes a pending migration record when schema already exists", async () => {
   const { tempDir, databasePath } = createTempDatabaseFile();

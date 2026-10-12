@@ -7,7 +7,7 @@ import {
   SQLITE_PRISMA_MIGRATIONS_PATH,
 } from "../config/database";
 import {
-  resolveAppRuntimeMode,
+  isSelfContainedRuntime,
   resolveDatabaseFilePath,
   resolveServerRoot,
 } from "../runtime/appPaths";
@@ -350,7 +350,7 @@ function ensureSchemaColumnBackfills(database: Database.Database): void {
 }
 
 export async function ensureRuntimeDatabaseReady(): Promise<void> {
-  if (resolveAppRuntimeMode() !== "desktop") {
+  if (!isSelfContainedRuntime()) {
     return;
   }
 
@@ -361,7 +361,7 @@ export async function ensureRuntimeDatabaseReady(): Promise<void> {
 
   const migrationsDir = resolveMigrationsDir();
   if (!fs.existsSync(migrationsDir)) {
-    throw new Error(`Desktop runtime migrations were not found at ${migrationsDir}.`);
+    throw new Error(`SQLite runtime migrations were not found at ${migrationsDir}.`);
   }
 
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
