@@ -29,12 +29,15 @@ node --max-old-space-size=6144 node_modules/typescript/lib/tsc.js -p tsconfig.js
 | 用例 | 现状 |
 | --- | --- |
 | `automaticAttempt.test.js` | 依赖 `node:sqlite`，Node 20 没有；Node 22 加 `--experimental-sqlite` 后 4/4 通过 |
-| `pipelineExecutionLease.test.js` | 同样依赖 `node:sqlite`；在 Node 22 下被 better-sqlite3 的 `NODE_MODULE_VERSION` 不匹配阻断，需在 Node 22 下重新编译原生模块后再验证 |
-| `promptCacheTemplateCompatibility.test.js` | `getRegisteredPromptAsset` 返回 null，尚未调查 |
-| `directorSimplificationGuard.test.js` | 前端自行推断导演状态的出现次数 210，基线 205，尚未调查 |
+| `pipelineExecutionLease.test.js` | 同样依赖 `node:sqlite`；在 Node 22 下重新编译 better-sqlite3 后 3/3 通过。验证后已还原 Node 20 的原生二进制（校验值与备份一致，Node 20 加载正常） |
+| `promptCacheTemplateCompatibility.test.js` | 测试期望的提示词版本已对齐，已修复 |
+| `directorSimplificationGuard.test.js` | 前端自行推断导演状态的出现次数 210，基线 205。新增来自 `a20d3cb3`（+3）与 `59086d91`（+2），均在 `NovelEdit.tsx` 等文件中。基线上调需人工批准，根治需执行计划的阶段 6 |
+
+## 集成测试
+
+使用临时库运行 `server/scripts/run-tests.cjs integration`：238 项中 236 通过、0 失败、2 跳过。
 
 ## 待办
 
-1. 在 Node 22 下重新编译 better-sqlite3，复验 `pipelineExecutionLease`。
-2. 调查 `promptCacheTemplateCompatibility` 与 `directorSimplificationGuard` 的失败。
-3. 完整集成测试（`test:integration`）尚未运行。
+1. `directorSimplificationGuard`：阶段 6 依赖阶段 4。阶段 4 的动作表（计划文档 S4 决策点）尚未获得人工确认，`resolve_checkpoint` 也尚未实现，因此需先确认动作表。
+2. 提交 `10cd38ce` 带入了 54 个 `backups/phase8_day1_*` 文件，推送前需决定是否取消跟踪。
