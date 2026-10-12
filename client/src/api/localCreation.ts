@@ -104,39 +104,209 @@ export function shouldUseLocalGeneration(novelId: string): boolean {
 }
 
 /**
- * 本地模式 AI 修正生成 - 【留作后续完善】
- * 
- * 当前作为占位函数，返回错误提示。
- * 后续可集成真正的本地 Tauri 生成逻辑。
- * 
- * @throws 提示本地 AI 修正功能正在开发中
+ * 事件处理器 - 处理本地生成事件流
+ * 累积文本并识别候选方案
+ */
+function createEventProcessor() {
+  const textBuffer: Record<string, string> = {};
+  const events: unknown[] = [];
+
+  return {
+    process(event: any) {
+      events.push(event);
+
+      if (event.kind === "token_delta" && event.stepId && event.text) {
+        // 累积 token 为完整文本
+        if (!textBuffer[event.stepId]) {
+          textBuffer[event.stepId] = "";
+        }
+        textBuffer[event.stepId] += event.text;
+      }
+    },
+
+    getText(stepId: string): string {
+      return textBuffer[stepId] || "";
+    },
+
+    getCheckpoints(): Array<{
+      candidateId: string;
+      stepId: string;
+      text: string;
+    }> {
+      const checkpoints: Array<{
+        candidateId: string;
+        stepId: string;
+        text: string;
+      }> = [];
+      
+      for (const event of events) {
+        const e = event as any;
+        if (e.kind === "checkpoint_saved" && e.candidateId && e.stepId) {
+          checkpoints.push({
+            candidateId: e.candidateId,
+            stepId: e.stepId,
+            text: this.getText(e.stepId),
+          });
+        }
+      }
+      
+      return checkpoints;
+    },
+  };
+}
+
+/**
+ * 本地模式 AI 修正生成 - 真实实现
  */
 export async function handleLocalAiRevision(
   novelId: string,
   chapterId: string,
-  request: unknown, // 接受任意类型的请求
+  request: unknown,
 ): Promise<unknown> {
-  console.info("[Local Mode] Attempted AI revision - feature not yet implemented in local mode");
-  throw new Error(
-    "本地模式暂不支持 AI 修正。请切换到云模式或联系开发人员。"
-  );
+  const aiRequest = request as {
+    source?: string;
+    scope?: string;
+    instruction?: string;
+    selection?: { from: number; to: number; text: string };
+    provider?: string;
+    model?: string;
+    temperature?: number;
+    [key: string]: unknown;
+  };
+
+  // 获取本地模型配置
+  const modelSetup = await getLocalModelSetup();
+  if (!modelSetup || !modelSetup.hasApiKey) {
+    throw new Error(
+      "本地模型配置未找到或 API Key 未配置。请在设置中配置 API Key。"
+    );
+  }
+
+  const processor = createEventProcessor();
+
+  try {
+    // 启动本地生成
+    const outcome = await startLocalGeneration({
+      commandId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      novelId,
+      targetChapterId: chapterId,
+      provider: aiRequest.provider || "opencode-go",
+      model: aiRequest.model || "gpt-4",
+      promptVersions: {
+        source: aiRequest.source || "freeform",
+        scope: aiRequest.scope || "selection",
+        instruction: aiRequest.instruction || "",
+      },
+      maxAutomaticRetries: 3,
+      endpoint: modelSetup.endpoint,
+      allowLocalhostHttp: modelSetup.allowLocalhostHttp,
+    });
+
+    // 订阅生成事件
+    await subscribeLocalGeneration(outcome.runId, (event) =>
+      processor.process(event)
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "本地生成启动失败";
+    console.error("[Local Generation Error]", message, error);
+    throw new Error(message);
+  }
+
+  // 提取生成的候选方案
+  const checkpoints = processor.getCheckpoints();
+  if (checkpoints.length === 0) {
+    throw new Error("生成未产生任何候选方案。请检查配置并重试。");
+  }
+
+  // 返回 ChapterEditorResponse 格式
+  return {
+    data: {
+      sessionId: `local-${Date.now()}`,
+      candidates: checkpoints.map((cp) => ({
+        id: cp.candidateId,
+        source: aiRequest.source || "freeform",
+        scope: aiRequest.scope || "selection",
+        content: cp.text,
+        applied: false,
+      })),
+      activeCandidateId: checkpoints[0]?.candidateId ?? null,
+    },
+  };
 }
 
 /**
- * 本地模式光标续写生成 - 【留作后续完善】
- * 
- * 当前作为占位函数，返回错误提示。
- * 后续可集成真正的本地 Tauri 生成逻辑。
- * 
- * @throws 提示本地续写功能正在开发中
+ * 本地模式光标续写生成 - 真实实现
  */
 export async function handleLocalCursorContinuation(
   novelId: string,
   chapterId: string,
-  request: unknown, // 接受任意类型的请求
+  request: unknown,
 ): Promise<unknown> {
-  console.info("[Local Mode] Attempted cursor continuation - feature not yet implemented in local mode");
-  throw new Error(
-    "本地模式暂不支持续写。请切换到云模式或联系开发人员。"
-  );
+  const contRequest = request as {
+    operation?: string;
+    cursorOffset?: number;
+    provider?: string;
+    model?: string;
+    temperature?: number;
+    [key: string]: unknown;
+  };
+
+  // 获取本地模型配置
+  const modelSetup = await getLocalModelSetup();
+  if (!modelSetup || !modelSetup.hasApiKey) {
+    throw new Error(
+      "本地模型配置未找到或 API Key 未配置。请在设置中配置 API Key。"
+    );
+  }
+
+  const processor = createEventProcessor();
+
+  try {
+    // 启动本地生成
+    const outcome = await startLocalGeneration({
+      commandId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      novelId,
+      targetChapterId: chapterId,
+      provider: contRequest.provider || "opencode-go",
+      model: contRequest.model || "gpt-4",
+      promptVersions: {
+        source: "continuation",
+        operation: contRequest.operation || "continue",
+        cursorOffset: String(contRequest.cursorOffset ?? 0),
+      },
+      maxAutomaticRetries: 3,
+      endpoint: modelSetup.endpoint,
+      allowLocalhostHttp: modelSetup.allowLocalhostHttp,
+    });
+
+    // 订阅生成事件
+    await subscribeLocalGeneration(outcome.runId, (event) =>
+      processor.process(event)
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "本地续写启动失败";
+    console.error("[Local Continuation Error]", message, error);
+    throw new Error(message);
+  }
+
+  // 提取生成的候选方案
+  const checkpoints = processor.getCheckpoints();
+  if (checkpoints.length === 0) {
+    throw new Error("续写未产生任何候选方案。请检查配置并重试。");
+  }
+
+  // 返回 ChapterEditorResponse 格式
+  return {
+    data: {
+      sessionId: `local-${Date.now()}`,
+      operation: contRequest.operation || "continue",
+      candidates: checkpoints.map((cp) => ({
+        id: cp.candidateId,
+        operation: contRequest.operation || "continue",
+        content: cp.text,
+        applied: false,
+      })),
+      activeCandidateId: checkpoints[0]?.candidateId ?? null,
+    },
+  };
 }
