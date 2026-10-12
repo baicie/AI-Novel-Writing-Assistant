@@ -19,6 +19,7 @@ import ProviderConfigDialog, { type ProviderFormState } from "./components/Provi
 import ProviderSettingsSection from "./components/ProviderSettingsSection";
 import SettingsActionResult from "./SettingsActionResult";
 import { AUTO_DIRECTOR_MOBILE_CLASSES } from "@/mobile/autoDirector";
+import { LocalCreationKeyManager } from "@/components/localCreation";
 
 function formatConnectionTestResult(response: Awaited<ReturnType<typeof testLLMConnection>>): string {
   const latency = response.data?.latency ?? 0;
@@ -484,6 +485,32 @@ export default function SettingsPage() {
       </div>
 
       <SettingsActionResult message={actionResult} />
+
+      {/* 【新增】本地创作密钥管理 */}
+      <div className="space-y-4 border-t pt-6">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2 mb-2">
+            <span>🖥️</span>
+            本地创作 - 系统密钥设置
+          </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            在此配置 API Key。本地生成时会自动从系统凭据读取，无需重复输入。
+          </p>
+        </div>
+
+        <div className="max-w-md">
+          <LocalCreationKeyManager />
+        </div>
+
+        <div className="text-xs text-muted-foreground space-y-1 mt-4">
+          <p>💡 关于本地创作：</p>
+          <ul className="ml-4 space-y-1 list-disc">
+            <li>密钥存储在系统凭据中（macOS Keychain）</li>
+            <li>生成完全离线运行，不需要网络连接</li>
+            <li>支持在中断后继续创作</li>
+          </ul>
+        </div>
+      </div>
 
       <ProviderConfigDialog
         open={isDialogOpen}

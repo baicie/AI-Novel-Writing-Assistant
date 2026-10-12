@@ -41,6 +41,7 @@ import {
 } from "../novelWorkspaceNavigation";
 import { StepHero } from "./workspaceShell";
 import DirectorVersionControl from "@/components/directorVersion/DirectorVersionControl";
+import { CreationModeSelector } from "@/components/localCreation";
 
 export default function NovelEditView(props: NovelEditViewProps) {
   const isMobileViewport = useIsMobileViewport();
@@ -210,6 +211,9 @@ function DesktopNovelEditView(props: NovelEditViewProps) {
             : "按当前步骤整理这本书的生产资产，需要时可以交给 AI 自动导演接管。"}
           actions={(
             <>
+            {/* 【新增】本地创作模式选择器 */}
+            <CreationModeSelector novelId={id} />
+
             {onSwitchToSimpleMode ? (
               <Button type="button" variant="outline" onClick={onSwitchToSimpleMode} disabled={isSwitchingToSimpleMode}>
                 {isSwitchingToSimpleMode ? <Loader2 className="animate-spin" /> : <Sparkles />}

@@ -78,3 +78,27 @@ export async function subscribeLocalGeneration(
     throw error;
   }
 }
+
+/**
+ * 生成路由 - 根据模式自动选择本地或云 API。
+ * 这是章节编辑器集成的关键入口。
+ */
+
+export interface ChapterGenerationMode {
+  isLocal: boolean;
+  novelId: string;
+}
+
+/**
+ * 检查是否应该使用本地生成。
+ * 仅当 localStorage 中明确设置为本地模式时返回 true。
+ */
+export function shouldUseLocalGeneration(novelId: string): boolean {
+  try {
+    const mode = localStorage.getItem(`local-creation-mode:${novelId}`);
+    return mode === "local";
+  } catch (e) {
+    console.warn("检查本地模式设置失败，默认使用云模式", e);
+    return false;
+  }
+}
