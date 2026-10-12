@@ -13,7 +13,6 @@ const {
   resolveModelTemperature,
 } = require("../dist/llm/capabilities.js");
 const {
-  buildOpenAICompatibleDefaultHeaders,
   createLLMFromResolvedOptions,
   resolveLLMClientOptions,
   setProviderSecretCache,
@@ -22,15 +21,75 @@ const { createAnthropicLLM } = require("../dist/llm/anthropicClient.js");
 const { refreshProviderModels } = require("../dist/llm/modelCatalog.js");
 const { HumanMessage } = require("@langchain/core/messages");
 
-test("custom provider auth mode replaces the SDK bearer header when requested", () => {
-  assert.equal(buildOpenAICompatibleDefaultHeaders("bearer", "secret"), undefined);
-  assert.deepEqual(buildOpenAICompatibleDefaultHeaders("x-api-key", "secret"), {
-    Authorization: null,
-    "x-api-key": "secret",
-  });
-  assert.deepEqual(buildOpenAICompatibleDefaultHeaders("none", "secret"), {
-    Authorization: null,
-  });
+function resolvedCustomGateway(authMode, apiKey) {
+  return {
+    provider: "custom_gateway",
+    providerName: "Gateway",
+    model: "gateway-model",
+    temperature: 0.7,
+    apiKey,
+    baseURL: "https://gateway.example.com/v1",
+    authMode,
+    concurrencyLimit: 0,
+    requestIntervalMs: 0,
+    reasoningEnabled: true,
+    reasoningEffort: null,
+    includeRawResponse: false,
+    requestProtocol: "openai_compatible",
+    executionMode: "plain",
+    structuredProfile: null,
+    structuredStrategy: null,
+    reasoningForcedOff: false,
+  };
+}
+
+async function captureSentChatCompletionHeaders(resolved) {
+  const chat = createLLMFromResolvedOptions(resolved);
+  const originalFetch = global.fetch;
+  let sentHeaders;
+  global.fetch = async (_url, init) => {
+    sentHeaders = new Headers(init.headers);
+    return new Response(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: 0,
+      model: resolved.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await chat.completions.completionWithRetry({
+      model: resolved.model,
+      messages: [{ role: "user", content: "hi" }],
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+  return sentHeaders;
+}
+
+test("custom provider auth mode decides the auth header that is actually sent", async () => {
+  const bearer = await captureSentChatCompletionHeaders(resolvedCustomGateway("bearer", "secret"));
+  assert.equal(bearer.get("authorization"), "Bearer secret");
+  assert.equal(bearer.has("x-api-key"), false);
+
+  const apiKeyHeader = await captureSentChatCompletionHeaders(resolvedCustomGateway("x-api-key", "secret"));
+  assert.equal(apiKeyHeader.has("authorization"), false);
+  assert.equal(apiKeyHeader.get("x-api-key"), "secret");
+
+  const anonymous = await captureSentChatCompletionHeaders(resolvedCustomGateway("none", undefined));
+  assert.equal(anonymous.has("authorization"), false);
+  assert.equal(anonymous.has("x-api-key"), false);
+});
+
+test("built-in providers always authenticate with bearer", async () => {
+  setProviderSecretCache("deepseek", { key: "test-key", authMode: "none" });
+  try {
+    const resolved = await resolveLLMClientOptions("deepseek", { authMode: "x-api-key" });
+    assert.equal(resolved.authMode, "bearer");
+  } finally {
+    setProviderSecretCache("deepseek", null);
+  }
 });
 const {
   classifyStructuredOutputFailure,
@@ -100,45 +159,28 @@ test("opencode go requests identify the app and keep one opaque session per nove
 test("opencode go clients carry the session headers on both request protocols", async () => {
   const expected = buildProviderSessionHeaders("opencode-go", "novel-a");
   const resolved = {
+    ...resolvedCustomGateway("bearer", "test-key"),
     provider: "opencode-go",
     providerName: "OpenCode Go",
     model: "glm-5.3",
-    temperature: 0.7,
-    apiKey: "test-key",
     baseURL: "https://opencode.ai/zen/go/v1",
-    authMode: "bearer",
-    concurrencyLimit: 0,
-    requestIntervalMs: 0,
-    reasoningEnabled: true,
-    reasoningEffort: null,
-    includeRawResponse: false,
-    requestProtocol: "openai_compatible",
-    executionMode: "plain",
-    structuredProfile: null,
-    structuredStrategy: null,
-    reasoningForcedOff: false,
     promptMeta: { novelId: "novel-a" },
   };
-  const chat = createLLMFromResolvedOptions(resolved);
   const deepseek = createLLMFromResolvedOptions({ ...resolved, provider: "deepseek", baseURL: "https://api.deepseek.com/v1" });
   assert.equal(deepseek.clientConfig.fetch, undefined);
 
+  const chatHeaders = await captureSentChatCompletionHeaders(resolved);
+  assert.equal(chatHeaders.get("user-agent"), expected["User-Agent"]);
+  assert.equal(chatHeaders.get("x-opencode-session"), expected["x-opencode-session"]);
+  assert.equal(chatHeaders.get("authorization"), "Bearer test-key");
+
   const originalFetch = global.fetch;
-  let chatHeaders;
   let anthropicHeaders;
   global.fetch = async (_url, init) => {
-    if (init.headers instanceof Headers) {
-      chatHeaders = init.headers;
-      return new Response("{}", { status: 200 });
-    }
     anthropicHeaders = init.headers;
     return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 });
   };
   try {
-    await chat.clientConfig.fetch("https://opencode.ai/zen/go/v1/chat/completions", {
-      method: "POST",
-      headers: { "user-agent": "langchainjs-openai/1.0.0", authorization: "Bearer test-key" },
-    });
     await createAnthropicLLM({
       apiKey: "test-key",
       model: "minimax-m3",
@@ -149,9 +191,6 @@ test("opencode go clients carry the session headers on both request protocols", 
   } finally {
     global.fetch = originalFetch;
   }
-  assert.equal(chatHeaders.get("user-agent"), expected["User-Agent"]);
-  assert.equal(chatHeaders.get("x-opencode-session"), expected["x-opencode-session"]);
-  assert.equal(chatHeaders.get("authorization"), "Bearer test-key");
   assert.equal(anthropicHeaders["User-Agent"], expected["User-Agent"]);
   assert.equal(anthropicHeaders["x-opencode-session"], expected["x-opencode-session"]);
   assert.equal(anthropicHeaders["x-api-key"], "test-key");

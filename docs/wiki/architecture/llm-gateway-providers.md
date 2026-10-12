@@ -38,11 +38,11 @@ OpenCode Go 这类订阅制网关用一个 API Key 转发 DeepSeek、Kimi、GLM�
 
   同一作品的规划、正文、审校请求落在同一会话里，方便网关做路由和提示词缓存。
 - User-Agent 使用不带版本号的产品标识 `BizNovelStudio (+仓库地址)`。服务端拿不到桌面应用版本，不写死一个会过期的版本号。
-- 身份请求头必须通过客户端的自定义 `fetch` 在请求发出前写入。原因是 LangChain `ChatOpenAI` 处理 `configuration.defaultHeaders` 时有两个行为：
+- 网关身份请求头和自定义厂商的鉴权请求头，都由模型客户端的自定义 `fetch` 在请求发出前统一处理：字符串值覆盖同名请求头，`null` 删除同名请求头。原因是 LangChain `ChatOpenAI` 处理 `configuration.defaultHeaders` 时有两个行为：
   - 它把请求头转成小写键，再无条件写入自己的 `langchainjs-openai/...` User-Agent。
   - 它丢弃值为 `null` 的请求头。
 
-  所以 `defaultHeaders` 既不能覆盖 User-Agent，也不能删除 SDK 默认发送的 `Authorization`。Anthropic 协议客户端用的是项目自己的 `fetch`，可以直接合并请求头，鉴权头始终最后写入。
+  所以 `defaultHeaders` 既不能覆盖 User-Agent，也不能删除 SDK 按 API Key 自动发送的 `Authorization: Bearer`。自定义厂商选 `x-api-key` 或无需鉴权时，同样靠这一层删掉 Bearer。Anthropic 协议客户端用的是项目自己的 `fetch`，可以直接合并请求头，鉴权头始终最后写入。
 - 结构化输出：
   - 网关一律走 `prompt_json`，`jsonCapabilities` 声明不支持原生 JSON。
   - 结构化档案落到默认分支（Qwen 模型落到兼容 Qwen 分支），单次结构化输出上限 8192。
@@ -57,7 +57,7 @@ OpenCode Go 这类订阅制网关用一个 API Key 转发 DeepSeek、Kimi、GLM�
 
 - 网关新增一个只支持 Responses 的模型族时，先用不带 Key 的探测确认格式支持，再更新 `responsesOnlyModelPrefixes` 和对应测试。
 - 网关要求新的身份请求头时，扩展厂商配置，由 `buildProviderSessionHeaders` 生成，再交给传输层统一附加。
-- 排查请求头问题时，用模拟的 `fetch` 截获最终请求，以实际发出的请求头为准。
+- 排查请求头问题时，用模拟的 `fetch` 截获最终请求，以实际发出的请求头为准。测试要从 LangChain 客户端一路走到 SDK 发出的请求，例如调用 `completions.completionWithRetry`；只断言请求头辅助函数的返回值，测不出 LangChain 丢弃 `null` 这类问题。也不要在单元测试里调用装饰后的 `invoke`，它会写入用量记录。
 
 不推荐或禁止做法：
 
@@ -70,7 +70,7 @@ OpenCode Go 这类订阅制网关用一个 API Key 转发 DeepSeek、Kimi、GLM�
 - 连接测试报 `not supported for format oa-compat`：这个模型只支持 Responses。确认它是否属于新出现的模型族，然后补充 `responsesOnlyModelPrefixes`；不要在调用侧换协议或加重试。
 - 网关拒绝请求或提示异常流量：先用模拟的 `fetch` 检查实际的 User-Agent 和会话头，确认没有回落成 `langchainjs-openai`，再检查网关控制台的用量额度。
 - 结构化任务频繁触发 JSON 修复：检查 `structuredProfile.family` 是否为 `default` 或兼容 Qwen 分支，确认网关厂商没有被误判为官方端点的能力档案。
-- 自定义厂商选了 `x-api-key` 或无需鉴权，网关仍报鉴权冲突：检查最终请求是否还带着 `Authorization`。`defaultHeaders` 中值为 `null` 的头会被 LangChain 丢弃，去掉鉴权头必须在传输层完成。
+- 自定义厂商选了 `x-api-key` 或无需鉴权，网关仍报鉴权冲突：用模拟的 `fetch` 截获最终请求，看是否还带着 `Authorization`。如果带着，通常是新的客户端构造路径绕开了工厂的传输层请求头处理，或者鉴权头又被改回 `defaultHeaders`。
 
 ## 相关模块
 

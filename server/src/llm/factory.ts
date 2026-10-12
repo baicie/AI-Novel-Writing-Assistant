@@ -289,7 +289,9 @@ export async function resolveLLMClientOptions(
   if (!baseURL) {
     throw new Error(`未配置 ${providerName} 的 API URL。`);
   }
-  const authMode = normalizeProviderAuthMode(options.authMode ?? dbSecret?.authMode);
+  const authMode = isBuiltInProvider(resolvedProvider)
+    ? "bearer"
+    : normalizeProviderAuthMode(options.authMode ?? dbSecret?.authMode);
 
   const temperature = resolveModelTemperature(resolvedProvider, model, resolvedTemperature);
   const timeoutMs = normalizeOptionalTimeoutMs(options.timeoutMs);
@@ -374,7 +376,7 @@ export async function resolveLLMClientOptions(
   };
 }
 
-export function buildOpenAICompatibleDefaultHeaders(
+function buildOpenAICompatibleAuthHeaders(
   authMode: ProviderAuthMode,
   apiKey?: string,
 ): Record<string, string | null> | undefined {
@@ -387,13 +389,17 @@ export function buildOpenAICompatibleDefaultHeaders(
   };
 }
 
-// LangChain rewrites defaultHeaders and always installs its own User-Agent, so provider identity
-// headers have to be applied on the outgoing request itself.
-function withRequestHeaders(headers: Record<string, string>): typeof fetch {
+// LangChain drops null-valued defaultHeaders and always installs its own User-Agent, so auth and
+// provider identity headers have to be applied on the outgoing request itself. A null value removes the header.
+function withRequestHeaders(headers: Record<string, string | null>): typeof fetch {
   return (input, init) => {
     const merged = new Headers(init?.headers);
     for (const [name, value] of Object.entries(headers)) {
-      merged.set(name, value);
+      if (value === null) {
+        merged.delete(name);
+      } else {
+        merged.set(name, value);
+      }
     }
     return fetch(input, { ...init, headers: merged });
   };
@@ -401,6 +407,10 @@ function withRequestHeaders(headers: Record<string, string>): typeof fetch {
 
 export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions): ChatOpenAI {
   const sessionHeaders = buildProviderSessionHeaders(resolved.provider, resolved.promptMeta?.novelId);
+  const requestHeaders = {
+    ...buildOpenAICompatibleAuthHeaders(resolved.authMode, resolved.apiKey),
+    ...sessionHeaders,
+  };
   const llm = resolved.requestProtocol === "anthropic"
     ? createAnthropicLLM({
       apiKey: resolved.apiKey,
@@ -423,8 +433,7 @@ export function createLLMFromResolvedOptions(resolved: ResolvedLLMClientOptions)
       __includeRawResponse: resolved.includeRawResponse,
       configuration: {
         baseURL: resolved.baseURL,
-        defaultHeaders: buildOpenAICompatibleDefaultHeaders(resolved.authMode, resolved.apiKey),
-        ...(sessionHeaders ? { fetch: withRequestHeaders(sessionHeaders) } : {}),
+        ...(Object.keys(requestHeaders).length > 0 ? { fetch: withRequestHeaders(requestHeaders) } : {}),
       },
     });
   const meta = {
