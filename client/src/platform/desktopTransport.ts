@@ -170,3 +170,37 @@ export async function startGeneration(
   missed.forEach(deliver);
   return { runId: outcome.runId };
 }
+
+// 本地创作特定命令
+
+export interface ModelSetupView {
+  endpoint: string;
+  model: string;
+  allowLocalhostHttp: boolean;
+  hasApiKey: boolean;
+}
+
+export function listChapters(novelId: string): Promise<ChapterSnapshot[]> {
+  return invoke("list_chapters", { novelId });
+}
+
+export function getModelSetup(): Promise<ModelSetupView | null> {
+  return invoke("get_model_setup");
+}
+
+export function saveModelSetup(input: {
+  endpoint: string;
+  model: string;
+  api_key: string;
+  allow_localhost_http: boolean;
+}): Promise<ModelSetupView> {
+  return invoke("save_model_setup", input as Record<string, unknown>);
+}
+
+export function cancelGeneration(runId: string): Promise<void> {
+  return invoke("cancel_generation", { runId });
+}
+
+export function openRun(input: StartGeneration): Promise<CommandOutcome> {
+  return invoke("open_run", { request: input });
+}
