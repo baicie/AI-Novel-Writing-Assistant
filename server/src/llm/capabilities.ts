@@ -157,6 +157,11 @@ export function getJsonCapability(provider: LLMProvider, model?: string, baseURL
       // 如后续你发现只有部分 Gemini 模型支持 schema，可在这里加条件
       modelCondition: () => true,
     },
+    "opencode-go": {
+      // 网关会把请求转给多家上游，response_format 是否透传未核验，统一走 prompt JSON。
+      supportsJsonObject: false,
+      supportsJsonSchema: false,
+    },
     ollama: {
       supportsJsonObject: false,
       supportsJsonSchema: false,

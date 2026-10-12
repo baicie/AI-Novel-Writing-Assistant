@@ -1,6 +1,7 @@
 import type { LLMProvider, ProviderAuthMode } from "@ai-novel/shared/types/llm";
 import {
   isBuiltInProvider,
+  isProviderModelCallable,
   providerRequiresApiKey,
   PROVIDERS,
   resolveProviderBaseUrl,
@@ -235,7 +236,7 @@ async function fetchProviderModels(
     headers: buildProviderModelHeaders(provider, apiKey, authMode),
   });
 
-  const models = parseModelIds(payload);
+  const models = parseModelIds(payload).filter((model) => isProviderModelCallable(provider, model));
   if (models.length === 0) {
     throw new Error("模型列表为空。");
   }

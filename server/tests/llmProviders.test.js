@@ -1,27 +1,95 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { z } = require("zod");
-const { PROVIDERS, SUPPORTED_PROVIDERS } = require("../dist/llm/providers.js");
+const {
+  PROVIDERS,
+  SUPPORTED_PROVIDERS,
+  buildProviderSessionHeaders,
+  isProviderModelCallable,
+} = require("../dist/llm/providers.js");
 const {
   getJsonCapability,
   getModelParameterCompatibility,
   resolveModelTemperature,
 } = require("../dist/llm/capabilities.js");
 const {
-  buildOpenAICompatibleDefaultHeaders,
+  createLLMFromResolvedOptions,
   resolveLLMClientOptions,
   setProviderSecretCache,
 } = require("../dist/llm/factory.js");
+const { createAnthropicLLM } = require("../dist/llm/anthropicClient.js");
+const { refreshProviderModels } = require("../dist/llm/modelCatalog.js");
+const { HumanMessage } = require("@langchain/core/messages");
 
-test("custom provider auth mode replaces the SDK bearer header when requested", () => {
-  assert.equal(buildOpenAICompatibleDefaultHeaders("bearer", "secret"), undefined);
-  assert.deepEqual(buildOpenAICompatibleDefaultHeaders("x-api-key", "secret"), {
-    Authorization: null,
-    "x-api-key": "secret",
-  });
-  assert.deepEqual(buildOpenAICompatibleDefaultHeaders("none", "secret"), {
-    Authorization: null,
-  });
+function resolvedCustomGateway(authMode, apiKey) {
+  return {
+    provider: "custom_gateway",
+    providerName: "Gateway",
+    model: "gateway-model",
+    temperature: 0.7,
+    apiKey,
+    baseURL: "https://gateway.example.com/v1",
+    authMode,
+    concurrencyLimit: 0,
+    requestIntervalMs: 0,
+    reasoningEnabled: true,
+    reasoningEffort: null,
+    includeRawResponse: false,
+    requestProtocol: "openai_compatible",
+    executionMode: "plain",
+    structuredProfile: null,
+    structuredStrategy: null,
+    reasoningForcedOff: false,
+  };
+}
+
+async function captureSentChatCompletionHeaders(resolved) {
+  const chat = createLLMFromResolvedOptions(resolved);
+  const originalFetch = global.fetch;
+  let sentHeaders;
+  global.fetch = async (_url, init) => {
+    sentHeaders = new Headers(init.headers);
+    return new Response(JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion",
+      created: 0,
+      model: resolved.model,
+      choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await chat.completions.completionWithRetry({
+      model: resolved.model,
+      messages: [{ role: "user", content: "hi" }],
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+  return sentHeaders;
+}
+
+test("custom provider auth mode decides the auth header that is actually sent", async () => {
+  const bearer = await captureSentChatCompletionHeaders(resolvedCustomGateway("bearer", "secret"));
+  assert.equal(bearer.get("authorization"), "Bearer secret");
+  assert.equal(bearer.has("x-api-key"), false);
+
+  const apiKeyHeader = await captureSentChatCompletionHeaders(resolvedCustomGateway("x-api-key", "secret"));
+  assert.equal(apiKeyHeader.has("authorization"), false);
+  assert.equal(apiKeyHeader.get("x-api-key"), "secret");
+
+  const anonymous = await captureSentChatCompletionHeaders(resolvedCustomGateway("none", undefined));
+  assert.equal(anonymous.has("authorization"), false);
+  assert.equal(anonymous.has("x-api-key"), false);
+});
+
+test("built-in providers always authenticate with bearer", async () => {
+  setProviderSecretCache("deepseek", { key: "test-key", authMode: "none" });
+  try {
+    const resolved = await resolveLLMClientOptions("deepseek", { authMode: "x-api-key" });
+    assert.equal(resolved.authMode, "bearer");
+  } finally {
+    setProviderSecretCache("deepseek", null);
+  }
 });
 const {
   classifyStructuredOutputFailure,
@@ -41,6 +109,117 @@ test("new provider defaults are present in their model fallback lists", () => {
       PROVIDERS[provider].models.includes(PROVIDERS[provider].defaultModel),
       `${provider} default model should exist in fallback models`,
     );
+  }
+});
+
+test("opencode go is a built-in gateway whose fallback models are all callable", () => {
+  const config = PROVIDERS["opencode-go"];
+  assert.ok(SUPPORTED_PROVIDERS.includes("opencode-go"));
+  assert.equal(config.baseURL, "https://opencode.ai/zen/go/v1");
+  assert.equal(config.envKey, "OPENCODE_GO_API_KEY");
+  assert.equal(config.models[0], config.defaultModel);
+  assert.ok(config.models.every((model) => isProviderModelCallable("opencode-go", model)));
+
+  assert.equal(isProviderModelCallable("opencode-go", "grok-4.7"), false);
+  assert.equal(isProviderModelCallable("opencode-go", " Grok-4.6 "), false);
+  assert.equal(isProviderModelCallable("opencode-go", "minimax-m3"), true);
+  assert.equal(isProviderModelCallable("grok", "grok-4"), true);
+  assert.equal(isProviderModelCallable("custom_gateway", "grok-4.7"), true);
+});
+
+test("opencode go model catalog hides models served only over the Responses API", async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify({
+    object: "list",
+    data: [{ id: "grok-4.7" }, { id: "deepseek-v4.1-flash" }, { id: "grok-4.6" }, { id: "minimax-m3" }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    assert.deepEqual(await refreshProviderModels("opencode-go", "test-key"), ["deepseek-v4.1-flash", "minimax-m3"]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("opencode go requests identify the app and keep one opaque session per novel", () => {
+  const novelA = buildProviderSessionHeaders("opencode-go", "novel-a");
+  assert.match(novelA["User-Agent"], /^BizNovelStudio\b/);
+  assert.match(novelA["x-opencode-session"], /^[0-9a-f]{32}$/);
+  assert.deepEqual(buildProviderSessionHeaders("opencode-go", "novel-a"), novelA);
+  assert.notEqual(buildProviderSessionHeaders("opencode-go", "novel-b")["x-opencode-session"], novelA["x-opencode-session"]);
+
+  const unscoped = buildProviderSessionHeaders("opencode-go");
+  assert.ok(unscoped["x-opencode-session"]);
+  assert.equal(buildProviderSessionHeaders("opencode-go", "  ")["x-opencode-session"], unscoped["x-opencode-session"]);
+  assert.notEqual(unscoped["x-opencode-session"], novelA["x-opencode-session"]);
+
+  assert.equal(buildProviderSessionHeaders("deepseek", "novel-a"), undefined);
+  assert.equal(buildProviderSessionHeaders("custom_gateway", "novel-a"), undefined);
+});
+
+test("opencode go clients carry the session headers on both request protocols", async () => {
+  const expected = buildProviderSessionHeaders("opencode-go", "novel-a");
+  const resolved = {
+    ...resolvedCustomGateway("bearer", "test-key"),
+    provider: "opencode-go",
+    providerName: "OpenCode Go",
+    model: "glm-5.3",
+    baseURL: "https://opencode.ai/zen/go/v1",
+    promptMeta: { novelId: "novel-a" },
+  };
+  const deepseek = createLLMFromResolvedOptions({ ...resolved, provider: "deepseek", baseURL: "https://api.deepseek.com/v1" });
+  assert.equal(deepseek.clientConfig.fetch, undefined);
+
+  const chatHeaders = await captureSentChatCompletionHeaders(resolved);
+  assert.equal(chatHeaders.get("user-agent"), expected["User-Agent"]);
+  assert.equal(chatHeaders.get("x-opencode-session"), expected["x-opencode-session"]);
+  assert.equal(chatHeaders.get("authorization"), "Bearer test-key");
+
+  const originalFetch = global.fetch;
+  let anthropicHeaders;
+  global.fetch = async (_url, init) => {
+    anthropicHeaders = init.headers;
+    return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 });
+  };
+  try {
+    await createAnthropicLLM({
+      apiKey: "test-key",
+      model: "minimax-m3",
+      baseURL: resolved.baseURL,
+      temperature: 0.7,
+      headers: expected,
+    }).invoke([new HumanMessage("hi")]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+  assert.equal(anthropicHeaders["User-Agent"], expected["User-Agent"]);
+  assert.equal(anthropicHeaders["x-opencode-session"], expected["x-opencode-session"]);
+  assert.equal(anthropicHeaders["x-api-key"], "test-key");
+});
+
+test("opencode go uses prompt json and leaves vendor thinking switches to the gateway", async () => {
+  assert.deepEqual(
+    getJsonCapability("opencode-go", "deepseek-v4.1-flash", "https://opencode.ai/zen/go/v1"),
+    { supportsJsonObject: false, supportsJsonSchema: false },
+  );
+  setProviderSecretCache("opencode-go", { key: "test-key", reasoningEnabled: true });
+  try {
+    const deepseekPro = await resolveLLMClientOptions("opencode-go", {
+      model: "deepseek-v4-pro",
+      executionMode: "structured",
+      structuredStrategy: "prompt_json",
+      maxTokens: 20000,
+    });
+    assert.equal(deepseekPro.baseURL, "https://opencode.ai/zen/go/v1");
+    assert.equal(deepseekPro.requestProtocol, "openai_compatible");
+    assert.equal(deepseekPro.structuredProfile?.family, "default");
+    assert.equal(deepseekPro.structuredProfile?.preferredStructuredStrategy, "prompt_json");
+    assert.equal(deepseekPro.maxTokens, 8192);
+    assert.equal(deepseekPro.modelKwargs, undefined);
+
+    const kimiK3 = await resolveLLMClientOptions("opencode-go", { model: "kimi-k3", temperature: 0.4 });
+    assert.equal(kimiK3.temperature, 1);
+  } finally {
+    setProviderSecretCache("opencode-go", null);
   }
 });
 
