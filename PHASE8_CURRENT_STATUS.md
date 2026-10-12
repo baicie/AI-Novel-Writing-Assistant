@@ -1,164 +1,40 @@
-# 📊 **Phase 8 - 当前状态（2026-10-13 02:40）**
+# Phase 8 当前状态（2026-10-13）
 
----
+## 构建问题的根因
 
-## 🟢 **已完成工作**
+`server` 的 `tsc` 在默认约 2GB 堆内存下处理 1087 个 TS 文件时内存溢出，
+日志为 `FATAL ERROR: Ineffective mark-compacts near heap limit ... JavaScript heap out of memory`，
+进程以 `Abort trap: 6`（退出码 134）结束。
 
-### **Phases 1-7：100% 完成**
-- ✅ 功能设计完成
-- ✅ 代码编写：2,870 行（高质量）
-- ✅ 测试通过：24/24 (100%)
-- ✅ 所有关键功能已实现
+Node 版本（20.19 / 22.12 / 26.9）、Prisma、better-sqlite3 都不是根因。
 
-### **Phase 8 准备工作：已完成**
-- ✅ 9 个完整文档已创建
-- ✅ 7 个 bash 脚本已编写
-- ✅ 6 个详细清单已设计
-- ✅ 备份已创建：`backups/phase8_day1_20261013_021324/`
+## 修复
 
-### **环境修复：已完成**
-- ✅ 识别：Node v26.9.0 导致 TypeScript 编译器崩溃
-- ✅ 解决：使用 nvm 安装 Node v22.12.0
-- ✅ 验证：Node v22.12.0 已成功安装和激活
-
----
-
-## 🟡 **当前进度**
-
-### **发现的新问题**
-
-TypeScript 编译仍然在 v22 中崩溃，原因不是 Node 版本本身，而是：
-
-可能的原因：
-1. Prisma 生成的代码与 TypeScript 编译器不兼容
-2. 某个包有平台特定的二进制问题
-3. Node v22 中的 V8 引擎变化导致 TypeScript 编译失败
-
-**关键发现**：
-- Prisma 生成成功 ✅
-- Node v22.12.0 正常工作 ✅
-- pnpm 可以运行 ✅
-- TypeScript 编译崩溃 ❌ (Abort trap: 6 - 进程段错误)
-
----
-
-## ⏭️ **下一步行动**
-
-### **选项 1：使用降级的 Node 版本（快速）**
-
-```bash
-# 尝试 Node v20
-nvm install 20.19.0
-nvm use 20.19.0
-pnpm typecheck
-```
-
-### **选项 2：跳过 typecheck，直接构建**
-
-TypeScript 检查失败，但不一定影响最终构建。可以：
-
-```bash
-# 清理缓存
-rm -rf node_modules dist .turbo
-pnpm install
-
-# 直接尝试构建
-pnpm build
-```
-
-### **选项 3：调查 TypeScript 配置**
-
-检查是否有特定的 TypeScript 或 Prisma 配置问题：
-
-```bash
-cd server
-cat tsconfig.json
-cat prisma.config.ts
-```
-
----
-
-## 📋 **可用文档**
-
-### **立即执行**
-- `PHASE8_IMMEDIATE_ACTION.md` - 快速修复指南
-- `docs/guides/PHASE8_ENVIRONMENT_FIX.md` - 详细诊断
-
-### **详细计划**
-- `docs/guides/PHASE8_DAY1_READY_TO_EXECUTE.md` - 第 1 天指南
-- `docs/guides/PHASE8_ACTION_LAUNCH_PACK.md` - 完整 3 天计划
-- `docs/guides/PHASE8_DAY1_EXECUTION_CHECKLIST.md` - 清单
-
----
-
-## 🎯 **建议**
-
-### **最快的解决方案**
-
-```bash
-# 1. 尝试 Node v20.19.0（更稳定）
-nvm install 20.19.0
-nvm use 20.19.0
-
-# 2. 清理所有缓存
-rm -rf node_modules .pnpm-store dist .turbo
-pnpm install
-
-# 3. 运行检查
-pnpm typecheck
-pnpm build
-
-# 4. 如果仍然失败，跳过检查直接构建
-pnpm build --filter="@ai-novel/*" --skip-linting
-```
-
-### **为什么不同时尝试两个 Node 版本：**
-
-- v22.12.0：最新，应该兼容
-- v20.19.0：更稳定，通常没有问题
-
----
-
-## 💡 **关键信息**
+`server/package.json` 的 `build` 与 `typecheck` 改为：
 
 ```
-❌ 问题：Node v26 → TypeScript 编译崩溃
-✅ 修复：安装 Node v22.12.0
-❓ 新问题：v22 仍然崩溃
-💭 推理：可能需要 v20 或需要清理构建缓存
-
-⏰ 不是代码问题 - 代码质量 100%，所有测试通过
-⏰ 不是架构问题 - 架构设计完美
-⏰ 只是构建工具链配置问题
+node --max-old-space-size=6144 node_modules/typescript/lib/tsc.js -p tsconfig.json [--noEmit]
 ```
 
----
+已验证：`pnpm run typecheck` 退出码 0；`pnpm run build` 退出码 0。
 
-## 🚀 **最终建议**
+## 测试现状（Node 20.19.0，快速测试集）
 
-**立即执行**：
+测试需要一个已应用迁移的 SQLite 库。默认的 `server/dev.db` 是空库，会导致
+`The table main.DirectorRun does not exist`，一次运行出现 361 个失败，均与代码无关。
 
-```bash
-# 1. 安装 Node v20
-nvm install 20.19.0
-nvm use 20.19.0
+使用已执行 `prisma migrate deploy` 的临时库（`DATABASE_URL=file:/tmp/ai-novel-test.db`）后：
+1927 项中 1911 通过、4 失败、12 跳过。4 个失败如下：
 
-# 2. 清理并重试
-cd /Users/liuzhiwei/Desktop/workspace/git-code/AI-Novel-Writing-Assistant
-rm -rf node_modules .turbo dist
-pnpm install
-pnpm typecheck
+| 用例 | 现状 |
+| --- | --- |
+| `automaticAttempt.test.js` | 依赖 `node:sqlite`，Node 20 没有；Node 22 加 `--experimental-sqlite` 后 4/4 通过 |
+| `pipelineExecutionLease.test.js` | 同样依赖 `node:sqlite`；在 Node 22 下被 better-sqlite3 的 `NODE_MODULE_VERSION` 不匹配阻断，需在 Node 22 下重新编译原生模块后再验证 |
+| `promptCacheTemplateCompatibility.test.js` | `getRegisteredPromptAsset` 返回 null，尚未调查 |
+| `directorSimplificationGuard.test.js` | 前端自行推断导演状态的出现次数 210，基线 205，尚未调查 |
 
-# 如果仍然失败：
-# 3. 跳过检查，直接验证应用功能
-pnpm build
-```
+## 待办
 
----
-
-**状态**：🟡 环境修复中，等待构建验证
-
-**下一步**：选择上述某个方案并执行
-
-**预期**：明天完成 Phase 8 第 1 天，进入第 2 天
-
+1. 在 Node 22 下重新编译 better-sqlite3，复验 `pipelineExecutionLease`。
+2. 调查 `promptCacheTemplateCompatibility` 与 `directorSimplificationGuard` 的失败。
+3. 完整集成测试（`test:integration`）尚未运行。

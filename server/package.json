@@ -17,10 +17,10 @@
   "scripts": {
     "dev": "pnpm run dev:api",
     "dev:api": "node scripts/ensure-dev-prisma.cjs && node scripts/stop-stale-dev-server.cjs && ts-node-dev --respawn --transpile-only src/app.ts",
-    "build": "node build.mjs",
+    "build": "node --max-old-space-size=6144 node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/app.js",
     "start:api": "node dist/app.js",
-    "typecheck": "pnpm prisma:generate && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm prisma:generate && node --max-old-space-size=6144 node_modules/typescript/lib/tsc.js -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @ai-novel/shared build && pnpm run build && pnpm run test:node",
     "test:node": "node scripts/run-tests.cjs fast",
@@ -71,7 +71,6 @@
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
     "@types/node": "^25.3.3",
-    "esbuild": "^0.28.2",
     "prisma": "^7.4.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
