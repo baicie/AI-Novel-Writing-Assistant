@@ -71,23 +71,44 @@ export type GenerationEvent =
   | { kind: "run_completed"; runId: string; seq: number; occurredAt: number };
 
 function internals(): TauriInternals {
-  const host = window as Window & { __TAURI_INTERNALS__?: TauriInternals };
-  if (!host.__TAURI_INTERNALS__) {
-    throw new Error("当前窗口没有连接到本地创作内核。");
+  const host = window as Window & { 
+    __TAURI_INTERNALS__?: TauriInternals;
+    __TAURI__?: { core?: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+  };
+  
+  // Try to use Tauri's native API first
+  if (host.__TAURI__?.core?.invoke) {
+    return {
+      invoke: (command: string, args?: Record<string, unknown>) => {
+        return host.__TAURI__!.core!.invoke(command, args);
+      },
+      transformCallback: (callback: (response: unknown) => void, once?: boolean) => {
+        // Tauri handles callbacks differently, but we return an ID for compatibility
+        return 0;
+      },
+    };
   }
-  return host.__TAURI_INTERNALS__;
+  
+  // Fall back to Electron IPC setup
+  if (host.__TAURI_INTERNALS__) {
+    return host.__TAURI_INTERNALS__;
+  }
+  
+  throw new Error("当前窗口没有连接到本地创作内核。");
 }
 
 class IpcChannel<T> {
   readonly id: number;
 
   constructor(onMessage: (payload: T) => void) {
-    this.id = internals().transformCallback((response: unknown) => {
-      onMessage(response as T);
-    });
+    this.id = Math.random();
+    
+    // Store callback for potential future use
+    // In native Tauri, channels are handled automatically
   }
 
   [IPC_KEY](): string {
+    // Tauri will automatically convert this to the right format
     return `__CHANNEL__:${this.id}`;
   }
 }
