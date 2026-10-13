@@ -10,6 +10,20 @@
     <script>
       (() => {
         try {
+          // 检测 Tauri 环境
+          const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+          if (isTauri && !window.__AI_NOVEL_RUNTIME__) {
+            window.__AI_NOVEL_RUNTIME__ = {
+              mode: 'desktop',
+              isPackaged: true,
+              appVersion: '0.1.0'
+            };
+          }
+        } catch {
+          // 忽略错误
+        }
+        
+        try {
           const preference = JSON.parse(localStorage.getItem("ai-novel.theme.preference") || "null") || {};
           const mode = preference.mode === "dark" || preference.mode === "light" || preference.mode === "system" ? preference.mode : "system";
           const resolvedMode = mode === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : mode;
