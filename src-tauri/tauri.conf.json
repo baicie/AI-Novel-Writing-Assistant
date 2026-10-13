@@ -25,7 +25,13 @@
   },
   "bundle": {
     "active": true,
-    "icon": ["icons/icon.png"],
+    "icon": [
+      "icons/app-icon-32.png",
+      "icons/app-icon-64.png",
+      "icons/app-icon-128.png",
+      "icons/app-icon-256.png",
+      "icons/app-icon-512.png"
+    ],
     "targets": ["dmg", "app"]
   }
 }
