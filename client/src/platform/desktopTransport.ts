@@ -100,15 +100,22 @@ function internals(): TauriInternals {
 class IpcChannel<T> {
   readonly id: number;
 
-  constructor(onMessage: (payload: T) => void) {
+  constructor(private onMessage: (payload: T) => void) {
     this.id = Math.random();
-    
-    // Store callback for potential future use
-    // In native Tauri, channels are handled automatically
+  }
+
+  toJSON() {
+    // Return a special marker that Tauri IPC can understand
+    // The actual channel handling is done by Tauri's core
+    return {
+      __tauri_ipc__: {
+        type: "channel",
+        id: this.id,
+      },
+    };
   }
 
   [IPC_KEY](): string {
-    // Tauri will automatically convert this to the right format
     return `__CHANNEL__:${this.id}`;
   }
 }
