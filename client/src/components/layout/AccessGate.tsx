@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { LockKeyhole } from "lucide-react";
-import { API_BASE_URL } from "@/lib/constants";
+import { API_BASE_URL, APP_RUNTIME } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -110,6 +110,11 @@ function LoginScreen(props: { onSuccess: () => void }) {
 }
 
 export default function AccessGate({ children }: { children: ReactNode }) {
+  // Desktop 应用使用本地 Runtime，无需访问控制
+  if (APP_RUNTIME === "desktop") {
+    return children;
+  }
+
   const [required, setRequired] = useState(false);
   const [phase, setPhase] = useState<"checking" | "open" | "locked" | "unreachable">("checking");
   const [attempt, setAttempt] = useState(0);
