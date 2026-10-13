@@ -15,7 +15,7 @@ import {
   type ChapterQualityDebtDetails,
 } from "@ai-novel/shared/types/chapterQualityLoop";
 import { AlertTriangle, Loader2 } from "lucide-react";
-import { createNovelSnapshot, previewChapterAiRevision, previewChapterCursorContinuation, resolveChapterAuditIssue, reviewNovelChapter, updateNovelChapter } from "@/api/novel";
+import { createNovelSnapshot, previewChapterAiRevisionWithRouting, previewChapterCursorContinuationWithRouting, resolveChapterAuditIssue, reviewNovelChapter, updateNovelChapter } from "@/api/novel";
 import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
@@ -292,7 +292,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       if (!chapter) {
         throw new Error("当前未选中章节。");
       }
-      return previewChapterAiRevision(novelId, chapter.id, request);
+      return previewChapterAiRevisionWithRouting(novelId, chapter.id, request);
     },
     onMutate: (request) => {
       lastPreviewRequestRef.current = request;
@@ -318,8 +318,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         errorMessage: undefined,
       }));
     },
-    onSuccess: (response) => {
-      const data = response.data;
+    onSuccess: (response: unknown) => {
+      // 【类型处理】处理来自本地或云 API 的响应
+      const data = (response as any)?.data;
       if (!data) {
         setSession((current) => ({
           ...current,
@@ -354,7 +355,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       if (!chapter) {
         throw new Error("当前未选中章节。");
       }
-      return previewChapterCursorContinuation(novelId, chapter.id, request);
+      return previewChapterCursorContinuationWithRouting(novelId, chapter.id, request);
     },
     onMutate: (request) => {
       lastContinuationRequestRef.current = request;
@@ -375,8 +376,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         errorMessage: undefined,
       }));
     },
-    onSuccess: (response) => {
-      const data = response.data;
+    onSuccess: (response: unknown) => {
+      // 【类型处理】处理来自本地或云 API 的响应
+      const data = (response as any)?.data;
       if (!data) {
         setSession((current) => ({ ...current, status: "error", errorMessage: "AI 未返回续写结果，请重试。" }));
         return;
