@@ -32,6 +32,7 @@ server/.tmp/
 desktop/build/
 desktop/runtime-migration-smoke/
 server/prisma-diff-migrations-to-schema.sql
+temp/
 
 # AI tool artifacts
 .claude/plan/
