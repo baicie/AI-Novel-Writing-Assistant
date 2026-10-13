@@ -370,6 +370,23 @@ pub fn run() {
                 kernel: kernel.clone(),
                 secrets: secrets.clone(),
             });
+            
+            // 在主窗口加载后注入运行时配置
+            let main_window = app.get_webview_window("main");
+            if let Some(window) = main_window {
+                let _ = window.eval(
+                    r#"
+                    if (!window.__AI_NOVEL_RUNTIME__) {
+                        window.__AI_NOVEL_RUNTIME__ = {
+                            mode: 'desktop',
+                            isPackaged: true,
+                            appVersion: '0.1.0'
+                        };
+                    }
+                    "#,
+                );
+            }
+            
             tauri::async_runtime::spawn(async move {
                 loop {
                     match worker.worker.tick().await {

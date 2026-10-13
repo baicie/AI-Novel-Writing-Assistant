@@ -10,8 +10,8 @@
     <script>
       (() => {
         try {
-          // 检测 Tauri 环境
-          const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+          // 检测 Tauri 环境 — 支持 __TAURI__ 和 __TAURI_INTERNALS__
+          const isTauri = typeof window !== 'undefined' && (window.__TAURI__ !== undefined || window.__TAURI_INTERNALS__ !== undefined);
           if (isTauri && !window.__AI_NOVEL_RUNTIME__) {
             window.__AI_NOVEL_RUNTIME__ = {
               mode: 'desktop',
