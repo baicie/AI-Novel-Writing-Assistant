@@ -5,7 +5,8 @@
   "identifier": "com.ai-novel.studio",
   "build": {
     "frontendDist": "../client/dist",
-    "devUrl": "http://127.0.0.1:5173"
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "concurrently \"pnpm dev:shared\" \"pnpm dev:server\" \"pnpm dev:client:wait\""
   },
   "app": {
     "withGlobalTauri": false,
