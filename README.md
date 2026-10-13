@@ -8,7 +8,7 @@
 <p align="center"><sub>Open-source AI novel writing assistant and long-form production studio.</sub></p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><img src="https://img.shields.io/github/v/release/ExplosiveCoderflome/AI-Novel-Writing-Assistant?style=flat-square&amp;label=Windows%20%E6%A1%8C%E9%9D%A2%E7%89%88&amp;color=17556b" alt="最新桌面版本" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-17556b?style=flat-square" alt="AGPL-3.0 许可证" /></a>
   <a href="./package.json"><img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-3C873A?style=flat-square" alt="Monorepo · pnpm workspace" /></a>
 </p>
@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载桌面版（Windows / macOS）</strong></a> ·
+  <a href="https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest"><strong>下载 Windows 桌面版</strong></a> ·
   <a href="https://explosivecoderflome.github.io/AI-Novel-Writing-Assistant/">项目介绍与文档</a> ·
   <a href="#快速开始">第一次使用</a> ·
   <a href="#源码运行">源码运行</a> ·
@@ -53,10 +53,12 @@
 
 #### 新增
 
-- 桌面版提供 macOS 安装包，按芯片分为 Apple 芯片（文件名带 `mac-arm64`）和 Intel 芯片（文件名带 `mac-x64`）两个版本，可在 GitHub Releases 按自己的电脑选择下载。
-- macOS 版关闭窗口后应用会留在程序坞，点击程序坞图标即可回到写作工作区；需要完全退出时使用 `Cmd+Q`。
-- 未经 Apple 开发者签名的 macOS 版会在系统设置的更新区说明如何下载对应芯片的新版并替换应用，创作数据保持不变。
-- 桌面开发包使用独立版本号，例如 `0.5.8-dev.1`，和正式版分开下载，不会替换已经发布的正式版。
+- 模型与厂商新增 OpenCode Go：订阅后填入一个 API Key，就能在 DeepSeek、Kimi、GLM、Qwen、MiniMax 等模型之间切换，默认推荐额度充足的 DeepSeek V4.1 Flash；模型列表只展示可以直接用于写作的模型。
+- 使用 OpenCode Go 时，同一本小说的连续生成会归入同一会话，更容易命中缓存、节省订阅额度。
+
+#### 修复
+
+- 自定义模型厂商的鉴权方式选择“x-api-key”或“无需鉴权”时，连接测试和正式生成只按所选方式发送密钥，避免第三方接口因多出的 Bearer 密钥拒绝请求。
 
 完整历史更新见 [版本更新说明](./docs/releases/release-notes.md)。
 
@@ -118,16 +120,12 @@ V2 单章安全上限为 **100,000 Tokens**，累计包含该章的生成、检�
 
 ### 下载安装
 
-普通写作推荐使用桌面版（Windows / macOS），无需安装 Node.js、pnpm 或手动启动服务端。
+普通写作使用推荐 Windows 桌面版，无需安装 Node.js、pnpm 或手动启动服务端。
 
 | 选择 | 下载文件 | 适合谁 |
 | --- | --- | --- |
-| Windows 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
-| Windows 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
-| macOS Apple 芯片 | `Biz-Novel-Studio-<版本>-mac-arm64.dmg` | M1 / M2 / M3 / M4 等 Apple 芯片的 Mac |
-| macOS Intel 芯片 | `Biz-Novel-Studio-<版本>-mac-x64.dmg` | Intel 处理器的 Mac |
-
-不确定自己的 Mac 是哪种芯片：点击屏幕左上角苹果菜单 →“关于本机”，“芯片”一栏写着 Apple M 系列就选 Apple 芯片版，“处理器”一栏写着 Intel 就选 Intel 版。打开 `.dmg` 后把应用拖入“应用程序”文件夹即可。如果首次打开时系统提示无法验证开发者，请到“系统设置 → 隐私与安全性”中点击“仍要打开”。
+| 安装版 | `Biz-Novel-Studio-<版本>-setup-x64.exe` | 长期使用，按安装向导完成安装 |
+| 便携版 | `Biz-Novel-Studio-<版本>-portable-x64.exe` | 希望从独立目录直接启动 |
 
 **[前往最新桌面版下载页 →](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant/releases/latest)**
 
