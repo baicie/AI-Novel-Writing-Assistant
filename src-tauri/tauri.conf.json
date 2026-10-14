@@ -6,16 +6,18 @@
   "build": {
     "frontendDist": "../client/dist",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeDevCommand": "concurrently \"pnpm dev:shared\" \"pnpm dev:server\" \"pnpm dev:client:wait\""
+    "beforeDevCommand": "pnpm exec concurrently \"pnpm dev:shared\" \"pnpm dev:server\" \"pnpm dev:client:wait\"",
+    "beforeBuildCommand": "pnpm --filter @ai-novel/client build"
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset: data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*; img-src 'self' asset: http://asset: data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'"
     },
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Biz Novel Studio",
         "width": 1400,
         "height": 900,

@@ -3,16 +3,20 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
+use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use novel_llm::authorize_endpoint;
 use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
-use crate::dto::{ChapterSnapshot, GenerationEvent, NovelSummary, RunContract, event_from_stored};
+use crate::dto::{
+    ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult,
+    NovelDetail, NovelSummary, RunContract, UpdateNovelFields, event_from_stored,
+};
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
 use crate::ports::{
-    Clock, CommandOutcome, Ids, NewChapter, NewNovel, NovelRepository, OpenRunRecord,
-    SaveChapterRecord, WorkflowRepository,
+    Clock, CommandOutcome, Ids, NewChapter, NewNovel, NovelRepository,
+    OpenRunRecord, SaveChapterRecord, WorkflowRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -55,6 +59,43 @@ impl DirectorService {
         Ok(self.novels.list_novels().await?)
     }
 
+    pub async fn list_novels_paginated(
+        &self,
+        query: &ListNovelsQuery,
+    ) -> Result<ListNovelsResult, AppError> {
+        Ok(self.novels.list_novels_paginated(query).await?)
+    }
+
+    pub async fn get_novel(&self, id: &str) -> Result<NovelDetail, AppError> {
+        Ok(self.novels.get_novel(id).await?)
+    }
+
+    pub async fn update_novel(
+        &self,
+        id: &str,
+        fields: &UpdateNovelFields,
+    ) -> Result<NovelDetail, AppError> {
+        Ok(self
+            .novels
+            .update_novel(id, fields, self.clock.now_ms())
+            .await?)
+    }
+
+    pub async fn delete_novel(&self, id: &str) -> Result<(), AppError> {
+        Ok(self.novels.delete_novel(id).await?)
+    }
+
+    pub async fn set_creation_experience(
+        &self,
+        id: &str,
+        experience: CreationExperience,
+    ) -> Result<NovelDetail, AppError> {
+        Ok(self
+            .novels
+            .set_creation_experience(id, experience, self.clock.now_ms())
+            .await?)
+    }
+
     pub async fn create_novel(
         &self,
         title: &str,
@@ -73,6 +114,57 @@ impl DirectorService {
                 now_ms: self.clock.now_ms(),
             })
             .await?)
+    }
+
+    /// Phase 2 入口：带着 setup 字段一起建书。
+    pub async fn create_novel_with_setup(
+        &self,
+        title: &str,
+        description: &str,
+        narrative_form: NarrativeForm,
+        writing_mode: WritingMode,
+        project_mode: ProjectMode,
+        creation_experience: CreationExperience,
+        target_audience: &str,
+        book_selling_point: &str,
+        competing_feel: &str,
+        first_30_chapter_promise: &str,
+        commercial_tags: Vec<String>,
+        genre_id: Option<String>,
+        primary_story_mode_id: Option<String>,
+        secondary_story_mode_id: Option<String>,
+        world_id: Option<String>,
+        style_tone: &str,
+        default_chapter_length: Option<i32>,
+        estimated_chapter_count: Option<i32>,
+    ) -> Result<NovelDetail, AppError> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(AppError::validation("先写一个书名。"));
+        }
+        let input = CreateNovelInput {
+            id: self.ids.new_id(),
+            title: title.to_string(),
+            description: description.trim().to_string(),
+            narrative_form,
+            writing_mode,
+            project_mode,
+            creation_experience,
+            target_audience: target_audience.trim().to_string(),
+            book_selling_point: book_selling_point.trim().to_string(),
+            competing_feel: competing_feel.trim().to_string(),
+            first_30_chapter_promise: first_30_chapter_promise.trim().to_string(),
+            commercial_tags,
+            genre_id,
+            primary_story_mode_id,
+            secondary_story_mode_id,
+            world_id,
+            style_tone: style_tone.trim().to_string(),
+            default_chapter_length,
+            estimated_chapter_count,
+            now_ms: self.clock.now_ms(),
+        };
+        Ok(self.novels.create_novel_with_setup(input).await?)
     }
 
     pub async fn create_chapter(

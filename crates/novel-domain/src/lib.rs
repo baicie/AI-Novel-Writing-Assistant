@@ -4,6 +4,7 @@
 mod chapter;
 mod error;
 mod run;
+mod setup;
 mod workflow;
 
 pub use chapter::{ChapterProtection, can_mark_stale, ensure_can_promote};
@@ -11,5 +12,9 @@ pub use error::DomainError;
 pub use run::{
     ControlEvent, PauseKind, RunControl, RunGate, RunPause, RunStatus, StopSignalKind, apply_event,
     initial_control, note_lease, parse_status,
+};
+pub use setup::{
+    CreationExperience, FirstNovelMilestone, FirstNovelOnboarding, Genre, NarrativeForm,
+    ProjectMode, QuickSetupStatus, StoryMode, World, WritingMode,
 };
 pub use workflow::{ArtifactStatus, ArtifactView};

@@ -1,10 +1,14 @@
+mod node_backend;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use node_backend::{BootstrapSnapshot, NodeBackend};
 use novel_application::{
     AppError, ChapterSnapshot, CommandOutcome, GenerationEvent, ModelSecrets, NoFault, NovelSummary,
     OpenRunInput, PortError, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
 };
+use novel_http::KernelState;
 use novel_llm::UnconfiguredProvider;
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
@@ -76,6 +80,28 @@ fn data_dir() -> PathBuf {
 }
 
 #[tauri::command]
+fn get_desktop_bootstrap_snapshot(backend: State<'_, NodeBackend>) -> BootstrapSnapshot {
+    backend.snapshot()
+}
+
+#[tauri::command]
+fn open_desktop_logs_directory(backend: State<'_, NodeBackend>) -> Result<(), String> {
+    backend
+        .reveal_logs_directory()
+        .map_err(|error| format!("无法打开日志目录：{error}"))
+}
+
+#[tauri::command]
+async fn restart_desktop_app(
+    app: tauri::AppHandle,
+    backend: State<'_, NodeBackend>,
+) -> Result<(), String> {
+    backend.stop();
+    app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
 async fn list_chapters(
     state: State<'_, AppState>,
     novel_id: String,
@@ -113,7 +139,7 @@ async fn save_model_setup(
 #[tauri::command]
 async fn has_api_key(state: State<'_, AppState>) -> Result<bool, AppError> {
     let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    Ok(check_has_api_key(secrets.as_ref()).await?)
+    check_has_api_key(secrets.as_ref()).await
 }
 
 async fn read_model_setup(
@@ -170,10 +196,12 @@ async fn write_model_setup(
 async fn check_has_api_key(secrets: &OsSecretStore) -> Result<bool, AppError> {
     use novel_platform::SecretStore;
     let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF;
+    // 尝试读取密钥。如果系统密钥存储不可用或未初始化，返回 false
+    // 这允许应用在首次启动或系统密钥存储受限的情况下继续启动
     let value = secrets
         .get(secret_ref)
         .await
-        .map_err(|_| AppError::from(PortError::Storage("无法读取系统凭据。".into())))?;
+        .unwrap_or(None); // 忽略存储访问错误，将其视为"未配置"
     Ok(value.is_some())
 }
 
@@ -334,11 +362,30 @@ async fn subscribe_run(
 
 pub fn run() {
     novel_platform::init_logging();
+
     tauri::Builder::default()
         .setup(|app| {
             let dir = data_dir();
             std::fs::create_dir_all(&dir)
                 .map_err(|error| format!("无法准备本地资料目录：{error}"))?;
+
+            let backend = NodeBackend::prepare(app.handle(), &dir);
+            backend.start();
+            let main_window = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .cloned()
+                .ok_or("缺少主窗口配置")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window)?
+                .initialization_script(
+                    backend.runtime_script(&app.package_info().version.to_string()),
+                )
+                .build()?;
+            app.manage(backend);
+
             let db_path = dir.join("novel.sqlite");
             let secrets: Arc<OsSecretStore> = Arc::new(OsSecretStore);
             let model_secrets: Arc<dyn ModelSecrets> = Arc::new(OsModelSecrets {
@@ -353,6 +400,9 @@ pub fn run() {
                 let runtime = Arc::new(Runtime::new(RuntimeDeps {
                     novels: kernel.clone(),
                     runs: kernel.clone(),
+                    worlds: kernel.clone(),
+                    lookups: kernel.clone(),
+                    task_center: kernel.clone(),
                     llm: Arc::new(UnconfiguredProvider),
                     clock: Arc::new(SystemClock),
                     ids: Arc::new(UuidIds),
@@ -370,23 +420,6 @@ pub fn run() {
                 kernel: kernel.clone(),
                 secrets: secrets.clone(),
             });
-            
-            // 在主窗口加载后注入运行时配置
-            let main_window = app.get_webview_window("main");
-            if let Some(window) = main_window {
-                let _ = window.eval(
-                    r#"
-                    if (!window.__AI_NOVEL_RUNTIME__) {
-                        window.__AI_NOVEL_RUNTIME__ = {
-                            mode: 'desktop',
-                            isPackaged: true,
-                            appVersion: '0.1.0'
-                        };
-                    }
-                    "#,
-                );
-            }
-            
             tauri::async_runtime::spawn(async move {
                 loop {
                     match worker.worker.tick().await {
@@ -397,6 +430,29 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             });
+
+            // stage 1 切流：当 `AI_NOVEL_KERNEL_BACKEND=1` 时，Tauri 进程直接起
+            // novel-http 的 axum server 监听 3000 端口，不生成 Node sidecar。
+            // 这是后端 Rust 化的开关；默认仍是 sidecar 模式，行为不变。
+            if std::env::var("AI_NOVEL_KERNEL_BACKEND")
+                .ok()
+                .filter(|value| !value.is_empty() && value != "0" && value != "false")
+                .is_some()
+            {
+                let kernel_state = KernelState::new(runtime.clone(), secrets.clone(), kernel.clone());
+                let host = std::env::var("AI_NOVEL_KERNEL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+                let port = std::env::var("AI_NOVEL_SERVER_PORT")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(3000_u16);
+                tracing::info!(host = %host, port, "kernel-integrated mode: Tauri 进程内起 axum server");
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = novel_http::serve(kernel_state, &host, port).await {
+                        tracing::error!(%error, "本地创作内核 HTTP server 启动失败");
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -415,15 +471,21 @@ pub fn run() {
             subscribe_run,
             get_model_setup,
             save_model_setup,
-            has_api_key
+            has_api_key,
+            get_desktop_bootstrap_snapshot,
+            open_desktop_logs_directory,
+            restart_desktop_app
         ])
         .build(tauri::generate_context!())
         .expect("无法打开本地创作窗口")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event
-                && let Some(state) = app.try_state::<AppState>()
-            {
-                state.runtime.worker.stop();
+        .run(move |app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(backend) = app.try_state::<NodeBackend>() {
+                    backend.stop();
+                }
+                if let Some(state) = app.try_state::<AppState>() {
+                    state.runtime.worker.stop();
+                }
             }
         });
 }

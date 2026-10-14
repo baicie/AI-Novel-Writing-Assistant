@@ -232,3 +232,34 @@ export function cancelGeneration(runId: string): Promise<void> {
 export function openRun(input: StartGeneration): Promise<CommandOutcome> {
   return invoke("open_run", { request: input });
 }
+
+export interface DesktopShellBootstrap {
+  state: "launching" | "starting-server" | "ready" | "error";
+  stage: string;
+  title: string;
+  detail: string;
+  logDir: string;
+  logFile: string;
+  updatedAtMs: number;
+  canRetry: boolean;
+}
+
+export function hasDesktopShell(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const host = window as Window & { __TAURI_INTERNALS__?: unknown };
+  return host.__TAURI_INTERNALS__ !== undefined;
+}
+
+export function getDesktopShellBootstrap(): Promise<DesktopShellBootstrap> {
+  return invoke("get_desktop_bootstrap_snapshot");
+}
+
+export function openDesktopShellLogsDirectory(): Promise<void> {
+  return invoke("open_desktop_logs_directory");
+}
+
+export function restartDesktopShell(): Promise<void> {
+  return invoke("restart_desktop_app");
+}

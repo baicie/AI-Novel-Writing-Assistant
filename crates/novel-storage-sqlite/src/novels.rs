@@ -2,10 +2,11 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    ChapterSnapshot, NewChapter, NewNovel, NovelRepository, NovelSummary, PortError,
-    PromoteOutcome, SaveChapterRecord,
+    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel,
+    NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
+    UpdateNovelFields,
 };
-use novel_domain::{ChapterProtection, ensure_can_promote};
+use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
 use sqlx::Row;
 
@@ -15,7 +16,8 @@ use crate::db::{SqliteKernel, map_sql};
 impl NovelRepository for SqliteKernel {
     async fn list_novels(&self) -> Result<Vec<NovelSummary>, PortError> {
         let rows = sqlx::query(
-            "SELECT id, title, description, status, updated_at FROM novel ORDER BY updated_at DESC",
+            "SELECT id, title, description, status, creation_experience, narrative_form, writing_mode, project_mode, updated_at
+             FROM novel ORDER BY updated_at DESC",
         )
         .fetch_all(&self.pool)
         .await
@@ -23,23 +25,437 @@ impl NovelRepository for SqliteKernel {
         rows.iter().map(novel_from_row).collect()
     }
 
-    async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError> {
-        sqlx::query("INSERT INTO novel(id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?)")
-            .bind(&novel.id)
-            .bind(&novel.title)
-            .bind(&novel.description)
-            .bind(novel.now_ms)
-            .bind(novel.now_ms)
-            .execute(&self.pool)
+    async fn list_novels_paginated(
+        &self,
+        query: &ListNovelsQuery,
+    ) -> Result<ListNovelsResult, PortError> {
+        let page = query.page.unwrap_or(1).max(1);
+        let limit = query.limit.unwrap_or(20).clamp(1, 200);
+        let offset = ((page - 1) * limit) as i64;
+        let search = query.search.as_deref().unwrap_or("").trim();
+        let like = if search.is_empty() {
+            None
+        } else {
+            Some(format!("%{search}%"))
+        };
+        let status = query.status.as_deref().filter(|value| !value.is_empty());
+        let narrative_form = query
+            .narrative_form
+            .as_deref()
+            .filter(|value| !value.is_empty());
+        let writing_mode = query.writing_mode.as_deref().filter(|value| !value.is_empty());
+
+        // 简单实现：用条件分支拼 SQL，避免引入动态 binding 框架。
+        let total: i64 = if let Some(like) = &like {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM novel WHERE title LIKE ?1 OR description LIKE ?1",
+            )
+            .bind(like)
+            .fetch_one(&self.pool)
             .await
-            .map_err(map_sql)?;
+            .map_err(map_sql)?
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM novel")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_sql)?
+        };
+
+        let rows = sqlx::query(
+            "SELECT id, title, description, status, creation_experience, narrative_form, writing_mode, project_mode, updated_at
+             FROM novel
+             WHERE (?1 IS NULL OR title LIKE ?1 OR description LIKE ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR narrative_form = ?3)
+               AND (?4 IS NULL OR writing_mode = ?4)
+             ORDER BY updated_at DESC
+             LIMIT ?5 OFFSET ?6",
+        )
+        .bind(&like)
+        .bind(status)
+        .bind(narrative_form)
+        .bind(writing_mode)
+        .bind(limit as i64)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+
+        let items = rows.iter().map(novel_from_row).collect::<Result<Vec<_>, _>>()?;
+        Ok(ListNovelsResult {
+            items,
+            page,
+            limit,
+            total,
+        })
+    }
+
+    async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError> {
+        sqlx::query(
+            "INSERT INTO novel(id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?)",
+        )
+        .bind(&novel.id)
+        .bind(&novel.title)
+        .bind(&novel.description)
+        .bind(novel.now_ms)
+        .bind(novel.now_ms)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
         Ok(NovelSummary {
             id: novel.id,
             title: novel.title,
             description: novel.description,
             status: "draft".into(),
+            creation_experience: "simple".into(),
+            narrative_form: "long_novel".into(),
+            writing_mode: "original".into(),
+            project_mode: "ai_led".into(),
             updated_at: novel.now_ms,
         })
+    }
+
+    async fn create_novel_with_setup(
+        &self,
+        input: CreateNovelInput,
+    ) -> Result<NovelDetail, PortError> {
+        let commercial_tags_json =
+            serde_json::to_string(&input.commercial_tags).unwrap_or_else(|_| "[]".to_string());
+        sqlx::query(
+            "INSERT INTO novel(
+                id, title, description, status,
+                narrative_form, target_audience, book_selling_point, competing_feel,
+                first_30_chapter_promise, commercial_tags_json,
+                genre_id, primary_story_mode_id, secondary_story_mode_id, world_id,
+                writing_mode, project_mode, creation_experience,
+                style_tone, default_chapter_length, estimated_chapter_count,
+                created_at, updated_at
+             ) VALUES (
+                ?, ?, ?, 'draft',
+                ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?
+             )",
+        )
+        .bind(&input.id)
+        .bind(&input.title)
+        .bind(&input.description)
+        .bind(input.narrative_form.as_str())
+        .bind(&input.target_audience)
+        .bind(&input.book_selling_point)
+        .bind(&input.competing_feel)
+        .bind(&input.first_30_chapter_promise)
+        .bind(&commercial_tags_json)
+        .bind(&input.genre_id)
+        .bind(&input.primary_story_mode_id)
+        .bind(&input.secondary_story_mode_id)
+        .bind(&input.world_id)
+        .bind(input.writing_mode.as_str())
+        .bind(input.project_mode.as_str())
+        .bind(input.creation_experience.as_str())
+        .bind(&input.style_tone)
+        .bind(input.default_chapter_length)
+        .bind(input.estimated_chapter_count)
+        .bind(input.now_ms)
+        .bind(input.now_ms)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        self.get_novel(&input.id).await
+    }
+
+    async fn get_novel(&self, id: &str) -> Result<NovelDetail, PortError> {
+        let row = sqlx::query(
+            "SELECT id, title, description, status,
+                    narrative_form, target_audience, book_selling_point, competing_feel,
+                    first_30_chapter_promise, commercial_tags_json,
+                    genre_id, primary_story_mode_id, secondary_story_mode_id, world_id,
+                    writing_mode, project_mode, creation_experience,
+                    narrative_pov, pace_preference, style_tone, emotion_intensity, ai_freedom,
+                    default_chapter_length, estimated_chapter_count,
+                    project_status, storyline_status, outline_status, resource_ready_score,
+                    created_at, updated_at
+             FROM novel WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到这本书。".into()))?;
+        novel_detail_from_row(&row)
+    }
+
+    async fn update_novel(
+        &self,
+        id: &str,
+        fields: &UpdateNovelFields,
+        now_ms: i64,
+    ) -> Result<NovelDetail, PortError> {
+        // 字段是稀疏的；动态 SQL 用宏 + match 处理。注意 null vs unset：外层 Option 是
+        // "是否要更新"，内层 Option 是"更新成 null 还是具体值"。
+        if let Some(value) = &fields.title {
+            sqlx::query("UPDATE novel SET title = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.description {
+            sqlx::query("UPDATE novel SET description = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.target_audience {
+            sqlx::query("UPDATE novel SET target_audience = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.book_selling_point {
+            sqlx::query("UPDATE novel SET book_selling_point = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.competing_feel {
+            sqlx::query("UPDATE novel SET competing_feel = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.first_30_chapter_promise {
+            sqlx::query(
+                "UPDATE novel SET first_30_chapter_promise = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(value.as_deref())
+            .bind(now_ms)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.commercial_tags {
+            let json = match value {
+                Some(tags) => serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string()),
+                None => "[]".to_string(),
+            };
+            sqlx::query("UPDATE novel SET commercial_tags_json = ?, updated_at = ? WHERE id = ?")
+                .bind(json)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.genre_id {
+            sqlx::query("UPDATE novel SET genre_id = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.primary_story_mode_id {
+            sqlx::query("UPDATE novel SET primary_story_mode_id = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.secondary_story_mode_id {
+            sqlx::query("UPDATE novel SET secondary_story_mode_id = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.world_id {
+            sqlx::query("UPDATE novel SET world_id = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.narrative_form.as_deref() {
+            sqlx::query("UPDATE novel SET narrative_form = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.writing_mode.as_deref() {
+            sqlx::query("UPDATE novel SET writing_mode = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.project_mode.as_deref() {
+            sqlx::query("UPDATE novel SET project_mode = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.narrative_pov {
+            sqlx::query("UPDATE novel SET narrative_pov = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.pace_preference {
+            sqlx::query("UPDATE novel SET pace_preference = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.style_tone {
+            sqlx::query("UPDATE novel SET style_tone = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.emotion_intensity {
+            sqlx::query("UPDATE novel SET emotion_intensity = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.ai_freedom {
+            sqlx::query("UPDATE novel SET ai_freedom = ?, updated_at = ? WHERE id = ?")
+                .bind(value.as_deref())
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.default_chapter_length {
+            sqlx::query("UPDATE novel SET default_chapter_length = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = &fields.estimated_chapter_count {
+            sqlx::query("UPDATE novel SET estimated_chapter_count = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.project_status.as_deref() {
+            sqlx::query("UPDATE novel SET project_status = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.storyline_status.as_deref() {
+            sqlx::query("UPDATE novel SET storyline_status = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.outline_status.as_deref() {
+            sqlx::query("UPDATE novel SET outline_status = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.resource_ready_score {
+            sqlx::query("UPDATE novel SET resource_ready_score = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        }
+        self.get_novel(id).await
+    }
+
+    async fn delete_novel(&self, id: &str) -> Result<(), PortError> {
+        let result = sqlx::query("DELETE FROM novel WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        if result.rows_affected() == 0 {
+            return Err(PortError::NotFound("没有找到这本书。".into()));
+        }
+        Ok(())
+    }
+
+    async fn set_creation_experience(
+        &self,
+        id: &str,
+        experience: CreationExperience,
+        now_ms: i64,
+    ) -> Result<NovelDetail, PortError> {
+        sqlx::query("UPDATE novel SET creation_experience = ?, updated_at = ? WHERE id = ?")
+            .bind(experience.as_str())
+            .bind(now_ms)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        self.get_novel(id).await
     }
 
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError> {
@@ -232,6 +648,50 @@ fn novel_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelSummary, PortErr
         title: row.try_get("title").map_err(map_sql)?,
         description: row.try_get("description").map_err(map_sql)?,
         status: row.try_get("status").map_err(map_sql)?,
+        creation_experience: row.try_get("creation_experience").map_err(map_sql)?,
+        narrative_form: row.try_get("narrative_form").map_err(map_sql)?,
+        writing_mode: row.try_get("writing_mode").map_err(map_sql)?,
+        project_mode: row.try_get("project_mode").map_err(map_sql)?,
+        updated_at: row.try_get("updated_at").map_err(map_sql)?,
+    })
+}
+
+fn novel_detail_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelDetail, PortError> {
+    let commercial_tags_json: String = row
+        .try_get("commercial_tags_json")
+        .map_err(map_sql)?;
+    let commercial_tags = serde_json::from_str::<Vec<String>>(&commercial_tags_json)
+        .unwrap_or_default();
+    Ok(NovelDetail {
+        id: row.try_get("id").map_err(map_sql)?,
+        title: row.try_get("title").map_err(map_sql)?,
+        description: row.try_get("description").map_err(map_sql)?,
+        status: row.try_get("status").map_err(map_sql)?,
+        creation_experience: row.try_get("creation_experience").map_err(map_sql)?,
+        narrative_form: row.try_get("narrative_form").map_err(map_sql)?,
+        target_audience: row.try_get("target_audience").map_err(map_sql)?,
+        book_selling_point: row.try_get("book_selling_point").map_err(map_sql)?,
+        competing_feel: row.try_get("competing_feel").map_err(map_sql)?,
+        first_30_chapter_promise: row.try_get("first_30_chapter_promise").map_err(map_sql)?,
+        commercial_tags,
+        genre_id: row.try_get("genre_id").map_err(map_sql)?,
+        primary_story_mode_id: row.try_get("primary_story_mode_id").map_err(map_sql)?,
+        secondary_story_mode_id: row.try_get("secondary_story_mode_id").map_err(map_sql)?,
+        world_id: row.try_get("world_id").map_err(map_sql)?,
+        writing_mode: row.try_get("writing_mode").map_err(map_sql)?,
+        project_mode: row.try_get("project_mode").map_err(map_sql)?,
+        narrative_pov: row.try_get("narrative_pov").map_err(map_sql)?,
+        pace_preference: row.try_get("pace_preference").map_err(map_sql)?,
+        style_tone: row.try_get("style_tone").map_err(map_sql)?,
+        emotion_intensity: row.try_get("emotion_intensity").map_err(map_sql)?,
+        ai_freedom: row.try_get("ai_freedom").map_err(map_sql)?,
+        default_chapter_length: row.try_get("default_chapter_length").map_err(map_sql)?,
+        estimated_chapter_count: row.try_get("estimated_chapter_count").map_err(map_sql)?,
+        project_status: row.try_get("project_status").map_err(map_sql)?,
+        storyline_status: row.try_get("storyline_status").map_err(map_sql)?,
+        outline_status: row.try_get("outline_status").map_err(map_sql)?,
+        resource_ready_score: row.try_get("resource_ready_score").map_err(map_sql)?,
+        created_at: row.try_get("created_at").map_err(map_sql)?,
         updated_at: row.try_get("updated_at").map_err(map_sql)?,
     })
 }

@@ -1,7 +1,5 @@
-CREATE TABLE schema_migration (
-  version TEXT PRIMARY KEY,
-  applied_at INTEGER NOT NULL
-);
+-- schema_migration 由 `crates/novel-storage-sqlite/src/db.rs::migrate` 在跑迁移前自动创建，
+-- 不在每个 SQL 文件里重复声明，避免后续迁移 ALTER 旧库时报 "table already exists"。
 
 CREATE TABLE novel (
   id TEXT PRIMARY KEY,
@@ -289,5 +287,3 @@ CREATE TABLE document_version (
   created_at INTEGER NOT NULL,
   UNIQUE (novel_id, kind, version)
 );
-
-INSERT INTO schema_migration(version, applied_at) VALUES ('0001', 0);

@@ -16,12 +16,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 dirs = "6"
 novel-application.workspace = true
+novel-http.workspace = true
 novel-llm.workspace = true
 novel-platform = { workspace = true, features = ["os-keychain"] }
 novel-storage-sqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }
+time = { version = "0.3", features = ["formatting"] }
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true

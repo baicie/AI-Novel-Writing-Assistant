@@ -28,6 +28,7 @@
     "db:seed": "pnpm --filter @ai-novel/server db:seed",
     "db:studio": "pnpm --filter @ai-novel/server db:studio",
     "build": "pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/server build && pnpm --filter @ai-novel/client build",
+    "build:desktop:backend": "pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/server prisma:generate && pnpm --filter @ai-novel/server build",
     "build:site": "pnpm --filter @ai-novel/site build",
     "check:docs-manifest": "node scripts/check-docs-manifest.cjs",
     "build:desktop": "pnpm --filter @ai-novel/desktop build",
@@ -63,7 +64,11 @@
     "test": "pnpm --filter @ai-novel/server test",
     "test:client": "pnpm --filter @ai-novel/client test",
     "test:all": "pnpm --filter @ai-novel/server test:all && pnpm --filter @ai-novel/client test",
-    "lint": "pnpm --filter @ai-novel/shared lint && pnpm --filter @ai-novel/server lint && pnpm --filter @ai-novel/client lint"
+    "lint": "pnpm --filter @ai-novel/shared lint && pnpm --filter @ai-novel/server lint && pnpm --filter @ai-novel/client lint",
+    "stage:tauri-sidecar": "node src-tauri/scripts/stage-node-sidecar.cjs",
+    "build:tauri:m1": "cd src-tauri && cargo tauri build --config tauri.bundle.conf.json --target aarch64-apple-darwin",
+    "build:tauri:x64": "cd src-tauri && cargo tauri build --config tauri.bundle.conf.json --target x86_64-apple-darwin",
+    "build:tauri:all": "cd src-tauri && cargo tauri build --config tauri.bundle.conf.json"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

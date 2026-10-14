@@ -2,7 +2,9 @@
 
 ## 概述
 
-本地创作内核是 Tauri 桌面应用的 Rust 后端，为离线创作提供能力支撑。它由 6 个 crate 组成，分层次设计，支持系统凭据管理、章节离线查询和生成中断。
+本地创作内核是 Tauri 桌面应用里与 Node 服务并排开发的 Rust 内核，由 `crates/` 下的多个 crate 分层组成，覆盖最小的单章生成闭环：小说与章节读写、运行与恢复、系统凭据保存模型密钥。
+
+它不是桌面应用的产品后端。自动导演、章节生产、Prompt、RAG、任务中心等全部产品能力，由安装包内置的 Node 服务（sidecar）提供，运行合同见 [Tauri 桌面壳与 Node 本地服务 sidecar](./tauri-node-sidecar.md)。桌面壳目前给内核接的是 `UnconfiguredProvider`，本地生成还没有接入真实模型。
 
 ## 架构分层
 
@@ -37,13 +39,7 @@
 
 #### 1. **Tauri 命令层** (`src-tauri/src/lib.rs`)
 - **职责**：HTTP/IPC 边界、请求反序列化、响应序列化
-- **命令清单**：
-  - `list_chapters(novel_id)` - 查询本书所有章节
-  - `get_model_setup()` - 读取模型密钥（从系统凭据）
-  - `save_model_setup(endpoint, model, api_key)` - 保存配置
-  - `cancel_generation(run_id)` - 中止生成任务
-  - `get_chapters_metadata()` - 章节元数据同步
-  - `sync_chapter()` - 章节版本同步
+- **命令清单**：见下文“Tauri 命令集合”。壳层的启动快照、日志目录和重启命令属于 Node sidecar 管理，不经过内核。
 - **核心约束**：
   - 不含业务逻辑，只负责参数传递
   - 所有异步操作通过 `State<AppState>` 访问
@@ -158,28 +154,21 @@ INSERT INTO schema_migration(version, applied_at)
 
 ### 完整命令清单
 
-| 命令 | 输入 | 输出 | 用途 |
-|------|------|------|------|
-| `list_chapters` | `novel_id: String` | `Vec<ChapterSnapshot>` | 查询章节列表 |
-| `get_model_setup` | — | `Option<ModelSetupView>` | 读取密钥配置 |
-| `save_model_setup` | `SaveModelSetupRequest` | `ModelSetupView` | 保存 API Key 到系统凭据 |
-| `cancel_generation` | `run_id: String` | `()` | 中止生成 |
-| `get_chapters_metadata` | — | `Vec<ChapterMetadata>` | 元数据同步 |
-| `sync_chapter` | `chapter_id: String` | `Chapter` | 版本同步 |
-| `open_run` | `OpenRunRequest` | `CommandOutcome` | 启动生成任务 |
-| `commit_run` | `run_id, result` | `()` | 提交任务结果 |
+命令注册在 `src-tauri/src/lib.rs`。每个命令都要同时出现在 `src-tauri/build.rs` 的命令清单和 `src-tauri/capabilities/default.json` 的权限里，否则前端调用会被权限层拒绝。
+
+| 命令 | 用途 |
+|------|------|
+| `list_novels` / `create_novel` | 小说列表与新建 |
+| `list_chapters` / `create_chapter` / `get_chapter` / `save_chapter` | 章节读写，保存时校验版本 |
+| `open_run` | 打开一次单章生成运行 |
+| `approve_run` / `cancel_run` / `resume_run` | 确认、停止、恢复运行 |
+| `cancel_generation` | 中止正在进行的模型调用 |
+| `replay_run` / `subscribe_run` | 补读与订阅运行事件 |
+| `get_model_setup` / `save_model_setup` / `has_api_key` | 模型配置与系统凭据 |
 
 ### 错误处理
 
-所有命令返回 `Result<T, AppError>`，客户端统一处理：
-
-```rust
-pub enum AppError {
-    PortError(PortError),           // 端口/存储层错误
-    RuntimeFault(String),            // 运行时异常
-    InvalidInput(String),            // 参数验证失败
-}
-```
+内核命令返回 `Result<T, AppError>`。`AppError` 序列化为 `{ code, message, retryable, details }`，`code` 取值为 `VALIDATION`、`CONFLICT`、`NOT_FOUND`、`CANCELLED`、`MODEL_RATE_LIMIT`、`STORAGE_CORRUPT`、`INTEGRITY_ERROR`，前端类型见 `client/src/platform/desktopTransport.ts`。
 
 ---
 
@@ -187,20 +176,23 @@ pub enum AppError {
 
 ### 不替换，并排
 
-- Tauri 本地内核 **不替换** 既有 Express + Prisma Node 服务
-- **并排运行**：Desktop UI 可同时调用本地 Rust 命令或远程 Node API
-- **迁移路径**：未来可选逐步迁移业务逻辑到 Rust 层
+- Tauri 本地内核 **不替换** 既有 Express + Prisma Node 服务。
+- Tauri 安装包内置 Node 运行时和编译后的 server，由 Rust 壳层在本机随机端口启动；桌面界面的全部产品功能都走这条 HTTP 链路。
+- **迁移路径**：按模块把对应 HTTP 接口逐个迁到 Rust；迁移完成前，Node 服务仍是产品主链路。
 
 ### 当前调用路由
 
 ```
 Desktop UI
     │
-    ├─→ 本地命令：list_chapters, get_model_setup, cancel_generation
-    │   (Tauri → Rust Kernel)
+    ├─→ 产品功能（自动导演、章节生产、设置、任务中心……）
+    │   HTTP → 安装包内置的 Node 服务（127.0.0.1:<每次启动分配的端口>）
     │
-    └─→ 云端 API：create_chapter, accept_chapter, ...
-        (HTTP → Node Express)
+    ├─→ 本地创作页：list_novels、list_chapters、open_run……
+    │   Tauri IPC → Rust 内核
+    │
+    └─→ 启动页：get_desktop_bootstrap_snapshot、open_desktop_logs_directory、restart_desktop_app
+        Tauri IPC → Rust 壳层（管理 Node 服务）
 ```
 
 ---
@@ -239,6 +231,7 @@ Desktop UI
 | 文件 | 用途 |
 |------|------|
 | `src-tauri/src/lib.rs` | Tauri 命令入口 |
+| `src-tauri/src/node_backend/` | 内置 Node 服务的启动、健康检查与启动快照 |
 | `crates/novel-application/src/` | 应用用例 |
 | `crates/novel-domain/src/` | 领域模型 |
 | `crates/novel-storage-sqlite/src/` | 数据库适配器 |

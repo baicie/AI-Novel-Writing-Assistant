@@ -1,5 +1,7 @@
 # 🎉 **本地创作项目发布完成 - 最终总结**
 
+> **范围说明**：本文总结的是 Rust 本地创作内核（`crates/`、`src-tauri/`）的阶段性工作，不代表产品后端已经迁移到 Rust。自动导演、章节生产、Prompt Registry、RAG、任务中心等全部产品能力仍由 `server/` 的 Node 服务提供；Tauri 安装包通过内置的 Node sidecar 运行这套服务。Rust 内核目前只覆盖最小的单章生成闭环，本地生成还没有接入真实模型。当前边界以 [Tauri 桌面壳与 Node 本地服务 sidecar](../wiki/architecture/tauri-node-sidecar.md) 和 [本地 Rust 创作内核](../wiki/architecture/rust-native-kernel.md) 为准。
+
 ## ✅ **发布状态：成功**
 
 **版本**：v0.5.7  

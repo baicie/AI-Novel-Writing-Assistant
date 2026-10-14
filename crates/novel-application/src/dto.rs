@@ -2,6 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use novel_domain::{
+    CreationExperience, NarrativeForm, ProjectMode, WritingMode,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NovelSummary {
@@ -9,7 +13,122 @@ pub struct NovelSummary {
     pub title: String,
     pub description: String,
     pub status: String,
+    pub creation_experience: String,
+    pub narrative_form: String,
+    pub writing_mode: String,
+    pub project_mode: String,
     pub updated_at: i64,
+}
+
+/// 小说完整详情，含 setup 阶段的所有字段。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NovelDetail {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub creation_experience: String,
+    pub narrative_form: String,
+    pub target_audience: String,
+    pub book_selling_point: String,
+    pub competing_feel: String,
+    pub first_30_chapter_promise: String,
+    pub commercial_tags: Vec<String>,
+    pub genre_id: Option<String>,
+    pub primary_story_mode_id: Option<String>,
+    pub secondary_story_mode_id: Option<String>,
+    pub world_id: Option<String>,
+    pub writing_mode: String,
+    pub project_mode: String,
+    pub narrative_pov: Option<String>,
+    pub pace_preference: Option<String>,
+    pub style_tone: String,
+    pub emotion_intensity: Option<String>,
+    pub ai_freedom: Option<String>,
+    pub default_chapter_length: Option<i32>,
+    pub estimated_chapter_count: Option<i32>,
+    pub project_status: String,
+    pub storyline_status: String,
+    pub outline_status: String,
+    pub resource_ready_score: i32,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 小说列表的查询条件。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListNovelsQuery {
+    pub page: Option<i32>,
+    pub limit: Option<i32>,
+    pub search: Option<String>,
+    pub status: Option<String>,
+    pub narrative_form: Option<String>,
+    pub writing_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListNovelsResult {
+    pub items: Vec<NovelSummary>,
+    pub page: i32,
+    pub limit: i32,
+    pub total: i64,
+}
+
+/// 小说可更新字段集。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpdateNovelFields {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub target_audience: Option<Option<String>>,
+    pub book_selling_point: Option<Option<String>>,
+    pub competing_feel: Option<Option<String>>,
+    pub first_30_chapter_promise: Option<Option<String>>,
+    pub commercial_tags: Option<Option<Vec<String>>>,
+    pub genre_id: Option<Option<String>>,
+    pub primary_story_mode_id: Option<Option<String>>,
+    pub secondary_story_mode_id: Option<Option<String>>,
+    pub world_id: Option<Option<String>>,
+    pub narrative_form: Option<String>,
+    pub writing_mode: Option<String>,
+    pub project_mode: Option<String>,
+    pub narrative_pov: Option<Option<String>>,
+    pub pace_preference: Option<Option<String>>,
+    pub style_tone: Option<Option<String>>,
+    pub emotion_intensity: Option<Option<String>>,
+    pub ai_freedom: Option<Option<String>>,
+    pub default_chapter_length: Option<Option<i32>>,
+    pub estimated_chapter_count: Option<Option<i32>>,
+    pub project_status: Option<String>,
+    pub storyline_status: Option<String>,
+    pub outline_status: Option<String>,
+    pub resource_ready_score: Option<i32>,
+}
+
+/// 创建小说时的输入，比 Phase 1 的 `NewNovel` 多 setup 字段。
+#[derive(Debug, Clone)]
+pub struct CreateNovelInput {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub narrative_form: NarrativeForm,
+    pub writing_mode: WritingMode,
+    pub project_mode: ProjectMode,
+    pub creation_experience: CreationExperience,
+    pub target_audience: String,
+    pub book_selling_point: String,
+    pub competing_feel: String,
+    pub first_30_chapter_promise: String,
+    pub commercial_tags: Vec<String>,
+    pub genre_id: Option<String>,
+    pub primary_story_mode_id: Option<String>,
+    pub secondary_story_mode_id: Option<String>,
+    pub world_id: Option<String>,
+    pub style_tone: String,
+    pub default_chapter_length: Option<i32>,
+    pub estimated_chapter_count: Option<i32>,
+    pub now_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,6 +342,50 @@ pub fn event_from_stored(
         },
         _ => return None,
     })
+}
+
+/// 任务中心顶部数字概览。
+///
+/// 3.0a 阶段：只统计 Rust 内核已有表（`workflow_control` + `quality_debt`）。
+/// 其他业务类目（拆书 / 图像 / 知识 / AgentRun / 风格提取 / 流水线）在 Rust 化前固定返回 0，
+/// 等 3.0b~f 完成后再补全。字段保持和 Node 端 `TaskOverviewSummary` 兼容，前端不会因字段缺失报错。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskOverviewSummary {
+    pub queued_count: i64,
+    pub running_count: i64,
+    pub failed_count: i64,
+    pub cancelled_count: i64,
+    pub waiting_approval_count: i64,
+    pub recovery_candidate_count: i64,
+}
+
+/// 单条待恢复任务摘要。
+///
+/// 字段集合对齐 Node 端 `RecoverableTaskSummary` 的核心子集：
+/// `id / kind / title / ownerLabel / status / currentStage / currentItemLabel /
+///  resumeAction / sourceRoute / recoveryHint`。
+/// 3.0a 阶段 `kind` 只会有 `novel_workflow`，其他业务项在 Rust 化后再补全。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverableTaskSummary {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub owner_label: String,
+    pub status: String,
+    pub current_stage: Option<String>,
+    pub current_item_label: Option<String>,
+    pub resume_action: String,
+    pub source_route: String,
+    pub recovery_hint: String,
+}
+
+/// 任务恢复候选列表响应。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverableTaskListResponse {
+    pub items: Vec<RecoverableTaskSummary>,
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import * as desktopShell from "@/platform/desktopTransport";
 import { APP_RUNTIME } from "./constants";
 
 export type DesktopBootstrapState = "launching" | "starting-server" | "loading-ui" | "ready" | "error";
@@ -80,12 +81,70 @@ const DEFAULT_UPDATER_SNAPSHOT: DesktopUpdaterSnapshot = {
   lastCheckedAt: null,
 };
 
-function getDesktopBridge() {
+type DesktopBridge = NonNullable<Window["__AI_NOVEL_DESKTOP__"]>;
+
+const SHELL_STARTUP_POLL_MS = 400;
+const SHELL_WATCH_POLL_MS = 3_000;
+
+let shellBridge: DesktopBridge | null = null;
+
+async function readShellBootstrapSnapshot(): Promise<DesktopBootstrapSnapshot> {
+  const { updatedAtMs, ...snapshot } = await desktopShell.getDesktopShellBootstrap();
+  return { ...snapshot, updatedAt: new Date(updatedAtMs).toISOString() };
+}
+
+function createShellBridge(): DesktopBridge {
+  return {
+    getBootstrapSnapshot: readShellBootstrapSnapshot,
+    subscribeBootstrapState: (listener) => {
+      let stopped = false;
+      let timer: number | undefined;
+      let lastKey = "";
+
+      const poll = async () => {
+        const snapshot = await readShellBootstrapSnapshot().catch(() => null);
+        if (stopped) {
+          return;
+        }
+        if (snapshot) {
+          const key = `${snapshot.state}|${snapshot.stage}|${snapshot.updatedAt}`;
+          if (key !== lastKey) {
+            lastKey = key;
+            listener(snapshot);
+          }
+        }
+        // The shell keeps reporting after startup so a local server crash brings back the recovery screen.
+        timer = window.setTimeout(poll, snapshot?.state === "ready" ? SHELL_WATCH_POLL_MS : SHELL_STARTUP_POLL_MS);
+      };
+
+      void poll();
+      return () => {
+        stopped = true;
+        window.clearTimeout(timer);
+      };
+    },
+    openLogsDirectory: () => desktopShell.openDesktopShellLogsDirectory(),
+    copyLogPath: async () => {
+      const { logFile } = await readShellBootstrapSnapshot();
+      await navigator.clipboard?.writeText(logFile).catch(() => undefined);
+      return logFile;
+    },
+    restartApp: () => desktopShell.restartDesktopShell(),
+  };
+}
+
+function getDesktopBridge(): DesktopBridge | null {
   if (typeof window === "undefined" || APP_RUNTIME !== "desktop") {
     return null;
   }
-
-  return window.__AI_NOVEL_DESKTOP__ ?? null;
+  if (window.__AI_NOVEL_DESKTOP__) {
+    return window.__AI_NOVEL_DESKTOP__;
+  }
+  if (!desktopShell.hasDesktopShell()) {
+    return null;
+  }
+  shellBridge ??= createShellBridge();
+  return shellBridge;
 }
 
 export function notifyDesktopRendererReady(): void {
@@ -110,6 +169,10 @@ export async function openDesktopLogsDirectory(): Promise<void> {
 
 export async function copyDesktopLogPath(): Promise<string | undefined> {
   return getDesktopBridge()?.copyLogPath?.();
+}
+
+export function canBundleDesktopLogs(): boolean {
+  return Boolean(getDesktopBridge()?.bundleLogs);
 }
 
 export async function bundleDesktopLogs(): Promise<string | null> {

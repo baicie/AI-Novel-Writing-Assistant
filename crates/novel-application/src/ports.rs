@@ -1,10 +1,16 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use novel_domain::{ArtifactView, ControlEvent, RunControl};
+use novel_domain::{
+    ArtifactView, ControlEvent, CreationExperience, FirstNovelOnboarding, Genre, RunControl,
+    StoryMode, World,
+};
 use novel_workflow::AttemptView;
 
-use crate::dto::{ChapterSnapshot, NovelSummary, RunContract};
+use crate::dto::{
+    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail,
+    NovelSummary, RecoverableTaskSummary, RunContract, TaskOverviewSummary, UpdateNovelFields,
+};
 use crate::error::PortError;
 
 #[derive(Debug, Clone)]
@@ -256,7 +262,29 @@ impl ModelSecrets for NoModelSecrets {
 #[async_trait]
 pub trait NovelRepository: Send + Sync {
     async fn list_novels(&self) -> Result<Vec<NovelSummary>, PortError>;
+    async fn list_novels_paginated(
+        &self,
+        query: &ListNovelsQuery,
+    ) -> Result<ListNovelsResult, PortError>;
     async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError>;
+    async fn create_novel_with_setup(
+        &self,
+        input: CreateNovelInput,
+    ) -> Result<NovelDetail, PortError>;
+    async fn get_novel(&self, id: &str) -> Result<NovelDetail, PortError>;
+    async fn update_novel(
+        &self,
+        id: &str,
+        fields: &UpdateNovelFields,
+        now_ms: i64,
+    ) -> Result<NovelDetail, PortError>;
+    async fn delete_novel(&self, id: &str) -> Result<(), PortError>;
+    async fn set_creation_experience(
+        &self,
+        id: &str,
+        experience: CreationExperience,
+        now_ms: i64,
+    ) -> Result<NovelDetail, PortError>;
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
     async fn get_chapter(
@@ -275,6 +303,48 @@ pub trait NovelRepository: Send + Sync {
         revision_id: &str,
         now_ms: i64,
     ) -> Result<PromoteOutcome, PortError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct NewWorld {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub overview_summary: String,
+    pub source_template_id: Option<String>,
+    pub owner_novel_id: Option<String>,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UpdateWorldFields {
+    pub name: Option<String>,
+    pub description: Option<Option<String>>,
+    pub overview_summary: Option<Option<String>>,
+    pub source_template_id: Option<Option<String>>,
+    pub owner_novel_id: Option<Option<String>>,
+    pub status: Option<String>,
+}
+
+#[async_trait]
+pub trait WorldRepository: Send + Sync {
+    async fn list_worlds(&self) -> Result<Vec<World>, PortError>;
+    async fn get_world(&self, id: &str) -> Result<Option<World>, PortError>;
+    async fn create_world(&self, world: NewWorld) -> Result<World, PortError>;
+    async fn update_world(
+        &self,
+        id: &str,
+        fields: &UpdateWorldFields,
+        now_ms: i64,
+    ) -> Result<World, PortError>;
+    async fn delete_world(&self, id: &str) -> Result<(), PortError>;
+}
+
+#[async_trait]
+pub trait LookupRepository: Send + Sync {
+    async fn list_genres(&self) -> Result<Vec<Genre>, PortError>;
+    async fn list_story_modes(&self) -> Result<Vec<StoryMode>, PortError>;
+    async fn get_first_novel_onboarding(&self) -> Result<FirstNovelOnboarding, PortError>;
 }
 
 #[async_trait]
@@ -367,4 +437,17 @@ pub trait KnowledgeRepository: Send + Sync {
     ) -> Result<Vec<SearchHit>, PortError>;
     async fn record_trace(&self, trace: RetrievalTrace) -> Result<(), PortError>;
     async fn latest_trace(&self, novel_id: &str) -> Result<Option<RetrievalTrace>, PortError>;
+}
+
+/// 任务中心只读数据源。
+///
+/// 3.0a 阶段：只覆盖 `workflow_run` / `workflow_control` / `quality_debt` 三张表，
+/// 用于构建运行记录页的顶部统计和"待恢复任务"清单。其他 5 类业务（拆书 / 流水线 /
+/// 图像 / 知识 / 风格提取 / AgentRun）的统计和恢复候选项在 3.0b~f 阶段补全。
+#[async_trait]
+pub trait TaskCenterRepository: Send + Sync {
+    /// 顶部数字概览：auto_director run 的状态分组计数 + 质量债待恢复数。
+    async fn task_overview(&self) -> Result<TaskOverviewSummary, PortError>;
+    /// 待恢复任务清单：auto_director run 中 `status='paused'` 且有 `failure_reason` 的项。
+    async fn list_recovery_candidates(&self) -> Result<Vec<RecoverableTaskSummary>, PortError>;
 }

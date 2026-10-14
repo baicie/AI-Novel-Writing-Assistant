@@ -27,7 +27,10 @@ async fn runtime(
 ) -> Runtime {
     Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
-        runs: kernel,
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
         llm,
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
@@ -404,6 +407,9 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
     let runtime = Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
         runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
         llm: llm.clone(),
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),

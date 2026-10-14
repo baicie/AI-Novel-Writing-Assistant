@@ -4,17 +4,6 @@
   "description": "本地创作窗口可以调用的创作命令",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "allow-list-novels",
-    "allow-create-novel",
-    "allow-create-chapter",
-    "allow-get-chapter",
-    "allow-save-chapter",
-    "allow-open-run",
-    "allow-approve-run",
-    "allow-cancel-run",
-    "allow-resume-run",
-    "allow-replay-run",
-    "allow-subscribe-run"
+    "core:default"
   ]
 }
