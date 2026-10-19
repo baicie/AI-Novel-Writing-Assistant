@@ -10,16 +10,16 @@ mod workflow;
 
 pub use chapter::{ChapterProtection, can_mark_stale, ensure_can_promote};
 pub use entities::{
-    Character, Chapter, Novel, NovelMode, NovelStatus, QualityIssue, RunContract, RunStatus,
+    Character, Chapter, Novel, NovelMode, NovelStatus, QualityIssue, RunContract,
     WorldSetting, WorkflowStep, WorkflowStepType, StepStatus,
 };
 pub use error::DomainError;
 pub use run::{
-    ControlEvent, PauseKind, RunControl, RunGate, RunPause, StopSignalKind, apply_event,
+    ControlEvent, PauseKind, RunControl, RunGate, RunPause, RunStatus, StopSignalKind, apply_event,
     initial_control, note_lease, parse_status,
 };
 pub use setup::{
     CreationExperience, FirstNovelMilestone, FirstNovelOnboarding, Genre, NarrativeForm,
-    ProjectMode, QuickSetupStatus, StoryMode, WritingMode,
+    ProjectMode, QuickSetupStatus, StoryMode, World, WritingMode,
 };
 pub use workflow::{ArtifactStatus, ArtifactView};

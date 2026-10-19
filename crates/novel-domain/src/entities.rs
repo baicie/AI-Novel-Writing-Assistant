@@ -389,8 +389,8 @@ pub struct RunContract {
     /// 所属小说 ID
     pub novel_id: String,
     
-    /// 运行状态
-    pub status: RunStatus,
+    /// 运行状态（使用 novel_domain::RunStatus）
+    pub status_str: String,  // 存储为字符串
     
     /// 开始章节号
     pub start_chapter: i32,
@@ -414,22 +414,6 @@ pub struct RunContract {
     pub completed_at: Option<i64>,
 }
 
-/// 运行状态
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-    /// 队列中
-    Queued,
-    /// 执行中
-    Running,
-    /// 已暂停
-    Paused,
-    /// 已完成
-    Completed,
-    /// 已失败
-    Failed,
-}
-
 impl RunContract {
     /// 创建新运行合同
     pub fn new(
@@ -442,7 +426,7 @@ impl RunContract {
         Self {
             id,
             novel_id,
-            status: RunStatus::Queued,
+            status_str: "Queued".to_string(),
             start_chapter,
             end_chapter,
             completed_chapters: 0,
