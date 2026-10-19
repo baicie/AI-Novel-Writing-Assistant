@@ -9,6 +9,7 @@ mod runtime;
 mod services_chapter;
 mod services_novel;
 mod services_run;
+mod services_integration_test;
 mod setup;
 mod tasks;
 mod usecase;
