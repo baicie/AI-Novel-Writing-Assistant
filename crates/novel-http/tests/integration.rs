@@ -420,3 +420,190 @@ async fn get_chapter_full_returns_content() {
 
     server.stop().await;
 }
+
+/// 测试：JSON 轮询模式仍然正常工作（向后兼容）
+#[tokio::test]
+async fn json_replay_mode_works() {
+    let server = TestServer::start().await;
+    let client = reqwest::Client::new();
+
+    // 创建小说和章节
+    let novel = serde_json::json!({
+        "title": "SSE 测试小说",
+        "description": "测试",
+        "narrativeForm": "third_person",
+        "writingMode": "ai_generated",
+        "projectMode": "structured",
+        "creationExperience": "complete_beginner",
+    });
+    let response = client
+        .post(format!("{}/api/novels", server.base_url))
+        .json(&novel)
+        .send()
+        .await
+        .expect("create novel");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let novel_id = body["data"]["id"].as_str().expect("novel id");
+
+    let chapter = serde_json::json!({
+        "title": "第一章",
+        "sortOrder": 1,
+    });
+    let response = client
+        .post(format!(
+            "{}/api/novels/{}/chapters",
+            server.base_url, novel_id
+        ))
+        .json(&chapter)
+        .send()
+        .await
+        .expect("create chapter");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let chapter_id = body["data"][0]["id"].as_str().expect("chapter id");
+
+    // 打开运行
+    let run_input = serde_json::json!({
+        "commandId": "cmd-test-123",
+        "targetChapterId": chapter_id,
+        "provider": "openai",
+        "model": "gpt-4",
+        "promptVersions": { "chapter_draft": "chapter-draft-v1" },
+        "tokenBudget": 8000,
+        "maxAutomaticRetries": 0,
+        "endpoint": "https://api.openai.com",
+        "allowLocalhostHttp": false,
+    });
+    let response = client
+        .post(format!("{}/api/novels/{}/runs", server.base_url, novel_id))
+        .json(&run_input)
+        .send()
+        .await
+        .expect("open run");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    let run_id = body["data"]["runId"].as_str().expect("run id");
+
+    // 查询事件（JSON 模式，不指定 stream 参数或 stream=false）
+    let response = client
+        .get(format!("{}/api/runs/{}/events?afterSeq=0", server.base_url, run_id))
+        .send()
+        .await
+        .expect("replay");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["success"], true);
+    assert!(
+        body["data"].is_array(),
+        "replay 应该返回数组，当前得到 {:?}",
+        body["data"]
+    );
+
+    // 查询时指定 stream=false，应该仍返回 JSON
+    let response = client
+        .get(format!(
+            "{}/api/runs/{}/events?afterSeq=0&stream=false",
+            server.base_url, run_id
+        ))
+        .send()
+        .await
+        .expect("replay json");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["success"], true);
+    assert!(body["data"].is_array());
+
+    server.stop().await;
+}
+
+/// 测试：confirm_event 端点可调用
+#[tokio::test]
+async fn confirm_event_endpoint_works() {
+    let server = TestServer::start().await;
+    let client = reqwest::Client::new();
+
+    // 创建小说和章节
+    let novel = serde_json::json!({
+        "title": "确认测试小说",
+        "description": "测试",
+        "narrativeForm": "third_person",
+        "writingMode": "ai_generated",
+        "projectMode": "structured",
+        "creationExperience": "complete_beginner",
+    });
+    let response = client
+        .post(format!("{}/api/novels", server.base_url))
+        .json(&novel)
+        .send()
+        .await
+        .expect("create novel");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let novel_id = body["data"]["id"].as_str().expect("novel id");
+
+    let chapter = serde_json::json!({
+        "title": "第一章",
+        "sortOrder": 1,
+    });
+    let response = client
+        .post(format!(
+            "{}/api/novels/{}/chapters",
+            server.base_url, novel_id
+        ))
+        .json(&chapter)
+        .send()
+        .await
+        .expect("create chapter");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let chapter_id = body["data"][0]["id"].as_str().expect("chapter id");
+
+    // 打开运行
+    let run_input = serde_json::json!({
+        "commandId": "cmd-test-456",
+        "targetChapterId": chapter_id,
+        "provider": "openai",
+        "model": "gpt-4",
+        "promptVersions": { "chapter_draft": "chapter-draft-v1" },
+        "tokenBudget": 8000,
+        "maxAutomaticRetries": 0,
+        "endpoint": "https://api.openai.com",
+        "allowLocalhostHttp": false,
+    });
+    let response = client
+        .post(format!("{}/api/novels/{}/runs", server.base_url, novel_id))
+        .json(&run_input)
+        .send()
+        .await
+        .expect("open run");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let run_id = body["data"]["runId"].as_str().expect("run id");
+
+    // 调用 confirm_event 端点
+    let confirm_body = serde_json::json!({
+        "lastConfirmedSeq": 5,
+    });
+    let response = client
+        .post(format!("{}/api/runs/{}/confirm", server.base_url, run_id))
+        .json(&confirm_body)
+        .send()
+        .await
+        .expect("confirm");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["confirmed"], true);
+    // 返回的是 snake_case 格式 last_confirmed_seq
+    assert_eq!(body["data"]["last_confirmed_seq"], 5);
+
+    // 验证无效序号被拒绝
+    let confirm_body = serde_json::json!({
+        "lastConfirmedSeq": -1,
+    });
+    let response = client
+        .post(format!("{}/api/runs/{}/confirm", server.base_url, run_id))
+        .json(&confirm_body)
+        .send()
+        .await
+        .expect("confirm negative");
+    assert_eq!(response.status(), 400);
+
+    server.stop().await;
+}
