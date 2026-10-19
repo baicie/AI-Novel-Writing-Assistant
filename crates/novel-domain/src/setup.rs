@@ -112,6 +112,7 @@ impl NarrativeForm {
 }
 
 /// 世界观实体（一个世界观模板，可以被多本小说引用）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct World {
