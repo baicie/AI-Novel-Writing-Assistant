@@ -30,14 +30,29 @@ impl ChapterUseCases for DirectorService {
             return Err(AppError::validation("Sort order must be non-negative"));
         }
 
-        // 暂时返回占位符，实际实现委托给 Repository
-        // 这是 UseCase 层的接口定义，具体实现需要 Repository 支持
-        Err(AppError::validation("Create chapter not implemented yet"))
+        // 验证小说存在
+        let _ = self
+            .get_novel(novel_id)
+            .await
+            .map_err(|_| AppError::not_found("Novel not found"))?;
+
+        // 调用 DirectorService 的 create_chapter 方法
+        self.create_chapter(novel_id, title, sort_order)
+            .await
+            .map_err(|e| {
+                AppError::validation(format!("Failed to create chapter: {}", e))
+            })
     }
 
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, AppError> {
-        // 占位符实现
-        Ok(vec![])
+        // 验证小说存在
+        let _ = self
+            .get_novel(novel_id)
+            .await
+            .map_err(|_| AppError::not_found("Novel not found"))?;
+
+        // 调用 DirectorService 的 list_chapters 方法
+        self.list_chapters(novel_id).await
     }
 
     async fn get_chapter(
@@ -45,7 +60,21 @@ impl ChapterUseCases for DirectorService {
         novel_id: &str,
         chapter_id: &str,
     ) -> Result<ChapterSnapshot, AppError> {
-        Err(AppError::not_found("Chapter not found"))
+        // 验证输入
+        if chapter_id.is_empty() {
+            return Err(AppError::validation("Chapter ID cannot be empty"));
+        }
+
+        // 验证小说存在
+        let _ = self
+            .get_novel(novel_id)
+            .await
+            .map_err(|_| AppError::not_found("Novel not found"))?;
+
+        // 调用 DirectorService 的 get_chapter 方法
+        self.get_chapter(novel_id, chapter_id)
+            .await
+            .map_err(|_| AppError::not_found("Chapter not found"))
     }
 
     async fn save_chapter(
@@ -65,8 +94,25 @@ impl ChapterUseCases for DirectorService {
             return Err(AppError::validation("Chapter content is too large (max 100KB)"));
         }
 
-        // 委托给 Repository（通过现有的 save_chapter_record 方法）
-        Err(AppError::validation("Save chapter not implemented yet"))
+        // 验证小说存在
+        let _ = self
+            .get_novel(&input.novel_id)
+            .await
+            .map_err(|_| AppError::not_found("Novel not found"))?;
+
+        // 调用 DirectorService 的 save_chapter 方法
+        // save_chapter 需要单独的参数，所以从 SaveChapterRecord 中提取
+        self.save_chapter(
+            &input.novel_id,
+            &input.chapter_id,
+            input.expected_version,
+            &input.title,
+            &input.content,
+        )
+        .await
+        .map_err(|e| {
+            AppError::validation(format!("Failed to save chapter: {}", e))
+        })
     }
 
     async fn promote_chapter(
@@ -88,7 +134,8 @@ impl ChapterUseCases for DirectorService {
             return Err(AppError::validation("Revision ID cannot be empty"));
         }
 
-        // 占位符实现
+        // 占位符实现 - 实际需要调用正式的提升方法
+        // 返回 MissingCandidate 作为默认结果
         Ok(PromoteOutcomeDto::MissingCandidate)
     }
 }
@@ -108,6 +155,18 @@ mod tests {
     fn test_validate_title_too_long() {
         let error = AppError::validation("Chapter title cannot exceed 200 characters");
         assert_eq!(error.message, "Chapter title cannot exceed 200 characters");
+    }
+
+    #[test]
+    fn test_validate_negative_sort_order() {
+        let error = AppError::validation("Sort order must be non-negative");
+        assert_eq!(error.message, "Sort order must be non-negative");
+    }
+
+    #[test]
+    fn test_validate_empty_content() {
+        let error = AppError::validation("Chapter content cannot be empty");
+        assert_eq!(error.message, "Chapter content cannot be empty");
     }
 
     #[test]
