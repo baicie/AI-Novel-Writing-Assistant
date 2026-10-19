@@ -3,6 +3,7 @@ mod dto;
 mod error;
 mod hash;
 mod hub;
+mod http_error;
 mod http_request;
 mod http_response;
 mod knowledge;
