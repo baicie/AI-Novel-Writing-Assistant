@@ -6,6 +6,7 @@ mod hub;
 mod http_error;
 mod http_request;
 mod http_response;
+mod http_routes;
 mod knowledge;
 mod ports;
 mod runtime;
