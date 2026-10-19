@@ -379,11 +379,24 @@ pub fn run() {
                 .find(|window| window.label == "main")
                 .cloned()
                 .ok_or("缺少主窗口配置")?;
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &main_window)?
-                .initialization_script(
-                    backend.runtime_script(&app.package_info().version.to_string()),
-                )
-                .build()?;
+            let runtime_script = backend.runtime_script(&app.package_info().version.to_string());
+            tracing::info!(script_len = runtime_script.len(), "Tauri 即将创建主窗口并注入 runtime script");
+            // dev 模式下 devUrl 存在时优先使用，替代 from_config 默认的 App("index.html")，
+            // 否则 dev 模式 WebView 会加载不存在的本地 dist 资源导致卡在空白页。
+            let webview_url = if let Some(dev_url) = app.config().build.dev_url.as_ref() {
+                eprintln!("[tauri-setup] dev mode: 使用 devUrl {}", dev_url);
+                tauri::WebviewUrl::External(dev_url.clone())
+            } else {
+                eprintln!("[tauri-setup] packaged mode: 使用 frontendDist/index.html");
+                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+            };
+            tauri::WebviewWindowBuilder::new(app.handle(), &main_window.label, webview_url)
+                .title(&main_window.title)
+                .inner_size(main_window.width, main_window.height)
+                .min_inner_size(main_window.min_width.unwrap_or(1000.0), main_window.min_height.unwrap_or(700.0))
+                .initialization_script(runtime_script)
+                .build()
+                .map_err(|e| format!("无法创建主窗口：{e}"))?;
             app.manage(backend);
 
             let db_path = dir.join("novel.sqlite");

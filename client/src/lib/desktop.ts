@@ -195,8 +195,32 @@ export function useDesktopBootstrap(): DesktopBootstrapSnapshot {
   const [snapshot, setSnapshot] = useState<DesktopBootstrapSnapshot>(DEFAULT_BOOTSTRAP_SNAPSHOT);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+    const runtimeGlobal = (window as Window & { __AI_NOVEL_RUNTIME__?: unknown }).__AI_NOVEL_RUNTIME__;
+    const isPackaged = (runtimeGlobal && typeof runtimeGlobal === "object" && "isPackaged" in runtimeGlobal)
+      ? Boolean((runtimeGlobal as { isPackaged?: unknown }).isPackaged)
+      : false;
+    // dev 模式下后端是 KernelIntegrated：axum server 在同一个 Tauri 进程里，
+    // bootstrap 状态在 setup 时已经 publish Ready，前端不必再调 Tauri IPC 拉一遍。
+    // 这里直接 assume ready 避免 Tauri 2 dev 模式下 WebView 注入 IPC channel 不稳定导致卡在启动页。
+    if (!isPackaged) {
+      setSnapshot({
+        state: "ready",
+        stage: "server-healthy",
+        title: "创作工作台已就绪",
+        detail: "本地创作服务运行正常。",
+        logDir: "",
+        logFile: "",
+        updatedAt: new Date().toISOString(),
+        canRetry: true,
+      });
+      return undefined;
+    }
     const bridge = getDesktopBridge();
     if (!bridge?.getBootstrapSnapshot) {
+      console.warn("[desktop-bridge] getDesktopBridge returned null, 启动页会一直 hold");
       return undefined;
     }
 
@@ -206,6 +230,8 @@ export function useDesktopBootstrap(): DesktopBootstrapSnapshot {
       if (!cancelled && nextSnapshot) {
         setSnapshot(nextSnapshot);
       }
+    }).catch((error: unknown) => {
+      console.error("[desktop-bridge] getBootstrapSnapshot failed", error);
     });
 
     const unsubscribe = bridge.subscribeBootstrapState?.((nextSnapshot) => {

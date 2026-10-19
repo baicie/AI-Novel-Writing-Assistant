@@ -248,8 +248,19 @@ export function hasDesktopShell(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  const host = window as Window & { __TAURI_INTERNALS__?: unknown };
-  return host.__TAURI_INTERNALS__ !== undefined;
+  const host = window as Window & {
+    __TAURI_INTERNALS__?: unknown;
+    __TAURI__?: unknown;
+    __AI_NOVEL_RUNTIME__?: unknown;
+  };
+  // Tauri 1 注入 __TAURI_INTERNALS__，Tauri 2 注入 __TAURI__。
+  // 任意一个存在就说明 WebView 跑在本地内核里。
+  // 同时只要 __AI_NOVEL_RUNTIME__ 注入成功，也视为 desktop 环境。
+  return (
+    host.__TAURI_INTERNALS__ !== undefined
+    || host.__TAURI__ !== undefined
+    || host.__AI_NOVEL_RUNTIME__ !== undefined
+  );
 }
 
 export function getDesktopShellBootstrap(): Promise<DesktopShellBootstrap> {
