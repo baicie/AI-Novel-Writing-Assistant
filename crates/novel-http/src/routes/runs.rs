@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
+use axum::response::{sse::Event, Sse, IntoResponse};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::time::sleep;
+use futures::Stream;
 
 use novel_application::{GenerationEvent, OpenRunInput};
 
@@ -103,17 +107,95 @@ pub async fn replay(
     State(state): State<KernelState>,
     Path(run_id): Path<String>,
     Query(query): Query<ReplayQuery>,
+) -> HttpResult<impl IntoResponse> {
+    if query.stream {
+        // SSE 流式响应
+        sse_stream(state, run_id, query.after_seq)
+            .await
+            .map(|stream| stream.into_response())
+    } else {
+        // JSON 数组响应（兼容旧模式）
+        json_replay(state, run_id, query.after_seq)
+            .await
+            .map(|json| json.into_response())
+    }
+}
+
+async fn json_replay(
+    state: KernelState,
+    run_id: String,
+    after_seq: i64,
 ) -> HttpResult<Json<Value>> {
     let events: Vec<GenerationEvent> = state
         .runtime
         .director
-        .replay(&run_id, query.after_seq)
+        .replay(&run_id, after_seq)
         .await
         .map_err(HttpError::from)?;
     Ok(Json(json!({
         "success": true,
         "data": events,
     })))
+}
+
+async fn sse_stream(
+    state: KernelState,
+    run_id: String,
+    after_seq: i64,
+) -> HttpResult<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>> {
+    // 查询初始事件
+    let initial_events = state
+        .runtime
+        .director
+        .replay(&run_id, after_seq)
+        .await
+        .map_err(HttpError::from)?;
+
+    let run_id_for_polling = run_id.clone();
+    let runtime = std::sync::Arc::new(state.runtime);
+
+    // 使用 async_stream 宏创建流
+    let stream = async_stream::stream! {
+        // 1. 发送历史事件
+        for event in initial_events.iter() {
+            if let Ok(json) = serde_json::to_string(&event) {
+                yield Ok(Event::default().data(json));
+            }
+        }
+
+        // 2. 计算最后一条历史事件的序号
+        let mut last_seq = initial_events
+            .last()
+            .and_then(|e| e.seq())
+            .unwrap_or(after_seq);
+
+        // 3. 进入长轮询模式
+        loop {
+            sleep(Duration::from_millis(500)).await;
+
+            match runtime.director.replay(&run_id_for_polling, last_seq).await {
+                Ok(new_events) => {
+                    if !new_events.is_empty() {
+                        for event in &new_events {
+                            if let Ok(json) = serde_json::to_string(&event) {
+                                yield Ok(Event::default().data(json));
+                            }
+                            // 更新最后序号
+                            if let Some(seq) = event.seq() {
+                                last_seq = seq;
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // 错误时停止轮询
+                    break;
+                }
+            }
+        }
+    };
+
+    Ok(Sse::new(stream))
 }
 
 pub async fn cancel_generation(
@@ -160,4 +242,6 @@ pub struct ResumeBody {
 pub struct ReplayQuery {
     #[serde(default)]
     pub after_seq: i64,
+    #[serde(default)]
+    pub stream: bool,
 }

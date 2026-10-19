@@ -16,6 +16,8 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 tracing.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+async-stream = "0.3"
+futures = "0.3"
 novel-application.workspace = true
 novel-platform.workspace = true
 novel-storage-sqlite.workspace = true
