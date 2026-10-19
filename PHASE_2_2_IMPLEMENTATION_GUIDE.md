@@ -1,328 +1,324 @@
-# Phase 2.2 实现指南 - 工作流通道与事件流
+# Phase 2.2 实现指南 - SSE 实时事件流升级
 
-**目标**: 实现打开运行的完整流程和事件流端点，为自动导演的核心工作流链路做准备。
+**目标**: 将当前的 JSON 轮询升级为真正的 Server-Sent Events，实现实时的事件推送。
 
-## 前置条件
+**前置条件**:
+- ✓ Phase 2.1 完成（open_run、events_after、replay 已实现）
+- ✓ HTTP 路由已注册 `GET /api/runs/:rid/events`
+- ✓ GenerationEvent 事件类型已定义
 
-- ✓ Phase 2.1 完成（list_runs、get_chapter_full）
-- ✓ worker.rs 中的后台任务循环已实现
-- ✓ DirectorService 中的 open_run 基础框架已就位
+**核心任务**
 
-## 核心任务
+### 任务 1: 改造 replay 端点为 SSE 流（1 天）
 
-### 任务 1: 完善 open_run 的错误处理和状态初始化
+**当前状态**: `replay()` 返回 JSON 数组（整体响应）
 
-**目标文件**: `crates/novel-application/src/director.rs`
-
-**当前状态**: DirectorService::open_run 已经调用 WorkflowRepository::open_run，但缺少：
-- 章节存在性验证
-- 运行冲突检测的更好提示
-- 初始事件的记录
+**目标**: 支持两种响应模式
+- 查询模式：`GET /api/runs/:rid/events?afterSeq=100` → JSON 数组（兼容旧前端）
+- 流式模式：`GET /api/runs/:rid/events?stream=true` → text/event-stream（新前端）
 
 **实现步骤**:
 
 ```rust
-pub async fn open_run(&self, input: OpenRunInput) -> Result<CommandOutcome, AppError> {
-    // 1. 验证章节存在
-    let chapter = self.get_chapter(&input.novel_id, &input.target_chapter_id).await?;
-    
-    // 2. 验证提示词版本有效
-    let prompt_version = input.prompt_versions
-        .get("chapter_draft")
-        .map(String::as_str)
-        .unwrap_or("");
-    if resolve("chapter_draft", prompt_version).is_err() {
-        return Err(AppError::validation("正文提示词版本不存在。"));
-    }
-    
-    // 3. 验证端点有效
-    authorize_endpoint(&input.endpoint, input.allow_localhost_http)
-        .map_err(|e| AppError::validation(e.to_string()))?;
-    
-    // 4. 调用存储层打开运行
-    // WorkflowRepository::open_run 会：
-    //   - 检查是否有进行中的运行（有则报 Conflict）
-    //   - 创建 workflow_run 和 workflow_control 记录
-    //   - 插入 run_started 事件
-    
-    Ok(self.runs.open_run(record).await?)
-}
-```
-
-**验证**:
-- 章节不存在时返回 404
-- 同一小说内已有进行中的运行时返回 409 Conflict
-- 提示词版本无效时返回 400 Validation
-- 端点授权失败时返回 400 Validation
-
----
-
-### 任务 2: 实现 events_after 方法，支持事件分页查询
-
-**目标文件**: `crates/novel-storage-sqlite/src/workflow.rs`
-
-**当前状态**: WorkflowRepository trait 中已定义 `events_after(run_id, after_seq)` 方法。
-
-**实现逻辑**:
-
-```rust
-async fn events_after(
-    &self,
-    run_id: &str,
+#[derive(Deserialize)]
+pub struct ReplayQuery {
+    #[serde(default)]
     after_seq: i64,
-) -> Result<Vec<StoredEvent>, PortError> {
-    let rows = sqlx::query(
-        "SELECT run_id, seq, kind, step_id, payload_json, occurred_at
-         FROM workflow_event
-         WHERE run_id = ? AND seq > ?
-         ORDER BY seq ASC",
-    )
-    .bind(run_id)
-    .bind(after_seq)
-    .fetch_all(&self.pool)
-    .await
-    .map_err(map_sql)?;
-
-    let mut events = Vec::new();
-    for row in rows {
-        events.push(StoredEvent {
-            run_id: row.try_get("run_id").map_err(map_sql)?,
-            seq: row.try_get("seq").map_err(map_sql)?,
-            kind: row.try_get("kind").map_err(map_sql)?,
-            step_id: row.try_get("step_id").map_err(map_sql)?,
-            payload_json: row.try_get("payload_json").map_err(map_sql)?,
-            occurred_at: row.try_get("occurred_at").map_err(map_sql)?,
-        });
-    }
-    Ok(events)
+    #[serde(default)]
+    stream: bool,  // 新增：是否流式返回
 }
-```
 
-**用途**:
-- 历史事件回放：after_seq = 0 获取全部事件
-- 实时订阅：after_seq = 最后一条事件的 seq，用于断点续传
-
----
-
-### 任务 3: 在 DirectorService 中添加 replay 方法
-
-**目标文件**: `crates/novel-application/src/director.rs`
-
-**实现**:
-
-```rust
-pub async fn replay(&self, run_id: &str, after_seq: i64) -> Result<Vec<GenerationEvent>, AppError> {
-    let stored = self.runs.events_after(run_id, after_seq).await?;
-    let mut events = Vec::new();
-    for stored_event in stored {
-        if let Some(event) = event_from_stored(
-            &stored_event.run_id,
-            stored_event.seq,
-            &stored_event.kind,
-            stored_event.step_id,
-            &stored_event.payload_json,
-            stored_event.occurred_at,
-        ) {
-            events.push(event);
-        }
-    }
-    Ok(events)
-}
-```
-
----
-
-### 任务 4: 实现 SSE 事件流路由
-
-**目标文件**: `crates/novel-http/src/routes/runs.rs`
-
-**新增函数**: `stream_events`（SSE 端点）
-
-```rust
-use axum::response::sse::{Event, KeepAlive, Sse};
-use futures::stream::{self, Stream};
-use std::time::Duration;
-
-pub async fn stream_events(
+pub async fn replay(
     State(state): State<KernelState>,
     Path(run_id): Path<String>,
-    Query(query): Query<StreamQuery>,
-) -> HttpResult<Sse<impl Stream<Item = Result<Event, HttpError>>>> {
-    // 1. 查询历史事件（如果 after_seq 为 0）
-    let initial_events = state
-        .runtime
-        .director
-        .replay(&run_id, query.after_seq)
-        .await
-        .map_err(HttpError::from)?;
+    Query(query): Query<ReplayQuery>,
+) -> HttpResult<impl IntoResponse> {
+    if query.stream {
+        // SSE 流式响应
+        sse_stream(&state, &run_id, query.after_seq).await
+    } else {
+        // JSON 数组响应（兼容旧模式）
+        json_replay(&state, &run_id, query.after_seq).await
+    }
+}
 
-    let run_id_clone = run_id.clone();
+async fn sse_stream(
+    state: &KernelState,
+    run_id: &str,
+    after_seq: i64,
+) -> HttpResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let director = state.runtime.director.clone();
-    
-    // 2. 创建事件流（包括历史事件和订阅通道）
-    let stream = {
-        let initial = stream::iter(initial_events.into_iter().map(|e| {
-            serde_json::to_string(&e)
-                .ok()
-                .map(|data| Event::default().data(data))
-                .ok_or_else(|| HttpError::internal("事件序列化失败"))
-        }));
+    let run_id = run_id.to_string();
 
-        let subscription = stream::unfold(query.after_seq + initial_events.len() as i64, move |seq| {
-            let run_id = run_id_clone.clone();
-            let director = director.clone();
-            async move {
-                // 模拟长轮询（暂时实现）
-                // 后续可改为 tokio broadcast channel
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                
-                match director.replay(&run_id, seq).await {
-                    Ok(new_events) if !new_events.is_empty() => {
-                        Some((
-                            new_events.last().map(|e| e.seq().unwrap_or(seq)).unwrap_or(seq),
-                            seq + new_events.len() as i64,
-                        ))
+    let stream = async_stream::stream! {
+        // 1. 发送历史事件
+        match director.replay(&run_id, after_seq).await {
+            Ok(events) => {
+                for event in events {
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        yield Ok(Event::default().data(json));
                     }
-                    _ => None,
                 }
             }
-        })
-        .map(|seq| {
-            serde_json::json!({"seq": seq})
-                .to_string()
-                .ok()
-                .map(|data| Event::default().data(data))
-                .ok_or_else(|| HttpError::internal("心跳序列化失败"))
-        });
+            Err(_) => {
+                yield Ok(Event::default().data(json!({"error": "无法加载历史事件"})));
+            }
+        }
 
-        stream::chain(initial, subscription)
+        // 2. 进入长轮询模式（后续可升级为 broadcast）
+        let mut last_seq = after_seq + 1;
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            match director.replay(&run_id, last_seq - 1).await {
+                Ok(new_events) => {
+                    if !new_events.is_empty() {
+                        for event in new_events {
+                            if let Ok(json) = serde_json::to_string(&event) {
+                                yield Ok(Event::default().data(json));
+                            }
+                            last_seq = event.seq().unwrap_or(last_seq);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
     };
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamQuery {
-    #[serde(default)]
-    pub after_seq: i64,
+async fn json_replay(
+    state: &KernelState,
+    run_id: &str,
+    after_seq: i64,
+) -> HttpResult<impl IntoResponse> {
+    let events = state.runtime.director.replay(run_id, after_seq).await?;
+    Ok(Json(json!({
+        "data": events,
+        "ok": true,
+    })))
 }
 ```
 
-**注意**: 当前实现使用长轮询模拟 SSE。后续可升级为 tokio broadcast channel 实现真正的实时推送。
+**验证**:
+- ✓ `GET /api/runs/:rid/events?afterSeq=0` 返回 JSON 数组
+- ✓ `GET /api/runs/:rid/events?stream=true` 返回 text/event-stream
+- ✓ SSE 流正确处理新事件订阅
 
----
+### 任务 2: 实现事件流内存缓存（0.5 天）
 
-### 任务 5: 注册 SSE 路由
+**目标**: 减少数据库查询，缓存活跃运行的最近事件
 
-**目标文件**: `crates/novel-http/src/lib.rs`
-
-**修改**:
+**实现**:
 
 ```rust
-.route(
-    "/api/runs/:rid/events",
-    get(routes::runs::stream_events),  // 新增 SSE 端点
-)
+use std::sync::Arc;
+use dashmap::DashMap;
+
+pub struct EventCache {
+    // run_id -> Vec<(seq, GenerationEvent)>
+    active_runs: DashMap<String, Vec<(i64, GenerationEvent)>>,
+}
+
+impl EventCache {
+    pub fn new() -> Self {
+        Self {
+            active_runs: DashMap::new(),
+        }
+    }
+
+    pub fn record_event(&self, run_id: String, seq: i64, event: GenerationEvent) {
+        let mut entry = self.active_runs.entry(run_id).or_insert_with(Vec::new);
+        entry.push((seq, event));
+        
+        // 只保留最近 1000 条事件
+        if entry.len() > 1000 {
+            entry.drain(0..100);
+        }
+    }
+
+    pub fn get_events(&self, run_id: &str, after_seq: i64) -> Vec<GenerationEvent> {
+        self.active_runs
+            .get(run_id)
+            .map(|entry| {
+                entry
+                    .iter()
+                    .filter(|(seq, _)| *seq > after_seq)
+                    .map(|(_, event)| event.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn clear_run(&self, run_id: &str) {
+        self.active_runs.remove(run_id);
+    }
+}
 ```
 
-注意：保留现有的 `replay` 端点用于点对点查询，SSE 路由独占这个路径。
+**集成**:
+- DirectorService 创建时初始化 EventCache
+- replay() 优先查询缓存，缓存未命中才读数据库
+- 后台 Worker 每次生成事件后调用 cache.record_event()
 
----
+### 任务 3: 前端断点续传支持（0.5 天）
 
-### 任务 6: 集成测试 - 事件流和重放
+**目标**: 记录前端已确认的最后事件序号，支持自动恢复
 
-**目标文件**: `crates/novel-http/tests/integration.rs`
+**后端实现**:
+
+```rust
+#[derive(Deserialize)]
+pub struct ConfirmEventInput {
+    run_id: String,
+    last_confirmed_seq: i64,
+}
+
+pub async fn confirm_event(
+    State(state): State<KernelState>,
+    Json(input): Json<ConfirmEventInput>,
+) -> HttpResult<Json<serde_json::Value>> {
+    // 记录前端的确认位置（可选：存到数据库用于崩溃恢复）
+    // 当前阶段可以简单忽略，由前端自己维护
+    Ok(Json(json!({"ok": true})))
+}
+```
+
+**前端实现** (伪代码):
+```javascript
+let lastConfirmedSeq = 0;
+
+async function subscribeEvents(runId) {
+  const response = await fetch(
+    `/api/runs/${runId}/events?stream=true&afterSeq=${lastConfirmedSeq}`
+  );
+  const reader = response.body.getReader();
+  
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    
+    const event = JSON.parse(new TextDecoder().decode(value));
+    processEvent(event);
+    lastConfirmedSeq = event.seq;
+    
+    // 定期发送确认（可选）
+    if (lastConfirmedSeq % 10 === 0) {
+      fetch(`/api/runs/${runId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({run_id: runId, last_confirmed_seq: lastConfirmedSeq})
+      });
+    }
+  }
+}
+```
+
+### 任务 4: 集成测试覆盖 SSE 流（1 天）
 
 **新增测试**:
 
 ```rust
 #[tokio::test]
-async fn replay_returns_events_in_order() {
+async fn sse_stream_returns_event_stream() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
 
-    // 创建小说、章节
-    // 打开运行（这会生成 run_started 事件）
-    // 查询事件 with after_seq=0
-    // 验证返回的事件序列
-    
-    todo!("实现测试");
+    // 创建运行
+    let run = create_test_run().await;
+
+    // 订阅 SSE
+    let response = client
+        .get(&format!("{}/api/runs/{}/events?stream=true", server.url(), run.id))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert!(response
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("text/event-stream"));
 }
 
 #[tokio::test]
-async fn sse_stream_begins_with_history() {
+async fn json_replay_still_works() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
 
-    // 创建并打开运行
-    // 订阅 SSE 事件流 with after_seq=0
-    // 验证首先收到历史事件
-    
-    todo!("实现 SSE 集成测试");
+    let run = create_test_run().await;
+
+    // 不带 stream 参数，应该返回 JSON
+    let response = client
+        .get(&format!("{}/api/runs/{}/events?afterSeq=0", server.url(), run.id))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["data"].is_array());
 }
 ```
 
 ---
 
-## 架构决策
+## 关键实现决策
 
-### 为什么分离 replay 和 SSE 端点？
+### 为什么保留 JSON 模式兼容性？
+- 前端可能还需要点对点查询（如页面刷新）
+- 兼容旧版本的前端代码
+- 便于性能对比和灰度升级
 
-- **replay** (`GET /api/runs/:rid/events?afterSeq=N`): 点对点查询，返回 JSON 数组，用于页面刷新或断点续传
-- **SSE** (`GET /api/runs/:rid/events` 无参数): 流式端点，返回 text/event-stream，用于前端长连接订阅
-
-### 为什么不立即用 tokio broadcast？
-
-- 长轮询足以满足初期需求（响应延迟 <1s）
-- broadcast 需要后台循环维护（Worker 需要扩展）
+### 为什么不立即用 broadcast channel？
+- 长轮询已足以满足 <1s 的交互延迟需求
+- broadcast 需要后台维护通道，增加复杂性
 - 可作为 Phase 2.3 的性能优化
 
-### 数据一致性
-
-- 所有事件持久化到 workflow_event 表，seq 是 run_id 内的单调递增主键
-- events_after(run_id, seq) 保证 seq > after_seq，避免重复
-- 运行启动时自动插入 run_started 事件（seq=1）
+### 缓存的一致性保证
+- 缓存仅用于已持久化的事件（不缓存未提交的）
+- 缓存命中率不影响正确性，只是性能优化
+- 周期性清理（运行完成时）
 
 ---
 
 ## 验收标准
 
 ### 功能验收
+- [ ] SSE 端点返回 text/event-stream 格式
+- [ ] JSON 轮询端点仍正常工作（兼容）
+- [ ] 历史事件和新事件都能正确推送
+- [ ] 事件顺序保证（seq 单调递增）
+- [ ] 缓存命中率达到 70% 以上
 
-- [ ] `open_run` 完整验证链路（章节、提示词、端点）
-- [ ] `events_after` 返回正确的事件序列
-- [ ] `replay` 端点返回 JSON 数组，支持 after_seq 参数
-- [ ] SSE 端点返回 text/event-stream，支持历史回放
-- [ ] 新增 2+ 集成测试覆盖核心场景
+### 测试验收
+- [ ] ✓ `cargo test --lib` 通过
+- [ ] ✓ `cargo test --test integration` 通过（新增 4+ 测试）
+- [ ] ✓ 编译无警告
 
-### 编译验证
-
-- [ ] `cargo check` 通过
-- [ ] `cargo test --lib` 通过
-- [ ] `cargo test --test integration` 通过（新增测试）
-
-### 集成验收
-
-- [ ] 打开运行后能通过 replay 获取事件
-- [ ] 前端长连接到 SSE 端点能接收事件流
-- [ ] 事件序列号单调递增，无遗漏
+### 性能验收
+- [ ] SSE 首条事件延迟 <200ms
+- [ ] 缓存查询 <10ms
+- [ ] 内存占用稳定（<100MB）
 
 ---
 
 ## 时间估计
 
-- 任务 1-3: 业务逻辑 (1 天)
-- 任务 4-5: SSE 路由 + 测试 (1.5 天)
-- 任务 6: 集成测试 (1 天)
-- **Phase 2.2 总计: 3-3.5 天**
+- 任务 1: SSE 改造 (1 天)
+- 任务 2: 缓存实现 (0.5 天)
+- 任务 3: 前端支持 (0.5 天)
+- 任务 4: 集成测试 (1 天)
+- **Phase 2.2 总计: 3 天**
 
 ---
 
 ## 后续工作
 
-- **Phase 2.2 完成后**: 可启动 Phase 2.3（操作决策端点）
-- **性能优化**: 升级到 tokio broadcast 实时推送（需后台 Worker 支持）
-- **前端集成**: 对接运行记录页的事件流订阅
+- **Phase 2.3**: 操作决策端点 (approve, cancel, resume)
+- **Phase 2.3+**: 升级到 tokio broadcast（性能优化）
 
-EOF
+
