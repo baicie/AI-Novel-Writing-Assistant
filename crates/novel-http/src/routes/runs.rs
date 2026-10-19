@@ -121,6 +121,30 @@ pub async fn replay(
     }
 }
 
+pub async fn confirm_event(
+    State(_state): State<KernelState>,
+    Path(_run_id): Path<String>,
+    Json(payload): Json<ConfirmEventBody>,
+) -> HttpResult<Json<Value>> {
+    // 当前阶段简单记录和返回成功
+    // 后续可扩展为：
+    // 1. 将 last_confirmed_seq 记录到数据库用于崩溃恢复
+    // 2. 更新内存状态追踪客户端进度
+    
+    // 基础验证
+    if payload.last_confirmed_seq < 0 {
+        return Err(HttpError::bad_request("序号不能为负数"));
+    }
+
+    Ok(Json(json!({
+        "success": true,
+        "data": {
+            "confirmed": true,
+            "last_confirmed_seq": payload.last_confirmed_seq,
+        },
+    })))
+}
+
 async fn json_replay(
     state: KernelState,
     run_id: String,
@@ -244,4 +268,11 @@ pub struct ReplayQuery {
     pub after_seq: i64,
     #[serde(default)]
     pub stream: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmEventBody {
+    /// 前端确认的最后一条事件序号
+    pub last_confirmed_seq: i64,
 }

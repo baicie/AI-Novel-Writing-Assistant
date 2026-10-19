@@ -63,6 +63,7 @@ pub fn router(state: KernelState) -> Router {
         .route("/api/runs/:rid/cancel", post(routes::runs::cancel))
         .route("/api/runs/:rid/resume", post(routes::runs::resume))
         .route("/api/runs/:rid/events", get(routes::runs::replay))
+        .route("/api/runs/:rid/confirm", post(routes::runs::confirm_event))
         .route(
             "/api/runs/:rid/cancel-generation",
             post(routes::runs::cancel_generation),
