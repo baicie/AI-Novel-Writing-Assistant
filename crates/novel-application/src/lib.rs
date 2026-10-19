@@ -6,6 +6,7 @@ mod hub;
 mod knowledge;
 mod ports;
 mod runtime;
+mod services_novel;
 mod setup;
 mod tasks;
 mod usecase;
