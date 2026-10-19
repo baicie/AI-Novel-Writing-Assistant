@@ -1,3 +1,4 @@
+mod app;
 mod director;
 mod dto;
 mod error;
