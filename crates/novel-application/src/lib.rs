@@ -8,6 +8,7 @@ mod ports;
 mod runtime;
 mod setup;
 mod tasks;
+mod usecase;
 mod worker;
 
 pub use director::{DirectorService, OpenRunInput};
@@ -32,4 +33,5 @@ pub use ports::{
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;
 pub use tasks::TaskCenterService;
+pub use usecase::{ChapterUseCases, NovelUseCases, PromoteOutcomeDto, RunUseCases};
 pub use worker::{ConcurrencyGate, TickOutcome, Worker};
