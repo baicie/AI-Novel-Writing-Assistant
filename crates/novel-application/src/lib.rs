@@ -9,6 +9,7 @@ mod http_handlers;
 mod http_request;
 mod http_response;
 mod http_routes;
+mod integration_tests;
 mod knowledge;
 mod ports;
 mod runtime;
