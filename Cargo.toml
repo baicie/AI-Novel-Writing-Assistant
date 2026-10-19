@@ -32,6 +32,7 @@ hex = "0.4"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "query", "tokio"] }
+dashmap = "5.5"
 tower = { version = "0.5", default-features = false, features = ["util"] }
 tower-http = { version = "0.5", default-features = false, features = ["cors", "trace"] }
 novel-domain = { path = "crates/novel-domain" }

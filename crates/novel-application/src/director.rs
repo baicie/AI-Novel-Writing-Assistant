@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde::Serialize;
+use dashmap::DashMap;
 
 use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use novel_llm::authorize_endpoint;
@@ -33,11 +34,68 @@ pub struct OpenRunInput {
     pub allow_localhost_http: bool,
 }
 
+/// 事件流内存缓存，用于减少数据库查询
+pub struct EventCache {
+    // run_id -> Vec<(seq, GenerationEvent)>
+    active_runs: DashMap<String, Vec<(i64, GenerationEvent)>>,
+}
+
+impl EventCache {
+    pub fn new() -> Self {
+        Self {
+            active_runs: DashMap::new(),
+        }
+    }
+
+    /// 记录一条事件到缓存
+    pub fn record_event(&self, run_id: String, seq: i64, event: GenerationEvent) {
+        let mut entry = self.active_runs.entry(run_id).or_insert_with(Vec::new);
+        entry.push((seq, event));
+        
+        // 只保留最近 1000 条事件，防止内存无限增长
+        if entry.len() > 1000 {
+            entry.drain(0..100);
+        }
+    }
+
+    /// 获取指定 seq 之后的所有缓存事件
+    pub fn get_events(&self, run_id: &str, after_seq: i64) -> Vec<GenerationEvent> {
+        self.active_runs
+            .get(run_id)
+            .map(|entry| {
+                entry
+                    .iter()
+                    .filter(|(seq, _)| *seq > after_seq)
+                    .map(|(_, event)| event.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// 清理已完成运行的缓存
+    pub fn clear_run(&self, run_id: &str) {
+        self.active_runs.remove(run_id);
+    }
+
+    /// 获取缓存命中情况（用于性能监控）
+    #[allow(dead_code)]
+    pub fn cache_size(&self) -> usize {
+        self.active_runs.len()
+    }
+}
+
+impl Default for EventCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct DirectorService {
     novels: Arc<dyn NovelRepository>,
     runs: Arc<dyn WorkflowRepository>,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn Ids>,
+    cache: Arc<EventCache>,
 }
 
 impl DirectorService {
@@ -52,7 +110,13 @@ impl DirectorService {
             runs,
             clock,
             ids,
+            cache: Arc::new(EventCache::new()),
         }
+    }
+
+    /// 获取内部的事件缓存，用于后台 Worker 记录事件
+    pub fn event_cache(&self) -> Arc<EventCache> {
+        self.cache.clone()
     }
 
     pub async fn list_novels(&self) -> Result<Vec<NovelSummary>, AppError> {
@@ -323,6 +387,13 @@ impl DirectorService {
         run_id: &str,
         after_seq: i64,
     ) -> Result<Vec<GenerationEvent>, AppError> {
+        // 1. 优先查询缓存
+        let cached = self.cache.get_events(run_id, after_seq);
+        if !cached.is_empty() {
+            return Ok(cached);  // 缓存命中
+        }
+
+        // 2. 缓存未命中，查询数据库
         let stored = self.runs.events_after(run_id, after_seq).await?;
         let mut events = Vec::with_capacity(stored.len());
         for event in stored {
@@ -337,6 +408,14 @@ impl DirectorService {
             .ok_or_else(|| AppError::integrity("运行记录里有无法识别的事件。"))?;
             events.push(mapped);
         }
+
+        // 3. 记录到缓存供下次使用
+        for event in &events {
+            if let Some(seq) = event.seq() {
+                self.cache.record_event(run_id.to_string(), seq, event.clone());
+            }
+        }
+
         Ok(events)
     }
 
