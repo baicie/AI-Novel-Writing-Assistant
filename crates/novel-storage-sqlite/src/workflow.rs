@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use novel_application::{
-    CandidateBody, ClaimedRun, CommandOutcome, ControlCommit, ControlWrite, NewArtifact,
-    NewAttempt, NewCandidate, NewInvocation, OpenRunRecord, PortError, StoredEvent,
-    WorkflowRepository,
+    CandidateBody, ChapterFullDetail, ClaimedRun, CommandOutcome, ControlCommit, ControlWrite,
+    NewArtifact, NewAttempt, NewCandidate, NewInvocation, OpenRunRecord, PortError, RunContract,
+    RunSummary, StoredEvent, WorkflowRepository,
 };
 use novel_domain::{ControlEvent, DomainError, RunControl, apply_event, note_lease, parse_status};
 use novel_workflow::{AttemptPhase, AttemptView, ResumeIntent, book_scope};
@@ -651,6 +651,71 @@ impl WorkflowRepository for SqliteKernel {
             .await
             .map_err(map_sql)?;
         Ok(())
+    }
+
+    /// Phase 2.1: 列出某小说的所有运行（按时间倒序）。
+    async fn list_runs(&self, novel_id: &str) -> Result<Vec<RunSummary>, PortError> {
+        let rows = sqlx::query(
+            "SELECT r.id, r.novel_id, r.contract_json, wc.status, r.created_at,
+                    COALESCE((SELECT title FROM chapter WHERE id = json_extract(r.contract_json, '$.targetChapterId')), '') as chapter_title,
+                    COALESCE((SELECT MAX(occurred_at) FROM workflow_event WHERE run_id = r.id), r.created_at) as updated_at
+             FROM workflow_run r
+             JOIN workflow_control wc ON r.id = wc.run_id
+             WHERE r.novel_id = ?
+             ORDER BY r.created_at DESC",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            let contract_json: String = row.try_get("contract_json").map_err(map_sql)?;
+            let contract: RunContract = serde_json::from_str(&contract_json)
+                .map_err(|_| PortError::Integrity("运行合同无法解析。".into()))?;
+            
+            results.push(RunSummary {
+                id: row.try_get("id").map_err(map_sql)?,
+                novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                chapter_id: contract.target_chapter_id.clone(),
+                chapter_title: row.try_get("chapter_title").map_err(map_sql)?,
+                state: row.try_get::<String, _>("status").map_err(map_sql)?,
+                created_at: row.try_get("created_at").map_err(map_sql)?,
+                updated_at: row.try_get("updated_at").map_err(map_sql)?,
+                provider: contract.provider.clone(),
+                model: contract.model.clone(),
+            });
+        }
+        Ok(results)
+    }
+
+    /// Phase 2.1: 获取章节的完整详情。
+    async fn get_chapter_full(&self, novel_id: &str, chapter_id: &str) -> Result<ChapterFullDetail, PortError> {
+        let row = sqlx::query(
+            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.created_at, c.updated_at,
+                    COALESCE(cr.content, '') as content
+             FROM chapter c
+             LEFT JOIN chapter_revision cr ON c.official_revision_id = cr.id
+             WHERE c.id = ? AND c.novel_id = ?",
+        )
+        .bind(chapter_id)
+        .bind(novel_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+
+        let row = row.ok_or_else(|| PortError::NotFound("章节不存在。".into()))?;
+        Ok(ChapterFullDetail {
+            id: row.try_get("id").map_err(map_sql)?,
+            novel_id: row.try_get("novel_id").map_err(map_sql)?,
+            title: row.try_get("title").map_err(map_sql)?,
+            sort_order: row.try_get("sort_order").map_err(map_sql)?,
+            content: row.try_get("content").map_err(map_sql)?,
+            status: "active".to_string(), // 简化：后续可根据 protection 字段细化
+            created_at: row.try_get("created_at").map_err(map_sql)?,
+            updated_at: row.try_get("updated_at").map_err(map_sql)?,
+        })
     }
 }
 

@@ -54,7 +54,11 @@ pub fn router(state: KernelState) -> Router {
             "/api/novels/:id/chapters/:cid",
             get(routes::chapters::detail).put(routes::chapters::save),
         )
-        .route("/api/novels/:id/runs", post(routes::runs::open))
+        .route(
+            "/api/novels/:id/chapters/:cid/full",
+            get(routes::chapters::full_detail),
+        )
+        .route("/api/novels/:id/runs", get(routes::runs::list_runs).post(routes::runs::open))
         .route("/api/runs/:rid/approve", post(routes::runs::approve))
         .route("/api/runs/:rid/cancel", post(routes::runs::cancel))
         .route("/api/runs/:rid/resume", post(routes::runs::resume))

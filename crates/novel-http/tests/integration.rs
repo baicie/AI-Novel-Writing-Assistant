@@ -321,3 +321,102 @@ async fn tasks_write_routes_still_return_501() {
 
     server.stop().await;
 }
+
+#[tokio::test]
+async fn list_runs_returns_empty_for_novel_without_runs() {
+    let server = TestServer::start().await;
+    let client = reqwest::Client::new();
+
+    // 先创建小说
+    let novel = serde_json::json!({
+        "title": "测试小说",
+        "description": "测试",
+        "narrativeForm": "third_person",
+        "writingMode": "ai_generated",
+        "projectMode": "structured",
+        "creationExperience": "complete_beginner",
+    });
+    let response = client
+        .post(format!("{}/api/novels", server.base_url))
+        .json(&novel)
+        .send()
+        .await
+        .expect("create");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    let novel_id = body["data"]["id"].as_str().expect("novel id");
+
+    // 获取运行列表，应该为空
+    let response = client
+        .get(format!("{}/api/novels/{}/runs", server.base_url, novel_id))
+        .send()
+        .await
+        .expect("list runs");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["total"], 0);
+    assert_eq!(body["data"]["items"].as_array().unwrap().len(), 0);
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn get_chapter_full_returns_content() {
+    let server = TestServer::start().await;
+    let client = reqwest::Client::new();
+
+    // 创建小说
+    let novel = serde_json::json!({
+        "title": "测试小说",
+        "description": "测试",
+        "narrativeForm": "third_person",
+        "writingMode": "ai_generated",
+        "projectMode": "structured",
+        "creationExperience": "complete_beginner",
+    });
+    let response = client
+        .post(format!("{}/api/novels", server.base_url))
+        .json(&novel)
+        .send()
+        .await
+        .expect("create");
+    let body: serde_json::Value = response.json().await.expect("json");
+    let novel_id = body["data"]["id"].as_str().expect("novel id");
+
+    // 创建章节
+    let chapter = serde_json::json!({
+        "title": "第一章",
+        "sortOrder": 1,
+    });
+    let response = client
+        .post(format!(
+            "{}/api/novels/{}/chapters",
+            server.base_url, novel_id
+        ))
+        .json(&chapter)
+        .send()
+        .await
+        .expect("create chapter");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    let chapter_id = body["data"][0]["id"].as_str().expect("chapter id");
+
+    // 获取完整详情
+    let response = client
+        .get(format!(
+            "{}/api/novels/{}/chapters/{}/full",
+            server.base_url, novel_id, chapter_id
+        ))
+        .send()
+        .await
+        .expect("get full");
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.expect("json");
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["title"], "第一章");
+    assert_eq!(body["data"]["sortOrder"], 1);
+    assert!(body["data"]["content"].is_string());
+
+    server.stop().await;
+}

@@ -144,6 +144,43 @@ pub struct ChapterSnapshot {
     pub updated_at: i64,
 }
 
+/// 运行摘要，用于列表展示。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSummary {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_title: String,
+    pub state: String, // "queued", "running", "paused_for_approval", "completed", "failed", etc.
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub provider: String,
+    pub model: String,
+}
+
+/// 运行列表查询结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRunsResult {
+    pub items: Vec<RunSummary>,
+    pub total: i64,
+}
+
+/// 章节完整详情。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterFullDetail {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub content: String, // current draft or saved text
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunContract {

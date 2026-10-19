@@ -23,6 +23,22 @@ pub async fn list(
     })))
 }
 
+pub async fn full_detail(
+    State(state): State<KernelState>,
+    Path((novel_id, chapter_id)): Path<(String, String)>,
+) -> HttpResult<Json<Value>> {
+    let chapter = state
+        .runtime
+        .director
+        .get_chapter_full(&novel_id, &chapter_id)
+        .await
+        .map_err(HttpError::from)?;
+    Ok(Json(json!({
+        "success": true,
+        "data": chapter,
+    })))
+}
+
 pub async fn create(
     State(state): State<KernelState>,
     Path(novel_id): Path<String>,

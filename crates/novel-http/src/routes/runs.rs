@@ -10,6 +10,25 @@ use novel_application::{GenerationEvent, OpenRunInput};
 use crate::error::{HttpError, HttpResult};
 use crate::state::KernelState;
 
+pub async fn list_runs(
+    State(state): State<KernelState>,
+    Path(novel_id): Path<String>,
+) -> HttpResult<Json<Value>> {
+    let runs = state
+        .runtime
+        .director
+        .list_runs(&novel_id)
+        .await
+        .map_err(HttpError::from)?;
+    Ok(Json(json!({
+        "success": true,
+        "data": {
+            "items": runs,
+            "total": runs.len() as i64,
+        },
+    })))
+}
+
 pub async fn open(
     State(state): State<KernelState>,
     Path(novel_id): Path<String>,

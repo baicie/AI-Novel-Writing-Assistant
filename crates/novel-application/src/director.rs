@@ -362,6 +362,20 @@ impl DirectorService {
             .await?)
     }
 
+    /// Phase 2.1：获取小说的所有运行列表（按时间倒序）。
+    pub async fn list_runs(&self, novel_id: &str) -> Result<Vec<crate::dto::RunSummary>, AppError> {
+        Ok(self.runs.list_runs(novel_id).await?)
+    }
+
+    /// Phase 2.1：获取章节的完整详情。
+    pub async fn get_chapter_full(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<crate::dto::ChapterFullDetail, AppError> {
+        Ok(self.runs.get_chapter_full(novel_id, chapter_id).await?)
+    }
+
     async fn command(
         &self,
         command_id: &str,

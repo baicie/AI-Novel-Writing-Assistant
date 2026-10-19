@@ -12,9 +12,10 @@ mod worker;
 
 pub use director::{DirectorService, OpenRunInput};
 pub use dto::{
-    ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult,
-    NovelDetail, NovelSummary, RecoverableTaskListResponse, RecoverableTaskSummary, RunContract,
-    TaskOverviewSummary, UpdateNovelFields, command_view, event_from_stored,
+    ChapterFullDetail, ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery,
+    ListNovelsResult, ListRunsResult, NovelDetail, NovelSummary, RecoverableTaskListResponse,
+    RecoverableTaskSummary, RunContract, RunSummary, TaskOverviewSummary, UpdateNovelFields,
+    command_view, event_from_stored,
 };
 pub use error::{AppError, AppErrorCode, PortError};
 pub use hash::{json_hash, sha256_hex};

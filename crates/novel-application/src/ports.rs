@@ -8,8 +8,9 @@ use novel_domain::{
 use novel_workflow::AttemptView;
 
 use crate::dto::{
-    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail,
-    NovelSummary, RecoverableTaskSummary, RunContract, TaskOverviewSummary, UpdateNovelFields,
+    ChapterFullDetail, ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult,
+    NovelDetail, NovelSummary, RecoverableTaskSummary, RunContract, RunSummary,
+    TaskOverviewSummary, UpdateNovelFields,
 };
 use crate::error::PortError;
 
@@ -358,6 +359,10 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<Option<ClaimedRun>, PortError>;
     async fn list_artifacts(&self, novel_id: &str) -> Result<Vec<ArtifactView>, PortError>;
     async fn list_attempts(&self, run_id: &str) -> Result<Vec<AttemptView>, PortError>;
+    /// 列出某小说的所有运行（按时间倒序）。
+    async fn list_runs(&self, novel_id: &str) -> Result<Vec<RunSummary>, PortError>;
+    /// 获取章节的完整详情。
+    async fn get_chapter_full(&self, novel_id: &str, chapter_id: &str) -> Result<ChapterFullDetail, PortError>;
     async fn insert_external_artifact(&self, artifact: NewArtifact) -> Result<(), PortError>;
     async fn start_attempt(&self, attempt: NewAttempt) -> Result<(), PortError>;
     async fn mark_remote_started(
