@@ -4,6 +4,7 @@ mod error;
 mod hash;
 mod hub;
 mod http_error;
+mod http_handlers;
 mod http_request;
 mod http_response;
 mod http_routes;
