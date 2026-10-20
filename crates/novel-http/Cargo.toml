@@ -27,4 +27,5 @@ novel-domain.workspace = true
 novel-llm.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 
