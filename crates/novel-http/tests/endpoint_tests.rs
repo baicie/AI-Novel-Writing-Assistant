@@ -300,7 +300,7 @@ async fn test_create_chapter_success() {
     // 创建章节
     let chapter_payload = serde_json::json!({
         "title": "Chapter 1",
-        "content": "Story content here"
+        "sortOrder": 1
     });
     
     let response = client
@@ -313,6 +313,8 @@ async fn test_create_chapter_success() {
     assert_eq!(response.status(), 200);
     let body: serde_json::Value = response.json().await.expect("json");
     assert_eq!(body["success"], true);
+    // 章节端点返回数组
+    assert!(body["data"][0]["id"].is_string());
 }
 
 /// Test 2.2: GET /api/novels/:id/chapters - 获取章节列表
@@ -366,7 +368,7 @@ async fn test_get_chapter_detail() {
     let novel_body: serde_json::Value = novel_response.json().await.expect("json");
     let novel_id = novel_body["data"]["id"].as_str().expect("id");
     
-    let chapter_payload = serde_json::json!({"title": "Chapter 1", "content": "Content"});
+    let chapter_payload = serde_json::json!({"title": "Chapter 1", "sortOrder": 1});
     let chapter_response = client
         .post(format!("{}/api/novels/{}/chapters", server.base_url, novel_id))
         .json(&chapter_payload)
@@ -375,7 +377,7 @@ async fn test_get_chapter_detail() {
         .expect("request");
     
     let chapter_body: serde_json::Value = chapter_response.json().await.expect("json");
-    let chapter_id = chapter_body["data"]["id"].as_str().expect("id");
+    let chapter_id = chapter_body["data"][0]["id"].as_str().expect("id");
     
     // 获取章节详情
     let response = client
@@ -404,7 +406,7 @@ async fn test_update_chapter() {
     let novel_body: serde_json::Value = novel_response.json().await.expect("json");
     let novel_id = novel_body["data"]["id"].as_str().expect("id");
     
-    let chapter_payload = serde_json::json!({"title": "Chapter 1", "content": "Content"});
+    let chapter_payload = serde_json::json!({"title": "Chapter 1", "sortOrder": 1});
     let chapter_response = client
         .post(format!("{}/api/novels/{}/chapters", server.base_url, novel_id))
         .json(&chapter_payload)
@@ -413,7 +415,7 @@ async fn test_update_chapter() {
         .expect("request");
     
     let chapter_body: serde_json::Value = chapter_response.json().await.expect("json");
-    let chapter_id = chapter_body["data"]["id"].as_str().expect("id");
+    let chapter_id = chapter_body["data"][0]["id"].as_str().expect("id");
     
     // 更新章节
     let update_payload = serde_json::json!({"title": "Chapter 1 - Updated"});
