@@ -466,17 +466,12 @@ async fn test_list_runs() {
 }
 
 /// Test 3.2: POST /api/novels/:id/runs - 打开/启动运行
-/// Test 3.2: POST /api/novels/:id/runs - 打开/启动运行
-/// 
-/// 已识别的依赖: promptVersions 需要有效的提示词版本定义
-/// 错误: "正文提示词版本不存在，不能开始创作。"
-/// TODO: 此测试依赖后端的提示词版本设置，需要集成测试环境支持
 #[tokio::test]
-#[ignore]  // 跳过: 需要提示词版本配置
 async fn test_open_run() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
     
+    // 创建故事
     let novel_payload = serde_json::json!({"title": "Test Novel"});
     let novel_response = client
         .post(format!("{}/api/novels", server.base_url))
@@ -488,12 +483,27 @@ async fn test_open_run() {
     let novel_body: serde_json::Value = novel_response.json().await.expect("json");
     let novel_id = novel_body["data"]["id"].as_str().expect("id");
     
+    // 创建章节
+    let chapter_payload = serde_json::json!({"title": "Chapter 1", "sortOrder": 1});
+    let chapter_response = client
+        .post(format!("{}/api/novels/{}/chapters", server.base_url, novel_id))
+        .json(&chapter_payload)
+        .send()
+        .await
+        .expect("request");
+    
+    let chapter_body: serde_json::Value = chapter_response.json().await.expect("json");
+    let chapter_id = chapter_body["data"][0]["id"].as_str().expect("id").to_string();
+    
+    // 打开运行 (必须使用真实的 chapter_id 和有效的 promptVersions)
     let run_payload = serde_json::json!({
         "commandId": "test-command-1",
-        "targetChapterId": "chapter-1",
+        "targetChapterId": chapter_id,
         "provider": "openai",
         "model": "gpt-4",
-        "promptVersions": {},
+        "promptVersions": {
+            "chapter_draft": "chapter-draft-v1"
+        },
         "tokenBudget": 4000,
         "maxAutomaticRetries": 1,
         "endpoint": "https://api.openai.com/v1/chat/completions",
@@ -636,40 +646,43 @@ async fn test_list_novels() {
     assert_eq!(response.status(), 200);
 }
 
-/// Test 3.4: POST /api/runs/:rid/approve - 批准运行
+/// Test 3.4: POST /api/runs/:rid/approve - 批准运行 (非存在的运行)
 #[tokio::test]
-async fn test_approve_run() {
+async fn test_approve_run_not_found() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
     
     let payload = serde_json::json!({"commandId": "approve-cmd"});
-    let response = client.post(format!("{}/api/runs/test-run-1/approve", server.base_url))
+    let response = client.post(format!("{}/api/runs/nonexistent-run/approve", server.base_url))
         .json(&payload).send().await.expect("request");
-    assert!(response.status().is_client_error() || response.status().is_success());
+    // 期望 404 或 400，因为运行不存在
+    assert!(response.status().is_client_error());
 }
 
-/// Test 3.5: POST /api/runs/:rid/cancel - 取消运行
+/// Test 3.5: POST /api/runs/:rid/cancel - 取消运行 (非存在的运行)
 #[tokio::test]
-async fn test_cancel_run() {
+async fn test_cancel_run_not_found() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
     
     let payload = serde_json::json!({"commandId": "cancel-cmd"});
-    let response = client.post(format!("{}/api/runs/test-run-1/cancel", server.base_url))
+    let response = client.post(format!("{}/api/runs/nonexistent-run/cancel", server.base_url))
         .json(&payload).send().await.expect("request");
-    assert!(response.status().is_client_error() || response.status().is_success());
+    // 期望 404 或 400
+    assert!(response.status().is_client_error());
 }
 
-/// Test 3.6: POST /api/runs/:rid/resume - 恢复运行
+/// Test 3.6: POST /api/runs/:rid/resume - 恢复运行 (非存在的运行)
 #[tokio::test]
-async fn test_resume_run() {
+async fn test_resume_run_not_found() {
     let server = TestServer::start().await;
     let client = reqwest::Client::new();
     
     let payload = serde_json::json!({"commandId": "resume-cmd"});
-    let response = client.post(format!("{}/api/runs/test-run-1/resume", server.base_url))
+    let response = client.post(format!("{}/api/runs/nonexistent-run/resume", server.base_url))
         .json(&payload).send().await.expect("request");
-    assert!(response.status().is_client_error() || response.status().is_success());
+    // 期望 404 或 400
+    assert!(response.status().is_client_error());
 }
 
 /// Test 4.3: 任务概览详情
