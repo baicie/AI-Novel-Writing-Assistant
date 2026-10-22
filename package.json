@@ -66,10 +66,11 @@
     "test:all": "pnpm --filter @ai-novel/server test:all && pnpm --filter @ai-novel/client test",
     "lint": "pnpm --filter @ai-novel/shared lint && pnpm --filter @ai-novel/server lint && pnpm --filter @ai-novel/client lint",
     "dev:tauri": "cargo tauri dev",
-    "build:tauri": "cargo tauri build --target aarch64-apple-darwin",
+    "build:tauri": "cargo tauri build --target aarch64-apple-darwin --bundles app",
     "build:tauri:debug": "cargo tauri build --debug --no-bundle --target aarch64-apple-darwin",
     "check:tauri": "cargo check -p novel-desktop && pnpm --filter @ai-novel/client typecheck",
-    "test:rust": "cargo test -p novel-domain -p novel-workflow -p novel-llm -p novel-storage-sqlite -p novel-application"
+    "test:rust": "cargo test -p novel-domain -p novel-workflow -p novel-llm -p novel-storage-sqlite -p novel-application",
+    "build:tauri:dmg": "cargo tauri build --target aarch64-apple-darwin --bundles app,dmg"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
