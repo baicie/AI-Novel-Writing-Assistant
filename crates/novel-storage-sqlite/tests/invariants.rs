@@ -91,9 +91,9 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     let source = dir.path().join("legacy.sqlite");
     let target = dir.path().join("next.sqlite");
     let pool = connect(&source, true).await;
-    sqlx::query("CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, secretNote TEXT)")
+    sqlx::query("CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, worldId TEXT, secretNote TEXT)")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO Novel (id, title, description, status, secretNote) VALUES ('n1','旧书','简介','draft','不要丢')")
+    sqlx::query("INSERT INTO Novel (id, title, description, status, worldId, secretNote) VALUES ('n1','旧书','简介','draft','w1','不要丢')")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE Character (id TEXT PRIMARY KEY, novelId TEXT, name TEXT, role TEXT)")
         .execute(&pool)
@@ -161,6 +161,12 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     assert!(Path::new(&report.source_backup).is_file());
     assert!(fs::metadata(&report.source_backup).unwrap().len() > 0);
     let kernel = SqliteKernel::open(&target).await.unwrap();
+    let novel_world_id: Option<String> =
+        sqlx::query_scalar("SELECT world_id FROM novel WHERE id = 'n1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(novel_world_id.as_deref(), Some("w1"));
     let chapter = NovelRepository::get_chapter(&kernel, "n1", "c1")
         .await
         .unwrap();

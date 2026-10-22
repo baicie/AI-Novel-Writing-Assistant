@@ -133,7 +133,7 @@ async fn collect_gaps(source: &SqlitePool, report: &mut MigrationReport) -> Resu
                 | "DirectorNextRunControl"
         ) {
             let allowed: &[&str] = match table.as_str() {
-                "Novel" => &["id", "title", "description", "status"],
+                "Novel" => &["id", "title", "description", "status", "worldId"],
                 "World" => &["id", "name", "description", "overviewSummary", "status"],
                 "Character" => &["id", "novelId", "name", "role"],
                 "VolumePlan" => &["id", "novelId", "sortOrder", "title", "summary"],
@@ -277,10 +277,21 @@ async fn import_novels(
     {
         return Ok(());
     }
-    let rows = sqlx::query("SELECT id, title, description, status FROM Novel")
-        .fetch_all(source)
-        .await
-        .map_err(map_sql)?;
+    let has_world_id = columns(source, "Novel")
+        .await?
+        .iter()
+        .any(|column| column == "worldId");
+    let rows = if has_world_id {
+        sqlx::query("SELECT id, title, description, status, worldId FROM Novel")
+            .fetch_all(source)
+            .await
+            .map_err(map_sql)?
+    } else {
+        sqlx::query("SELECT id, title, description, status FROM Novel")
+            .fetch_all(source)
+            .await
+            .map_err(map_sql)?
+    };
     for row in rows {
         let id: String = row.try_get("id").map_err(map_sql)?;
         if mapped(tx, "Novel", &id).await? {
@@ -290,11 +301,26 @@ async fn import_novels(
         let title: String = row.try_get("title").map_err(map_sql)?;
         let description: Option<String> = row.try_get("description").map_err(map_sql)?;
         let status: Option<String> = row.try_get("status").map_err(map_sql)?;
-        sqlx::query("INSERT INTO novel(id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        let legacy_world_id: Option<String> = if has_world_id {
+            row.try_get("worldId").map_err(map_sql)?
+        } else {
+            None
+        };
+        let world_id = if let Some(world_id) = legacy_world_id {
+            if mapped(tx, "World", &world_id).await? {
+                Some(world_id)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        sqlx::query("INSERT INTO novel(id, title, description, status, world_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
             .bind(&id)
             .bind(title)
             .bind(description.unwrap_or_default())
             .bind(status.unwrap_or_else(|| "draft".into()))
+            .bind(world_id.as_deref())
             .bind(now_ms)
             .bind(now_ms)
             .execute(tx.deref_mut())
