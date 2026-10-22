@@ -90,6 +90,18 @@ export interface VolumeSnapshot {
   summary: string;
 }
 
+export interface RunSummary {
+  id: string;
+  novelId: string;
+  chapterId: string;
+  chapterTitle: string;
+  state: string;
+  createdAt: number;
+  updatedAt: number;
+  provider: string;
+  model: string;
+}
+
 export interface CommandOutcome {
   runId: string;
   status: string;
@@ -384,6 +396,10 @@ export function deleteVolume(input: { novelId: string; volumeId: string }): Prom
   return invoke("delete_volume", input);
 }
 
+export function listRuns(novelId: string): Promise<RunSummary[]> {
+  return invoke("list_runs", { novelId });
+}
+
 export function approveRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {
   return invoke("approve_run", input);
 }
@@ -537,6 +553,44 @@ export function listStoryModes(): Promise<StoryMode[]> {
 
 export function listWorlds(): Promise<World[]> {
   return invoke("list_worlds");
+}
+
+export interface TaskOverview {
+  queuedCount: number;
+  runningCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  waitingApprovalCount: number;
+  recoveryCandidateCount: number;
+}
+
+export interface RecoverableTask {
+  id: string;
+  kind: string;
+  title: string;
+  ownerLabel: string;
+  status: string;
+  currentStage: string | null;
+  currentItemLabel: string | null;
+  resumeAction: string;
+  sourceRoute: string;
+  recoveryHint: string;
+}
+
+export function getTaskOverview(): Promise<TaskOverview> {
+  return invoke("get_task_overview");
+}
+
+export function listRecoveryCandidates(): Promise<{ items: RecoverableTask[] }> {
+  return invoke("list_recovery_candidates");
+}
+
+export function getQuickSetupStatus(): Promise<Record<string, unknown>> {
+  return invoke("get_quick_setup_status");
+}
+
+export function getFirstNovelOnboarding(): Promise<Record<string, unknown>> {
+  return invoke("get_first_novel_onboarding");
 }
 
 export function getModelSetup(): Promise<ModelSetupView | null> {

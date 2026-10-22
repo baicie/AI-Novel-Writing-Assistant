@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use novel_application::{AppError, CommandOutcome, GenerationEvent, OpenRunInput};
+use novel_application::{AppError, CommandOutcome, GenerationEvent, OpenRunInput, RunSummary};
 use serde::Deserialize;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -20,6 +20,14 @@ pub struct OpenRunRequest {
     pub max_automatic_retries: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+}
+
+#[tauri::command]
+pub async fn list_runs(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Vec<RunSummary>, AppError> {
+    state.runtime.director.list_runs(&novel_id).await
 }
 
 #[tauri::command]

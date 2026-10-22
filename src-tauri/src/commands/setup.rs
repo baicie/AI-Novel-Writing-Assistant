@@ -1,5 +1,5 @@
 use novel_application::{AppError, PortError};
-use novel_domain::{Genre, StoryMode, World};
+use novel_domain::{FirstNovelOnboarding, Genre, QuickSetupStatus, StoryMode, World};
 use tauri::State;
 
 use crate::state::AppState;
@@ -12,6 +12,20 @@ pub async fn list_genres(state: State<'_, AppState>) -> Result<Vec<Genre>, AppEr
 #[tauri::command]
 pub async fn list_story_modes(state: State<'_, AppState>) -> Result<Vec<StoryMode>, AppError> {
     state.runtime.setup.list_story_modes().await
+}
+
+#[tauri::command]
+pub async fn get_quick_setup_status(
+    state: State<'_, AppState>,
+) -> Result<QuickSetupStatus, AppError> {
+    state.runtime.setup.get_quick_setup_status().await
+}
+
+#[tauri::command]
+pub async fn get_first_novel_onboarding(
+    state: State<'_, AppState>,
+) -> Result<FirstNovelOnboarding, AppError> {
+    state.runtime.setup.get_first_novel_onboarding().await
 }
 
 #[tauri::command]
