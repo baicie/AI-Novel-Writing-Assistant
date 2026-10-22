@@ -90,6 +90,7 @@
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel` 和 `get_chapter` |
+| Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`，页面无未捕获异常 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
 

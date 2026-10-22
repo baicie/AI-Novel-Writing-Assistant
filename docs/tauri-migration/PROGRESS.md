@@ -8,7 +8,7 @@
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
 - 最新本地提交：代码最新提交 `9b4a2823`；文档提交紧随
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
-- 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 74 MB；release 路由 smoke 已验证小说列表与章节编辑器页面。
+- 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 74 MB；release 路由 smoke 已验证小说列表、小说编辑页与章节编辑器页面。
 
 ## 已完成并验证
 
