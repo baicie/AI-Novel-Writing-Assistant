@@ -185,12 +185,23 @@ function detailToNovel(
 }
 
 async function loadNovel(id: string): Promise<NovelDetailResponse> {
-  const [detail, chapters, volumes] = await Promise.all([
+  const [detail, chapters, volumes, characters] = await Promise.all([
     transport.getNovel(id),
     transport.listChapters(id),
     transport.listVolumes(id),
+    transport.listCharacters(id),
   ]);
   const response = detailToNovel(detail, chapters, volumes);
+  response.characters = characters.map((character) => ({
+    id: character.id,
+    name: character.name,
+    role: character.role,
+    personality: character.personality ?? null,
+    development: character.arc ?? null,
+    novelId: character.novelId,
+    createdAt: iso(character.createdAt),
+    updatedAt: iso(character.updatedAt),
+  }));
   const list = summaryToListItem({
     ...detail,
     creationExperience: detail.creationExperience,

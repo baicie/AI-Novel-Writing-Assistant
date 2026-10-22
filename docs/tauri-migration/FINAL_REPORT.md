@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | 桌面启动壳 | VERIFIED | Tauri 2 release `.app` 启动；隔离数据目录初始化 SQLite；WebView 成功调用 bootstrap Command |
 | Node/Express 依赖 | VERIFIED | Tauri release `.app` 内没有 Node/server/sidecar 资源；默认启动路径不再启动本地 HTTP server |
-| 小说列表/创建/详情/更新/删除 | VERIFIED（核心路径） | Rust Commands + SQLx；删除有卷/章的书会拒绝，避免误删 |
+| 小说列表/创建/详情/更新/删除 | VERIFIED（核心路径） | Rust Commands + SQLx；删除有卷/章的书会拒绝，避免误删；人物列表由 `list_characters` 只读投影提供 |
 | 卷 CRUD | VERIFIED（内核） | 卷序唯一约束、含章节删除拒绝、事务更新 |
 | 章节 CRUD/正文保存 | VERIFIED（核心路径） | CAS 版本检查、用户正文保护、重启读回 |
 | 章节修订 | VERIFIED（读取/追加） | 只追加 `chapter_revision`；尚无恢复旧版本的独立 UI |
@@ -30,7 +30,7 @@
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试 |
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | NOT_STARTED 或 PARTIAL | 未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
-| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.21 MiB |
+| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.25 MiB |
 | macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
 
@@ -74,7 +74,7 @@
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：203 tests |
+| `cargo test --workspace --exclude novel-http` | PASS：204 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
 | `cargo test -p novel-storage-sqlite` | PASS：4 + 3 tests |
 | `cargo test -p novel-llm` | PASS：8 + 3 tests |
@@ -86,24 +86,24 @@
 | `pnpm build`（根级） | PASS（`NODE_OPTIONS=--max-old-space-size=8192`，有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
-| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.21 MiB `.app` |
+| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.25 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；Tauri `bundle_dmg.sh` 失败 |
 | `hdiutil create/verify` 手动 DMG | PASS：8.8 MiB，校验和 VALID，内含 `.app` |
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace` |
-| Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`，页面无未捕获异常 |
+| Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`、`list_characters`，页面无未捕获异常 |
 | Release 路由 smoke（新建小说页） | PASS：`/novels/create` 加载，实际调用 `list_novels`，无未捕获异常 |
 | Release 路由 smoke（设置页） | PASS：`/settings` 加载，无未捕获异常；模型密钥命令由 Transport 提供 |
 | Release 路由巡检（扩展页面） | PASS（仅渲染/不崩溃）：`/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 加载无未捕获异常；未迁移 API 仍返回 501 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
 
-已跟踪 Rust 测试合计 258 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 259 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 8. 构建产物及路径
 
-- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
+- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.25 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`

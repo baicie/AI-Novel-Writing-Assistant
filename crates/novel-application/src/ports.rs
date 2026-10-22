@@ -8,9 +8,10 @@ use novel_domain::{
 use novel_workflow::AttemptView;
 
 use crate::dto::{
-    ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, ListNovelsQuery,
-    ListNovelsResult, NovelDetail, NovelSummary, RecoverableTaskSummary, RunContract, RunSummary,
-    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
+    ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
+    CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary,
+    RecoverableTaskSummary, RunContract, RunSummary, TaskOverviewSummary, UpdateNovelFields,
+    VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -325,6 +326,7 @@ pub trait NovelRepository: Send + Sync {
     ) -> Result<NovelDetail, PortError>;
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
+    async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError>;
     async fn get_chapter(
         &self,
         novel_id: &str,

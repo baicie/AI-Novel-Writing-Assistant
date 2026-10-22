@@ -14,6 +14,7 @@
     "allow-update-novel",
     "allow-delete-novel",
     "allow-list-chapters",
+    "allow-list-characters",
     "allow-create-chapter",
     "allow-get-chapter",
     "allow-save-chapter",

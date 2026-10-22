@@ -10,9 +10,9 @@ use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
 use crate::dto::{
-    ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery,
-    ListNovelsResult, NovelDetail, NovelSummary, RunContract, UpdateNovelFields, VolumeSnapshot,
-    event_from_stored,
+    ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, CreateNovelInput, GenerationEvent,
+    ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, RunContract, UpdateNovelFields,
+    VolumeSnapshot, event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
@@ -279,6 +279,13 @@ impl DirectorService {
 
     pub async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, AppError> {
         Ok(self.novels.list_chapters(novel_id).await?)
+    }
+
+    pub async fn list_characters(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<CharacterSnapshot>, AppError> {
+        Ok(self.novels.list_characters(novel_id).await?)
     }
 
     pub async fn save_chapter(

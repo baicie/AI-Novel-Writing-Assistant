@@ -1,6 +1,6 @@
 use novel_application::{
-    AppError, ChapterRevisionSnapshot, ChapterSnapshot, NovelDetail, NovelSummary,
-    UpdateNovelFields, VolumeSnapshot,
+    AppError, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, NovelDetail,
+    NovelSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use serde::Deserialize;
@@ -215,6 +215,16 @@ pub async fn list_chapters(
     novel_id: String,
 ) -> Result<Vec<ChapterSnapshot>, AppError> {
     state.runtime.director.list_chapters(&novel_id).await
+}
+
+#[tauri::command]
+pub async fn list_characters(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Vec<CharacterSnapshot>, AppError> {
+    let characters = state.runtime.director.list_characters(&novel_id).await?;
+    tracing::info!(novel_id = %novel_id, count = characters.len(), "characters served to webview");
+    Ok(characters)
 }
 
 #[tauri::command]

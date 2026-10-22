@@ -2,9 +2,9 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, DeleteChapterRecord,
-    ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel, NewVolume, NovelDetail,
-    NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
+    ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, CreateNovelInput,
+    DeleteChapterRecord, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel, NewVolume,
+    NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
     UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
@@ -562,6 +562,42 @@ impl NovelRepository for SqliteKernel {
         .await
         .map_err(map_sql)?;
         rows.iter().map(chapter_from_row).collect()
+    }
+
+    async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, name, role, profile_json, created_at, updated_at
+             FROM character WHERE novel_id = ? ORDER BY created_at, id",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                let profile = row
+                    .try_get::<String, _>("profile_json")
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                Ok(CharacterSnapshot {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    name: row.try_get("name").map_err(map_sql)?,
+                    role: row.try_get("role").map_err(map_sql)?,
+                    personality: profile
+                        .get("personality")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    arc: profile
+                        .get("arc")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                    updated_at: row.try_get("updated_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
     }
 
     async fn get_chapter(

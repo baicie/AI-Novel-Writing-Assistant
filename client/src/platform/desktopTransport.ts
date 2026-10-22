@@ -62,6 +62,17 @@ export interface NovelDetail {
   updatedAt: number;
 }
 
+export interface CharacterSnapshot {
+  id: string;
+  novelId: string;
+  name: string;
+  role: string;
+  personality?: string | null;
+  arc?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ChapterSnapshot {
   id: string;
   novelId: string;
@@ -307,6 +318,10 @@ export function updateNovel(input: UpdateNovelInput): Promise<NovelDetail> {
 
 export function deleteNovel(novelId: string): Promise<void> {
   return invoke("delete_novel", { novelId });
+}
+
+export function listCharacters(novelId: string): Promise<CharacterSnapshot[]> {
+  return invoke("list_characters", { novelId });
 }
 
 export function listChapters(novelId: string): Promise<ChapterSnapshot[]> {

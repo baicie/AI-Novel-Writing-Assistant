@@ -147,6 +147,20 @@ pub struct ChapterSnapshot {
 }
 
 /// 卷是章节的稳定分组；排序在单本小说内唯一。
+/// 人物快照：只读展示所需字段；详细档案仍保存在 profile_json。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterSnapshot {
+    pub id: String,
+    pub novel_id: String,
+    pub name: String,
+    pub role: String,
+    pub personality: Option<String>,
+    pub arc: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VolumeSnapshot {

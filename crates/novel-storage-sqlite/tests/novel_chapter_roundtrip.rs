@@ -264,3 +264,48 @@ async fn setup_creation_persists_style_review_switch() {
     assert_eq!(detail.title, "设定建书");
     assert!(detail.post_generation_style_review_enabled);
 }
+
+#[tokio::test]
+async fn character_list_projection_reads_only_the_requested_novel() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&db_path(&dir)).await.unwrap();
+    let novel = kernel
+        .create_novel(NewNovel {
+            id: "novel-characters".into(),
+            title: "人物投影".into(),
+            description: "".into(),
+            now_ms: 1_760_000_000_000,
+        })
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at)
+         VALUES ('char-1', ?, '林动', 'protagonist', '{\"personality\":\"坚韧\",\"arc\":\"由弱到强\"}', 1, 2)",
+    )
+    .bind(&novel.id)
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    kernel
+        .create_novel(NewNovel {
+            id: "another-novel".into(),
+            title: "另一本".into(),
+            description: "".into(),
+            now_ms: 1_760_000_000_001,
+        })
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at)
+         VALUES ('char-other', 'another-novel', '无关角色', '', '{}', 1, 2)",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+
+    let characters = kernel.list_characters(&novel.id).await.unwrap();
+    assert_eq!(characters.len(), 1);
+    assert_eq!(characters[0].name, "林动");
+    assert_eq!(characters[0].personality.as_deref(), Some("坚韧"));
+    assert_eq!(characters[0].arc.as_deref(), Some("由弱到强"));
+}
