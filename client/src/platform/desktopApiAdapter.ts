@@ -385,12 +385,6 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   if (path === "/tasks/recovery-candidates" && method === "get") {
     return ok(await transport.listRecoveryCandidates());
   }
-  if (path === "/settings/quick-setup/status" && method === "get") {
-    return ok(await transport.getQuickSetupStatus());
-  }
-  if (path === "/onboarding/first-novel" && method === "get") {
-    return ok(await transport.getFirstNovelOnboarding());
-  }
   if (path === "/worlds" && method === "get") {
     const worlds = await transport.listWorlds();
     return ok(worlds.map((world) => ({

@@ -132,7 +132,9 @@ pub async fn create_novel_with_setup(
 
 #[tauri::command]
 pub async fn list_novels(state: State<'_, AppState>) -> Result<Vec<NovelSummary>, AppError> {
-    state.runtime.director.list_novels().await
+    let novels = state.runtime.director.list_novels().await?;
+    tracing::info!(count = novels.len(), "novel list served to webview");
+    Ok(novels)
 }
 
 #[tauri::command]
@@ -140,7 +142,9 @@ pub async fn get_novel(
     state: State<'_, AppState>,
     novel_id: String,
 ) -> Result<NovelDetail, AppError> {
-    state.runtime.director.get_novel(&novel_id).await
+    let novel = state.runtime.director.get_novel(&novel_id).await?;
+    tracing::info!(novel_id = %novel_id, "novel detail served to webview");
+    Ok(novel)
 }
 
 #[tauri::command]
@@ -234,11 +238,13 @@ pub async fn get_chapter(
     novel_id: String,
     chapter_id: String,
 ) -> Result<ChapterSnapshot, AppError> {
-    state
+    let chapter = state
         .runtime
         .director
         .get_chapter(&novel_id, &chapter_id)
-        .await
+        .await?;
+    tracing::info!(novel_id = %novel_id, chapter_id = %chapter_id, "chapter served to webview");
+    Ok(chapter)
 }
 
 #[tauri::command]

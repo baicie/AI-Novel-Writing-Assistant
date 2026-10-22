@@ -41,6 +41,22 @@ pub fn get_desktop_bootstrap_snapshot(app: tauri::AppHandle) -> BootstrapSnapsho
 }
 
 #[tauri::command]
+pub fn report_client_runtime(
+    config: Option<serde_json::Value>,
+    location_hash: String,
+    runtime_mode: String,
+    message: Option<String>,
+) {
+    tracing::info!(
+        config = ?config,
+        location_hash = %location_hash,
+        runtime_mode = %runtime_mode,
+        message = %message.unwrap_or_default(),
+        "webview runtime diagnostics"
+    );
+}
+
+#[tauri::command]
 pub fn open_desktop_logs_directory(app: tauri::AppHandle) -> Result<(), String> {
     open_directory(&logs_dir(&app)).map_err(|error| format!("无法打开日志目录：{error}"))
 }

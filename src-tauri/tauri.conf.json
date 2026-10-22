@@ -7,7 +7,7 @@
     "frontendDist": "../client/dist",
     "devUrl": "http://127.0.0.1:5173",
     "beforeDevCommand": "pnpm --filter @ai-novel/client dev",
-    "beforeBuildCommand": "pnpm --filter @ai-novel/client build"
+    "beforeBuildCommand": "AI_NOVEL_CLIENT_BASE=relative pnpm --filter @ai-novel/client build"
   },
   "app": {
     "withGlobalTauri": true,

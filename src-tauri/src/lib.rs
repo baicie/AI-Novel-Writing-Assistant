@@ -79,15 +79,22 @@ pub fn run() {
                 }
             });
 
+            let start_route = std::env::var("BIZ_NOVEL_START_ROUTE").ok();
+            let route_script = start_route
+                .as_ref()
+                .filter(|route| route.starts_with('/'))
+                .map(|route| format!("window.location.hash = {};", serde_json::json!(format!("#{route}"))))
+                .unwrap_or_default();
             let runtime_script = format!(
-                "window.__AI_NOVEL_RUNTIME__ = {};",
+                "window.__AI_NOVEL_RUNTIME__ = {}; window.__AI_NOVEL_START_ROUTE__ = {}; {route_script}",
                 serde_json::json!({
                     "mode": "desktop",
                     "isPackaged": !tauri::is_dev(),
                     "appVersion": app.package_info().version.to_string(),
                     "isPortable": false,
                     "updateChannel": "beta",
-                })
+                }),
+                serde_json::json!(start_route)
             );
             let webview_url = if tauri::is_dev() {
                 let dev_url = app
@@ -154,6 +161,7 @@ pub fn run() {
             commands::generation::generate_text,
             commands::generation::cancel_text_generation,
             commands::shell::get_desktop_bootstrap_snapshot,
+            commands::shell::report_client_runtime,
             commands::shell::open_desktop_logs_directory,
             commands::shell::restart_desktop_app,
         ])

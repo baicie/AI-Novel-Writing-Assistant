@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-report-client-runtime"
+description = "Enables the report_client_runtime command without any pre-configured scope."
+commands.allow = ["report_client_runtime"]
+
+[[permission]]
+identifier = "deny-report-client-runtime"
+description = "Denies the report_client_runtime command without any pre-configured scope."
+commands.deny = ["report_client_runtime"]

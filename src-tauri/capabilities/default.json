@@ -51,6 +51,7 @@
     "allow-generate-text",
     "allow-cancel-text-generation",
     "allow-get-desktop-bootstrap-snapshot",
+    "allow-report-client-runtime",
     "allow-open-desktop-logs-directory",
     "allow-restart-desktop-app"
   ]

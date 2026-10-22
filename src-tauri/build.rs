@@ -44,6 +44,7 @@ fn main() {
         "generate_text",
         "cancel_text_generation",
         "get_desktop_bootstrap_snapshot",
+        "report_client_runtime",
         "open_desktop_logs_directory",
         "restart_desktop_app",
     ];

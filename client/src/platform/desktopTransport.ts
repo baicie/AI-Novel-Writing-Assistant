@@ -625,6 +625,15 @@ export function getDesktopShellBootstrap(): Promise<DesktopShellBootstrap> {
   return invoke("get_desktop_bootstrap_snapshot");
 }
 
+export function reportClientRuntime(input: {
+  config: unknown;
+  locationHash: string;
+  runtimeMode: string;
+  message?: string;
+}): Promise<void> {
+  return invoke("report_client_runtime", input);
+}
+
 export function openDesktopShellLogsDirectory(): Promise<void> {
   return invoke("open_desktop_logs_directory");
 }
