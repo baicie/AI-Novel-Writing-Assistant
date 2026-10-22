@@ -18,6 +18,7 @@ cleanup() {
     kill -TERM "$APP_PID" 2>/dev/null || true
     sleep 1
     kill -KILL "$APP_PID" 2>/dev/null || true
+    wait "$APP_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
