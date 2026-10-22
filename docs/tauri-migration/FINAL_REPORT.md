@@ -89,6 +89,7 @@
 | `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.25 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；Tauri `bundle_dmg.sh` 失败 |
 | `hdiutil create/verify` 手动 DMG | PASS：8.8 MiB，校验和 VALID，内含 `.app` |
+| `scripts/audit-tauri-release.sh` | PASS：`.app` 无 Node/Electron/sidecar 文件，主二进制未链接 Node/Electron 库 |
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace` |
@@ -108,6 +109,7 @@
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`
 - 路由冒烟脚本：`scripts/smoke-tauri-route.sh`
+- Release bundle 审计脚本：`scripts/audit-tauri-release.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
 
 ## 9. 剩余阻塞和已知风险

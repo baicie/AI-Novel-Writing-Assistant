@@ -21,7 +21,7 @@
 - 应用数据目录使用 Tauri app data dir（测试可用 `BIZ_NOVEL_DATA_DIR` 隔离）。
 - CSP 默认仅允许自身、Tauri IPC、asset/data/blob 资源；HTTP/WS 仅开发模式 CSP 放行 Vite。
 - 最小 capabilities 已列出全部命令 allow 权限。
-- 证据：`cargo check -p novel-desktop` 通过；`cargo tauri build --debug --no-bundle --target aarch64-apple-darwin` 通过。
+- 证据：`cargo check -p novel-desktop` 通过；`cargo tauri build --debug --no-bundle --target aarch64-apple-darwin` 通过；`scripts/audit-tauri-release.sh` 确认 `.app` 无 Node/Electron/sidecar 文件或链接库。
 
 ### P1 书稿 SQLite
 
