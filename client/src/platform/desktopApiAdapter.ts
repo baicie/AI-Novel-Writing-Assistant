@@ -265,6 +265,41 @@ function taskStatusForRun(state: string): "queued" | "running" | "waiting_approv
   }
 }
 
+function runToTaskSummary(run: transport.RunSummary) {
+  return {
+    id: run.id,
+    kind: "novel_workflow",
+    title: run.chapterTitle || "未命名章节",
+    status: taskStatusForRun(run.state),
+    pendingManualRecovery: false,
+    progress: taskStatusForRun(run.state) === "succeeded" ? 100 : 0,
+    currentStage: run.state,
+    currentItemKey: run.chapterId || null,
+    currentItemLabel: run.chapterTitle || null,
+    executionScopeLabel: run.novelId,
+    blockingReason: null,
+    resumeAction: null,
+    lastHealthyStage: null,
+    attemptCount: 0,
+    maxAttempts: 1,
+    lastError: null,
+    createdAt: iso(run.createdAt),
+    updatedAt: iso(run.updatedAt),
+    heartbeatAt: iso(run.updatedAt),
+    ownerId: "desktop",
+    ownerLabel: "本地创作内核",
+    sourceRoute: `/novels/${run.novelId}/chapters/${run.chapterId}`,
+    checkpointType: null,
+    checkpointSummary: null,
+    noticeCode: null,
+    noticeSummary: null,
+    failureCode: null,
+    failureSummary: null,
+    recoveryHint: null,
+    tokenUsage: null,
+  } as const;
+}
+
 async function listTaskRuns(config: AxiosRequestConfig): Promise<ApiResponse<unknown>> {
   const query = queryOf(config);
   const kind = query.get("kind");
@@ -275,39 +310,25 @@ async function listTaskRuns(config: AxiosRequestConfig): Promise<ApiResponse<unk
   const items = runs
     .filter((run) => !status || taskStatusForRun(run.state) === status)
     .filter((run) => !keyword || `${run.chapterTitle}\n${run.novelId}`.toLocaleLowerCase().includes(keyword))
-    .map((run) => ({
-      id: run.id,
-      kind: "novel_workflow",
-      title: run.chapterTitle || "未命名章节",
-      status: taskStatusForRun(run.state),
-      pendingManualRecovery: false,
-      progress: taskStatusForRun(run.state) === "succeeded" ? 100 : 0,
-      currentStage: run.state,
-      currentItemKey: run.chapterId || null,
-      currentItemLabel: run.chapterTitle || null,
-      executionScopeLabel: run.novelId,
-      blockingReason: null,
-      resumeAction: null,
-      lastHealthyStage: null,
-      attemptCount: 0,
-      maxAttempts: 1,
-      lastError: null,
-      createdAt: iso(run.createdAt),
-      updatedAt: iso(run.updatedAt),
-      heartbeatAt: iso(run.updatedAt),
-      ownerId: "desktop",
-      ownerLabel: "本地创作内核",
-      sourceRoute: `/novels/${run.novelId}/chapters/${run.chapterId}`,
-      checkpointType: null,
-      checkpointSummary: null,
-      noticeCode: null,
-      noticeSummary: null,
-      failureCode: null,
-      failureSummary: null,
-      recoveryHint: null,
-      tokenUsage: null,
-    }));
+    .map(runToTaskSummary);
   return ok({ items, nextCursor: null });
+}
+
+async function getTaskDetail(config: InternalAxiosRequestConfig, runId: string): Promise<ApiResponse<unknown>> {
+  const runs = await transport.listAllRuns();
+  const run = runs.find((candidate) => candidate.id === runId);
+  if (!run) return ok(null);
+  return ok({
+    ...runToTaskSummary(run),
+    provider: run.provider,
+    model: run.model,
+    startedAt: null,
+    finishedAt: null,
+    retryCountLabel: "0 次",
+    meta: {},
+    steps: [],
+    failureDetails: null,
+  });
 }
 
 async function updateChapter(config: AxiosRequestConfig, novelId: string, chapterId: string): Promise<ApiResponse<Chapter>> {
@@ -381,6 +402,10 @@ async function exportNovelFile(config: InternalAxiosRequestConfig, novelId: stri
 async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   const method = methodOf(config);
   const path = pathOf(config);
+  const taskDetail = path.match(/^\/tasks\/novel_workflow\/([^/]+)$/);
+  if (taskDetail && method === "get") {
+    return getTaskDetail(config, decodeURIComponent(taskDetail[1]!));
+  }
   if (path === "/tasks" && method === "get") return listTaskRuns(config);
   if (path === "/novels" && method === "get") return listNovelPage(config);
   if (path === "/novels" && method === "post") {

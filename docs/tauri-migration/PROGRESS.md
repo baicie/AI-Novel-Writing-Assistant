@@ -53,7 +53,7 @@
 
 - Run 状态机、持久化事件、RunContract、命令幂等、CAS、Approval Gate、step checkpoint、取消与恢复已在 Rust application/storage/workflow 层存在。
 - 单书单活跃 Run 由部分唯一索引保证。
-- 证据：`cargo test -p novel-application` 158 个测试通过；`cargo test -p novel-application --test recovery` 6 个测试通过；`novel-domain` 13 个、`novel-workflow` 6 个测试通过；`/tasks` 路由 smoke 实际调用 `list_all_runs`，预置 queued Run 时返回 count=1。
+- 证据：`cargo test -p novel-application` 158 个测试通过；`cargo test -p novel-application --test recovery` 6 个测试通过；`novel-domain` 13 个、`novel-workflow` 6 个测试通过；`/tasks` 路由 smoke 实际调用 `list_all_runs`，预置 queued Run 时返回 count=1；带 `kind/id` 查询时详情投影也加载。
 
 ## 最近失败/未决
 

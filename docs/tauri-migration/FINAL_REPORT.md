@@ -98,7 +98,7 @@
 | Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`、`list_characters`，页面无未捕获异常 |
 | Release 路由 smoke（新建小说页） | PASS：`/novels/create` 加载，实际调用 `list_novels`，无未捕获异常 |
 | Release 路由 smoke（设置页） | PASS：`/settings` 加载，无未捕获异常；模型密钥命令由 Transport 提供 |
-| Release 路由 smoke（运行记录） | PASS：预置 1 个 queued Run 后，`/tasks` 实际调用 `list_all_runs` 并返回 count=1，无未捕获异常 |
+| Release 路由 smoke（运行记录） | PASS：预置 1 个 queued Run 后，`/tasks` 实际调用 `list_all_runs` 并返回 count=1；带 `kind/id` 查询时列表与详情投影均加载，无未捕获异常 |
 | Release 路由巡检（扩展页面） | PASS（仅渲染/不崩溃）：`/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 加载无未捕获异常；未迁移 API 仍返回 501 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
