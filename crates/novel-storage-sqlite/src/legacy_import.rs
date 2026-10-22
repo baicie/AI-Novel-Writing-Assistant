@@ -41,7 +41,13 @@ pub async fn import_legacy(
     target: &Path,
     now_ms: i64,
 ) -> Result<MigrationReport, PortError> {
-    if source == target {
+    let source_identity = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let target_identity = if target.exists() {
+        std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf())
+    } else {
+        target.to_path_buf()
+    };
+    if source_identity == target_identity {
         return Err(PortError::Conflict("不能把旧库直接当成新库来改。".into()));
     }
     if !source.is_file() {
