@@ -99,7 +99,7 @@ impl NovelRepository for SqliteKernel {
 
     async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError> {
         sqlx::query(
-            "INSERT INTO novel(id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, 'draft', ?, ?)",
+            "INSERT INTO novel(id, title, description, status, post_generation_style_review_enabled, created_at, updated_at) VALUES (?, ?, ?, 'draft', 1, ?, ?)",
         )
         .bind(&novel.id)
         .bind(&novel.title)
