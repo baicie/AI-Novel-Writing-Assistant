@@ -11,7 +11,15 @@ import AppRouter from "./router";
 import { Toaster } from "./components/ui/toast";
 import "./index.css";
 import { ThemeProvider } from "./components/theme/ThemeProvider";
-import { getDesktopShellBootstrap, hasDesktopShell, reportClientRuntime } from "./platform/desktopTransport";
+import {
+  createChapter,
+  createNovelWithSetup,
+  getChapter,
+  getDesktopShellBootstrap,
+  hasDesktopShell,
+  reportClientRuntime,
+  saveChapter,
+} from "./platform/desktopTransport";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +61,27 @@ if (hasDesktopShell()) {
   void getDesktopShellBootstrap()
     .then((snapshot) => console.info("[desktop] local kernel ready", snapshot.stage))
     .catch((error: unknown) => reportError(`bootstrap failed: ${String(error)}`));
+
+  if ((window as Window & { __AI_NOVEL_SMOKE_SAVE__?: unknown }).__AI_NOVEL_SMOKE_SAVE__ === true) {
+    void (async () => {
+      const novel = await createNovelWithSetup({ title: "桌面保存烟测", description: "" });
+      const chapter = await createChapter({ novelId: novel.id, title: "第一章", sortOrder: 1 });
+      const saved = await saveChapter({
+        novelId: novel.id,
+        chapterId: chapter.id,
+        expectedVersion: 0,
+        title: chapter.title,
+        content: "桌面保存烟测正文。",
+      });
+      const reopened = await getChapter({ novelId: novel.id, chapterId: chapter.id });
+      reportClientRuntime({
+        config: runtimeConfig ?? null,
+        locationHash: window.location.hash,
+        runtimeMode: APP_RUNTIME,
+        message: `save smoke ok version=${saved.officialVersion} chars=${reopened.content.length}`,
+      }).catch(() => undefined);
+    })().catch((error: unknown) => reportError(`save smoke failed: ${String(error)}`));
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

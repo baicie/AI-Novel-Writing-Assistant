@@ -11,7 +11,7 @@
 | 章节 CRUD | Prisma/Express | VERIFIED（核心路径） | 创建/读取/更新/删除；CAS；编辑器保存与 Volume 绑定 |
 | 章节修订 | Prisma/Express | VERIFIED（读取/追加） | `chapter_revision` 只追加；版本列表命令；恢复操作尚未做独立 UI |
 | 长正文 | Prisma/Express | VERIFIED | >1MB 中文正文写入、关闭、重开读回测试 |
-| 自动保存 / 章节切换 | 前端 + HTTP | PARTIAL | Plate 编辑器保存、`officialVersion` CAS 和错误提示已接；整页工作区数据仍有未迁移字段 |
+| 自动保存 / 章节切换 | 前端 + Tauri Command | VERIFIED（保存命令链路） | Renderer → Tauri `save_chapter` → SQLite 保存/重开已验证；Plate 自动保存交互仍待人工验收，工作区附属字段仍为 PARTIAL |
 | 模型设置 / 密钥 | Express + Prisma | VERIFIED（命令） | OS keychain + `provider_credential`；前端本地 key manager 使用 Transport |
 | 基础设置 | Express + Prisma | PARTIAL | 小说基础字段、生成后风格复审开关、模型设置已迁移；模型路由、任务策略等未迁移 |
 | AI 流式生成 | Express SSE / LangGraph | VERIFIED（Mock + 网关） | reqwest SSE、Tauri Channel、超时、取消、有限重试、token 上限测试；未做真实付费调用 |

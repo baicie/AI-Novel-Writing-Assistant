@@ -93,6 +93,7 @@
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace` |
+| Renderer 保存 smoke | PASS：Render → Tauri Commands → SQLite 实际完成建书、建章、`save_chapter`（expectedVersion=0）、重开读取；返回 version=1、content=正文 |
 | Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`、`list_characters`，页面无未捕获异常 |
 | Release 路由 smoke（新建小说页） | PASS：`/novels/create` 加载，实际调用 `list_novels`，无未捕获异常 |
 | Release 路由 smoke（设置页） | PASS：`/settings` 加载，无未捕获异常；模型密钥命令由 Transport 提供 |
@@ -109,6 +110,7 @@
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`
 - 路由冒烟脚本：`scripts/smoke-tauri-route.sh`
+- 保存冒烟脚本：`scripts/smoke-tauri-save.sh`
 - Release bundle 审计脚本：`scripts/audit-tauri-release.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
 
