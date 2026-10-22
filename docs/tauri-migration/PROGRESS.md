@@ -31,7 +31,7 @@
 - 章节：创建（可绑定卷）、读取、列表、正文保存、元数据更新、删除；正文保存和删除均做 `officialVersion` CAS。
 - 修订：`chapter_revision` 追加写入，`list_chapter_revisions` 可读取。
 - 手工编辑后 `protection=user_edited`；AI `promote_candidate` 在保护状态下返回 `Blocked`。
-- 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands；Adapter 的创建/保存/重开全链路 smoke 已通过。
+- 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands；Adapter 的创建/保存/重开和小说更新全链路 smoke 已通过。
 - 证据：`cargo test -p novel-storage-sqlite` 8 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书；`scripts/smoke-tauri-save.sh` 已验证 Renderer → Tauri `save_chapter` → SQLite 的真实保存/重开链路。
 
 ### P2 LLM 网关

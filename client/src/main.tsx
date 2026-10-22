@@ -102,11 +102,15 @@ if (hasDesktopShell()) {
       const reopened = await apiClient.get<{ data: { content: string } }>(
         `/novels/${novelId}/chapters/${chapterId}`,
       );
+      const updated = await apiClient.put<{ data: { description: string; postGenerationStyleReviewEnabled: boolean } }>(
+        `/novels/${novelId}`,
+        { description: "适配器更新后的简介", postGenerationStyleReviewEnabled: true },
+      );
       reportClientRuntime({
         config: runtimeConfig ?? null,
         locationHash: window.location.hash,
         runtimeMode: APP_RUNTIME,
-        message: `adapter smoke ok version=${saved.data.data.officialVersion} chars=${reopened.data.data.content.length}`,
+        message: `adapter smoke ok version=${saved.data.data.officialVersion} chars=${reopened.data.data.content.length} updated=${updated.data.data.description}/${updated.data.data.postGenerationStyleReviewEnabled}`,
       }).catch(() => undefined);
     }).catch((error: unknown) => reportError(`adapter smoke failed: ${String(error)}`));
   }

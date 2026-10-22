@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | 桌面启动 | Electron main + Node server/sidecar | VERIFIED | Tauri 2 debug/release build；隔离数据目录启动后完成 SQLite 迁移并保持进程运行 |
 | 基础 IPC | preload + Express HTTP | VERIFIED | `desktopTransport.ts` 使用 `@tauri-apps/api/core` `invoke`/`Channel`；核心 REST 只通过集中适配器进入 |
-| 小说列表/创建/详情/更新/删除 | Prisma/Express | VERIFIED（核心路径） | Tauri Commands + SQLx；更新使用单事务；前端 `NovelList`/创建页接入 |
+| 小说列表/创建/详情/更新/删除 | Prisma/Express | VERIFIED（核心路径） | Tauri Commands + SQLx；更新使用单事务；Adapter 创建/更新/章节保存 smoke 通过；前端 `NovelList`/创建页接入 |
 | 卷 CRUD | Prisma/Express | VERIFIED（后端 + 前端 Transport） | 卷序冲突、含章节删除拒绝有测试；旧页面尚未全部改为卷 API |
 | 章节 CRUD | Prisma/Express | VERIFIED（核心路径） | 创建/读取/更新/删除；CAS；编辑器保存与 Volume 绑定 |
 | 章节修订 | Prisma/Express | VERIFIED（读取/追加） | `chapter_revision` 只追加；版本列表命令；恢复操作尚未做独立 UI |
