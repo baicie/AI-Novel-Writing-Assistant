@@ -28,7 +28,8 @@
 
 ## B-005 macOS DMG 打包
 
-- 现象：`cargo tauri build --target aarch64-apple-darwin --bundles app,dmg` 的 `.app` 阶段成功，`bundle_dmg.sh` 失败；DMG 文件未产出。
+- 现象：`cargo tauri build --target aarch64-apple-darwin --bundles app,dmg` 的 `.app` 阶段成功，`bundle_dmg.sh` 失败。
+- 已绕过：使用 `hdiutil create -srcfolder ... -format UDZO` 从同一 `.app` 生成 8.8 MiB DMG，`hdiutil verify` 校验通过。
 - 分类：本机构建环境的 Tauri DMG bundler/磁盘镜像脚本问题，不是 Rust 编译错误。
 - 处理：保留成功的 `.app`；未尝试签名、公证或上传。
 - 下一动作：在交互式 macOS 构建机或 CI 上重跑 DMG，检查 `hdiutil`/AppleScript/Finder 权限；完成后再做签名与公证。

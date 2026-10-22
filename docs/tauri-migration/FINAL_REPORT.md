@@ -31,7 +31,7 @@
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | NOT_STARTED 或 PARTIAL | 未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
 | macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.21 MiB |
-| macOS arm64 DMG | BLOCKED | `bundle_dmg.sh` 在当前构建环境失败；不是代码编译失败 |
+| macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
 
 ## 3. Rust 后端已迁移模块
@@ -87,7 +87,8 @@
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
 | `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.21 MiB `.app` |
-| `cargo tauri build ... --bundles app,dmg` | `.app` PASS；DMG `bundle_dmg.sh` 失败 |
+| `cargo tauri build ... --bundles app,dmg` | `.app` PASS；Tauri `bundle_dmg.sh` 失败 |
+| `hdiutil create/verify` 手动 DMG | PASS：8.8 MiB，校验和 VALID，内含 `.app` |
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace` |
@@ -103,7 +104,7 @@
 
 - macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
-- DMG 尝试路径（未成功）：`target/aarch64-apple-darwin/release/bundle/dmg/`
+- DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`
 - 路由冒烟脚本：`scripts/smoke-tauri-route.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
@@ -111,7 +112,7 @@
 ## 9. 剩余阻塞和已知风险
 
 - 未跟踪测试文件阻塞全工作区 `--all-targets` 编译；没有修改或删除用户文件。
-- DMG 生成失败；`.app` 未签名/未公证，不能作为公开分发包。
+- Tauri DMG 脚本失败；手动 `hdiutil` DMG 已生成并校验，但 `.app`/DMG 未签名、未公证，不能作为公开分发包。
 - 真实模型 endpoint、额度、429、usage 字段未验证；不做无限真实调用。
 - 仅核心书稿页面接入 Tauri；自动导演/任务中心写操作/知识库/图像/短剧仍走未迁移路径。
 - 未做 Windows/Linux 交叉打包；`better-sqlite3`/Node 旧路径仍存在于 Electron workspace，但不在 Tauri release 内。
