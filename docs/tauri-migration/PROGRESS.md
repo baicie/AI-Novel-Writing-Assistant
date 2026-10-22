@@ -32,7 +32,7 @@
 - 修订：`chapter_revision` 追加写入，`list_chapter_revisions` 可读取。
 - 手工编辑后 `protection=user_edited`；AI `promote_candidate` 在保护状态下返回 `Blocked`。
 - 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands。
-- 证据：`cargo test -p novel-storage-sqlite` 7 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书。
+- 证据：`cargo test -p novel-storage-sqlite` 8 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书。
 
 ### P2 LLM 网关
 

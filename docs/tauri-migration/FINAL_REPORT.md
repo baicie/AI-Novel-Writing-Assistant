@@ -76,7 +76,7 @@
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
 | `cargo test --workspace --exclude novel-http` | PASS：204 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
-| `cargo test -p novel-storage-sqlite` | PASS：4 + 3 tests |
+| `cargo test -p novel-storage-sqlite` | PASS：4 + 4 tests |
 | `cargo test -p novel-llm` | PASS：8 + 3 tests |
 | `cargo test -p novel-domain -p novel-workflow` | PASS：13 + 6 tests |
 | `cargo test -p novel-http --test integration_novels/integration_chapters/endpoint_tests/integration` | PASS：12 + 9 + 25 + 9 tests（已跟踪测试目标） |
