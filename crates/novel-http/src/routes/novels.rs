@@ -152,6 +152,7 @@ pub async fn update(
         storyline_status: payload.storyline_status,
         outline_status: payload.outline_status,
         resource_ready_score: payload.resource_ready_score,
+        status: payload.status,
     };
     let detail = state
         .runtime
@@ -270,6 +271,7 @@ pub struct UpdateNovelBody {
     pub storyline_status: Option<String>,
     pub outline_status: Option<String>,
     pub resource_ready_score: Option<i32>,
+    pub status: Option<String>,
 }
 
 // 链接 ensure_can_promote 的存在，避免 import 警告。
