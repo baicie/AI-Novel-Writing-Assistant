@@ -30,7 +30,7 @@
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试 |
 | 导入导出 | PARTIAL | Rust JSON/Markdown 导出 Command；旧下载按钮未全部接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | NOT_STARTED 或 PARTIAL | 未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
-| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.16 MiB |
+| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.21 MiB |
 | macOS arm64 DMG | BLOCKED | `bundle_dmg.sh` 在当前构建环境失败；不是代码编译失败 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
 
@@ -85,17 +85,19 @@
 | `pnpm --filter @ai-novel/client build` | PASS（有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
-| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.16 MiB `.app` |
+| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.21 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；DMG `bundle_dmg.sh` 失败 |
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 74 MB |
+| Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
+| Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel` 和 `get_chapter` |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
 
-已跟踪 Rust 测试合计 257 个通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 257 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 8. 构建产物及路径
 
-- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.16 MiB）
+- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG 尝试路径（未成功）：`target/aarch64-apple-darwin/release/bundle/dmg/`
 - 迁移报告与文档：`docs/tauri-migration/`
