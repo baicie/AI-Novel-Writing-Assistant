@@ -144,8 +144,7 @@ impl NovelRepository for SqliteKernel {
                 ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
-                ?, ?,
-                ?, ?
+                ?, ?, ?
              )",
         )
         .bind(&input.id)
