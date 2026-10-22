@@ -88,7 +88,7 @@
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
 | `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.21 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；DMG `bundle_dmg.sh` 失败 |
-| 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 74 MB |
+| 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
 | Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel` 和 `get_chapter` |
 | Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`，页面无未捕获异常 |
