@@ -6,7 +6,7 @@
 - 截止时间：2026-10-23T10:00:00+08:00
 - 基线：`8a1beae6`
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
-- 最新本地提交：代码最新提交 `8852b675`；文档提交紧随
+- 最新本地提交：代码最新提交 `5d0523f9`；文档提交紧随
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
 - 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 67–74 MB；release 路由 smoke 已验证设置页、新建小说页、小说列表、小说编辑页与章节编辑器页面。
 - 可复现脚本：`scripts/smoke-tauri-route.sh`（隔离临时数据目录，不触碰用户数据库）。
