@@ -83,6 +83,7 @@
 | `pnpm --filter @ai-novel/client typecheck` | PASS |
 | `pnpm typecheck`（根级） | PASS；根脚本已设置 `NODE_OPTIONS=--max-old-space-size=8192` |
 | `pnpm --filter @ai-novel/client build` | PASS（有既有大 chunk 警告） |
+| `pnpm build`（根级） | PASS（`NODE_OPTIONS=--max-old-space-size=8192`，有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
 | `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.21 MiB `.app` |
