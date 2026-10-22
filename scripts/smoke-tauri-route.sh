@@ -13,6 +13,8 @@ fi
 
 DATA_DIR="$(mktemp -d /tmp/biz-novel-tauri-smoke.XXXXXX)"
 LOG_FILE="$DATA_DIR/route.log"
+ROUTE="${TAURI_ROUTE:-/novels}"
+EXPECTED_LOG="${TAURI_EXPECT_LOG:-novel list served to webview count=1}"
 cleanup() {
   if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
     kill -TERM "$APP_PID" 2>/dev/null || true
@@ -34,15 +36,15 @@ APP_PID=""
 sqlite3 "$DATA_DIR/novel.sqlite" \
   "INSERT INTO novel(id,title,description,status,created_at,updated_at) VALUES ('smoke-n1','路由烟测','Tauri command smoke','draft',1,1);"
 
-BIZ_NOVEL_DATA_DIR="$DATA_DIR" BIZ_NOVEL_START_ROUTE=/novels RUST_LOG=info "$APP_BIN" >"$LOG_FILE" 2>&1 &
+BIZ_NOVEL_DATA_DIR="$DATA_DIR" BIZ_NOVEL_START_ROUTE="$ROUTE" RUST_LOG=info "$APP_BIN" >"$LOG_FILE" 2>&1 &
 APP_PID=$!
 sleep 10
 
-if ! grep -q "novel list served to webview count=1" "$LOG_FILE"; then
-  echo "Route smoke failed; expected Tauri list command. Log follows:" >&2
+if ! grep -q "$EXPECTED_LOG" "$LOG_FILE"; then
+  echo "Route smoke failed for $ROUTE; expected log: $EXPECTED_LOG" >&2
   cat "$LOG_FILE" >&2
   exit 1
 fi
 
-echo "Tauri route smoke passed:"
-grep -E "runtime diagnostics|novel list served" "$LOG_FILE"
+echo "Tauri route smoke passed for $ROUTE:"
+grep -E "runtime diagnostics|novel list served|chapter editor workspace" "$LOG_FILE"
