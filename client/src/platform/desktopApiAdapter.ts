@@ -51,7 +51,12 @@ function unsupported(config: InternalAxiosRequestConfig): never {
       statusText: "Not Implemented",
       headers: {},
       config,
-      data: { success: false, error: "NOT_MIGRATED", message },
+      data: {
+        success: false,
+        error: "这个功能暂未接入桌面本地内核",
+        code: "NOT_MIGRATED",
+        message,
+      },
     },
   );
 }
@@ -94,7 +99,7 @@ function summaryToListItem(novel: transport.NovelSummary): NovelListItem {
     writingMode: novel.writingMode as NovelListItem["writingMode"],
     creationExperience: novel.creationExperience as NovelListItem["creationExperience"],
     narrativeForm: novel.narrativeForm as NovelListItem["narrativeForm"],
-    postGenerationStyleReviewEnabled: false,
+    postGenerationStyleReviewEnabled: (novel as transport.NovelSummary & { postGenerationStyleReviewEnabled?: boolean }).postGenerationStyleReviewEnabled ?? false,
     projectMode: novel.projectMode as NovelListItem["projectMode"],
     createdAt: updatedAt,
     updatedAt,
@@ -134,7 +139,7 @@ function detailToNovel(
     narrativeForm: detail.narrativeForm as NovelDetailResponse["narrativeForm"],
     commercialTags: detail.commercialTags,
     projectMode: detail.projectMode as NovelDetailResponse["projectMode"],
-    postGenerationStyleReviewEnabled: false,
+    postGenerationStyleReviewEnabled: detail.postGenerationStyleReviewEnabled,
     targetAudience: detail.targetAudience,
     bookSellingPoint: detail.bookSellingPoint,
     competingFeel: detail.competingFeel,
@@ -294,7 +299,12 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
           statusText: "Not Implemented",
           headers: {},
           config,
-          data: { success: false, error: "NOT_MIGRATED", message: "续写来源导入还没有接入桌面本地内核，现有来源资料不会被改动。" },
+          data: {
+            success: false,
+            error: "续写来源导入暂未接入桌面本地内核",
+            code: "NOT_MIGRATED",
+            message: "续写来源导入还没有接入桌面本地内核，现有来源资料不会被改动。",
+          },
         },
       );
     }
@@ -317,6 +327,7 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
       styleTone: typeof payload.styleTone === "string" ? payload.styleTone : undefined,
       defaultChapterLength: typeof payload.defaultChapterLength === "number" ? payload.defaultChapterLength : undefined,
       estimatedChapterCount: typeof payload.estimatedChapterCount === "number" ? payload.estimatedChapterCount : undefined,
+      postGenerationStyleReviewEnabled: payload.postGenerationStyleReviewEnabled === true,
     });
     return ok(detailToNovel(created, [], []));
   }
@@ -427,6 +438,9 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
         outlineStatus: typeof payload.outlineStatus === "string" ? payload.outlineStatus : undefined,
         resourceReadyScore: typeof payload.resourceReadyScore === "number" ? payload.resourceReadyScore : undefined,
         status: typeof payload.status === "string" ? payload.status : undefined,
+        postGenerationStyleReviewEnabled: typeof payload.postGenerationStyleReviewEnabled === "boolean"
+          ? payload.postGenerationStyleReviewEnabled
+          : undefined,
       });
       return ok(await loadNovel(id));
     }

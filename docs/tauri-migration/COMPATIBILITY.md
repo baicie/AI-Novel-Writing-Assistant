@@ -13,7 +13,7 @@
 | 长正文 | Prisma/Express | VERIFIED | >1MB 中文正文写入、关闭、重开读回测试 |
 | 自动保存 / 章节切换 | 前端 + HTTP | PARTIAL | Plate 编辑器保存、`officialVersion` CAS 和错误提示已接；整页工作区数据仍有未迁移字段 |
 | 模型设置 / 密钥 | Express + Prisma | VERIFIED（命令） | OS keychain + `provider_credential`；前端本地 key manager 使用 Transport |
-| 基础设置 | Express + Prisma | PARTIAL | 小说基础字段、模型设置已迁移；模型路由、任务策略等未迁移 |
+| 基础设置 | Express + Prisma | PARTIAL | 小说基础字段、生成后风格复审开关、模型设置已迁移；模型路由、任务策略等未迁移 |
 | AI 流式生成 | Express SSE / LangGraph | VERIFIED（Mock + 网关） | reqwest SSE、Tauri Channel、超时、取消、有限重试、token 上限测试；未做真实付费调用 |
 | Run 工作流 | TS LangGraph/导演 | VERIFIED（最小内核） | Run 状态机、事件、CAS、Gate、checkpoint、幂等、取消、恢复测试 |
 | 旧数据导入 | Prisma/旧 SQLite | VERIFIED（工具） | 只读旧库、双库一致性备份、ID 映射、数量/关系/正文 hash 校验、未支持项报告 |

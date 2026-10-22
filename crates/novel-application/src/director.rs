@@ -203,6 +203,7 @@ impl DirectorService {
         style_tone: &str,
         default_chapter_length: Option<i32>,
         estimated_chapter_count: Option<i32>,
+        post_generation_style_review_enabled: bool,
     ) -> Result<NovelDetail, AppError> {
         let title = title.trim();
         if title.is_empty() {
@@ -228,6 +229,7 @@ impl DirectorService {
             style_tone: style_tone.trim().to_string(),
             default_chapter_length,
             estimated_chapter_count,
+            post_generation_style_review_enabled,
             now_ms: self.clock.now_ms(),
         };
         Ok(self.novels.create_novel_with_setup(input).await?)

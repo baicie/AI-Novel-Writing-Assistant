@@ -57,6 +57,7 @@ export interface NovelDetail {
   storylineStatus: string;
   outlineStatus: string;
   resourceReadyScore: number;
+  postGenerationStyleReviewEnabled: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -261,6 +262,7 @@ export interface CreateNovelSetupInput {
   styleTone?: string;
   defaultChapterLength?: number;
   estimatedChapterCount?: number;
+  postGenerationStyleReviewEnabled?: boolean;
 }
 
 export function createNovelWithSetup(input: CreateNovelSetupInput): Promise<NovelDetail> {
@@ -295,6 +297,7 @@ export interface UpdateNovelInput {
   outlineStatus?: string;
   resourceReadyScore?: number;
   status?: string;
+  postGenerationStyleReviewEnabled?: boolean;
 }
 
 export function updateNovel(input: UpdateNovelInput): Promise<NovelDetail> {

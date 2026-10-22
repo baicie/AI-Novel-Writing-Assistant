@@ -50,6 +50,7 @@ pub struct NovelDetail {
     pub storyline_status: String,
     pub outline_status: String,
     pub resource_ready_score: i32,
+    pub post_generation_style_review_enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -103,6 +104,7 @@ pub struct UpdateNovelFields {
     pub outline_status: Option<String>,
     pub resource_ready_score: Option<i32>,
     pub status: Option<String>,
+    pub post_generation_style_review_enabled: Option<bool>,
 }
 
 /// 创建小说时的输入，比 Phase 1 的 `NewNovel` 多 setup 字段。
@@ -127,6 +129,7 @@ pub struct CreateNovelInput {
     pub style_tone: String,
     pub default_chapter_length: Option<i32>,
     pub estimated_chapter_count: Option<i32>,
+    pub post_generation_style_review_enabled: bool,
     pub now_ms: i64,
 }
 

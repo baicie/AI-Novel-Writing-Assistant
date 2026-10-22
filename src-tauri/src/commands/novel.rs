@@ -37,6 +37,7 @@ pub struct UpdateNovelRequest {
     pub outline_status: Option<String>,
     pub resource_ready_score: Option<i32>,
     pub status: Option<String>,
+    pub post_generation_style_review_enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +62,7 @@ pub struct CreateNovelSetupRequest {
     pub style_tone: Option<String>,
     pub default_chapter_length: Option<i32>,
     pub estimated_chapter_count: Option<i32>,
+    pub post_generation_style_review_enabled: Option<bool>,
 }
 
 #[tauri::command]
@@ -123,6 +125,9 @@ pub async fn create_novel_with_setup(
             request.style_tone.as_deref().unwrap_or(""),
             request.default_chapter_length,
             request.estimated_chapter_count,
+            request
+                .post_generation_style_review_enabled
+                .unwrap_or(false),
         )
         .await
 }
@@ -191,6 +196,7 @@ pub async fn update_novel(
                 outline_status: request.outline_status,
                 resource_ready_score: request.resource_ready_score,
                 status: request.status,
+                post_generation_style_review_enabled: request.post_generation_style_review_enabled,
             },
         )
         .await

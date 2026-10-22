@@ -24,7 +24,7 @@
 
 ### P1 书稿 SQLite
 
-- SQLx SQLite 打开时启用 WAL、`foreign_keys=ON`、5s busy timeout、4 连接池。
+- SQLx SQLite 打开时启用 WAL、`foreign_keys=ON`、5s busy timeout、4 连接池；migration 0004 补充生成后风格复审开关。
 - 小说：创建、读取详情、列表、更新（事务）、删除命令。
 - 卷：创建、列表、更新、删除；删除有章节的卷会拒绝。
 - 章节：创建（可绑定卷）、读取、列表、正文保存、元数据更新、删除；正文保存和删除均做 `officialVersion` CAS。

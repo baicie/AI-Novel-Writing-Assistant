@@ -59,6 +59,7 @@ impl NovelUseCases for DirectorService {
             storyline_status: "planning".to_string(),
             outline_status: "pending".to_string(),
             resource_ready_score: 0,
+            post_generation_style_review_enabled: input.post_generation_style_review_enabled,
             created_at: 0,
             updated_at: 0,
         })

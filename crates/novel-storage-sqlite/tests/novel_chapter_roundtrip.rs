@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use novel_application::{
     DeleteChapterRecord, NewChapter, NewNovel, NewVolume, NovelRepository, PromoteOutcome,
-    SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
+    SaveChapterRecord, UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord,
 };
 use novel_storage_sqlite::SqliteKernel;
 use tempfile::TempDir;
@@ -46,6 +46,18 @@ async fn long_chapter_roundtrip_survives_reopen_and_preserves_user_edit_guard() 
             })
             .await
             .unwrap();
+        let updated_novel = kernel
+            .update_novel(
+                &novel.id,
+                &UpdateNovelFields {
+                    post_generation_style_review_enabled: Some(true),
+                    ..Default::default()
+                },
+                1_760_000_000_002,
+            )
+            .await
+            .unwrap();
+        assert!(updated_novel.post_generation_style_review_enabled);
         let volume = kernel
             .create_volume(NewVolume {
                 id: "volume-1".into(),
@@ -149,6 +161,8 @@ async fn long_chapter_roundtrip_survives_reopen_and_preserves_user_edit_guard() 
     assert_eq!(chapters[0].title, "第一章：雪夜");
     assert_eq!(chapters[0].sort_order, 2);
 
+    let reopened_novel = reopened.get_novel(&novel.id).await.unwrap();
+    assert!(reopened_novel.post_generation_style_review_enabled);
     let volumes = reopened.list_volumes(&novel.id).await.unwrap();
     assert_eq!(volumes.len(), 1);
     assert_eq!(volumes[0].title, "第一卷：风雪");

@@ -107,13 +107,13 @@
 - 仅核心书稿页面接入 Tauri；自动导演/任务中心写操作/知识库/图像/短剧仍走未迁移路径。
 - 未做 Windows/Linux 交叉打包；`better-sqlite3`/Node 旧路径仍存在于 Electron workspace，但不在 Tauri release 内。
 - Tauri release 的 WKWebView 输入法、粘贴、撤销、长文本滚动和选择行为需人工验收。
-- `postGenerationStyleReviewEnabled`、续写来源字段等旧模型字段在桌面适配器中未完整持久化，已由 501 边界或兼容矩阵限制，不能宣称全量等价。
+- 续写来源字段等旧模型字段在桌面适配器中未完整持久化，已由 501 边界或兼容矩阵限制，不能宣称全量等价；`postGenerationStyleReviewEnabled` 已补入 SQLite migration 0004。
 
 ## 10. 后续继续执行的具体任务
 
 1. 由用户确认并处理 `crates/novel-http/tests/integration_runs.rs`；恢复全 workspace `--all-targets`。
 2. 在用户批准的测试凭据/预算下验证真实 OpenAI-compatible 流式调用与取消。
 3. 完成剩余旧 UI API → Tauri Command 映射，优先自动导演运行投影、任务中心只读详情、章节工作区附属数据。
-4. 补齐续写来源字段、`postGenerationStyleReviewEnabled` 和旧数据字段迁移。
+4. 补齐续写来源字段和其他旧模型字段迁移。
 5. 修复/重做 DMG 打包、签名/公证；在 macOS arm64 上完成人工输入法与长文验收。
 6. 再评估 Windows x64/Linux x64；不要以 Node sidecar 补缺口。

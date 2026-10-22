@@ -136,7 +136,7 @@ impl NovelRepository for SqliteKernel {
                 genre_id, primary_story_mode_id, secondary_story_mode_id, world_id,
                 writing_mode, project_mode, creation_experience,
                 style_tone, default_chapter_length, estimated_chapter_count,
-                created_at, updated_at
+                post_generation_style_review_enabled, created_at, updated_at
              ) VALUES (
                 ?, ?, ?, 'draft',
                 ?, ?, ?, ?,
@@ -144,6 +144,7 @@ impl NovelRepository for SqliteKernel {
                 ?, ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
+                ?, ?,
                 ?, ?
              )",
         )
@@ -166,6 +167,9 @@ impl NovelRepository for SqliteKernel {
         .bind(&input.style_tone)
         .bind(input.default_chapter_length)
         .bind(input.estimated_chapter_count)
+        .bind(i64::from(u8::from(
+            input.post_generation_style_review_enabled,
+        )))
         .bind(input.now_ms)
         .bind(input.now_ms)
         .execute(&self.pool)
@@ -184,7 +188,7 @@ impl NovelRepository for SqliteKernel {
                     narrative_pov, pace_preference, style_tone, emotion_intensity, ai_freedom,
                     default_chapter_length, estimated_chapter_count,
                     project_status, storyline_status, outline_status, resource_ready_score,
-                    created_at, updated_at
+                    post_generation_style_review_enabled, created_at, updated_at
              FROM novel WHERE id = ?",
         )
         .bind(id)
@@ -447,6 +451,17 @@ impl NovelRepository for SqliteKernel {
                 .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
+        }
+        if let Some(value) = fields.post_generation_style_review_enabled {
+            sqlx::query(
+                "UPDATE novel SET post_generation_style_review_enabled = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(i64::from(u8::from(value)))
+            .bind(now_ms)
+            .bind(id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
         }
         tx.commit().await.map_err(map_sql)?;
         self.get_novel(id).await
@@ -1008,6 +1023,10 @@ fn novel_detail_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelDetail, P
         storyline_status: row.try_get("storyline_status").map_err(map_sql)?,
         outline_status: row.try_get("outline_status").map_err(map_sql)?,
         resource_ready_score: row.try_get("resource_ready_score").map_err(map_sql)?,
+        post_generation_style_review_enabled: row
+            .try_get::<i64, _>("post_generation_style_review_enabled")
+            .map_err(map_sql)?
+            != 0,
         created_at: row.try_get("created_at").map_err(map_sql)?,
         updated_at: row.try_get("updated_at").map_err(map_sql)?,
     })

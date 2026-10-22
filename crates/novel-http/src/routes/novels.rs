@@ -82,6 +82,9 @@ pub async fn create(
             payload.style_tone.as_deref().unwrap_or(""),
             payload.default_chapter_length,
             payload.estimated_chapter_count,
+            payload
+                .post_generation_style_review_enabled
+                .unwrap_or(false),
         )
         .await
         .map_err(HttpError::from)?;
@@ -153,6 +156,7 @@ pub async fn update(
         outline_status: payload.outline_status,
         resource_ready_score: payload.resource_ready_score,
         status: payload.status,
+        post_generation_style_review_enabled: payload.post_generation_style_review_enabled,
     };
     let detail = state
         .runtime
@@ -188,9 +192,8 @@ pub async fn set_creation_experience(
     State(state): State<KernelState>,
     Path((id, experience)): Path<(String, String)>,
 ) -> HttpResult<Json<Value>> {
-    let experience = novel_domain::CreationExperience::parse(&experience).ok_or_else(|| {
-        HttpError::bad_request(format!("未知的创作经验：{experience}"))
-    })?;
+    let experience = novel_domain::CreationExperience::parse(&experience)
+        .ok_or_else(|| HttpError::bad_request(format!("未知的创作经验：{experience}")))?;
     let detail = state
         .runtime
         .director
@@ -240,6 +243,7 @@ pub struct CreateNovelBody {
     pub style_tone: Option<String>,
     pub default_chapter_length: Option<i32>,
     pub estimated_chapter_count: Option<i32>,
+    pub post_generation_style_review_enabled: Option<bool>,
 }
 
 #[derive(Deserialize, Default)]
@@ -272,6 +276,7 @@ pub struct UpdateNovelBody {
     pub outline_status: Option<String>,
     pub resource_ready_score: Option<i32>,
     pub status: Option<String>,
+    pub post_generation_style_review_enabled: Option<bool>,
 }
 
 // 链接 ensure_can_promote 的存在，避免 import 警告。
