@@ -453,14 +453,31 @@ impl NovelRepository for SqliteKernel {
     }
 
     async fn delete_novel(&self, id: &str) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapter WHERE novel_id = ?")
+            .bind(id)
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        let volumes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM volume WHERE novel_id = ?")
+            .bind(id)
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        if chapters > 0 || volumes > 0 {
+            return Err(PortError::Conflict(
+                "这本书里还有卷或章节，先导出并删除书稿内容再删除整本书。".into(),
+            ));
+        }
         let result = sqlx::query("DELETE FROM novel WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
         if result.rows_affected() == 0 {
             return Err(PortError::NotFound("没有找到这本书。".into()));
         }
+        tx.commit().await.map_err(map_sql)?;
         Ok(())
     }
 

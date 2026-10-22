@@ -185,27 +185,22 @@ export async function handleLocalAiRevision(
   const processor = createEventProcessor();
 
   try {
-    // 启动本地生成
-    const outcome = await startLocalGeneration({
+    await desktopTransport.startGenerationAwaitCheckpoint({
       commandId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       novelId,
       targetChapterId: chapterId,
-      provider: aiRequest.provider || "opencode-go",
+      provider: aiRequest.provider || "openai-compatible",
       model: aiRequest.model || "gpt-4",
       promptVersions: {
+        chapter_draft: "chapter-draft-v1",
         source: aiRequest.source || "freeform",
         scope: aiRequest.scope || "selection",
         instruction: aiRequest.instruction || "",
       },
-      maxAutomaticRetries: 3,
+      maxAutomaticRetries: 1,
       endpoint: modelSetup.endpoint,
       allowLocalhostHttp: modelSetup.allowLocalhostHttp,
-    });
-
-    // 订阅生成事件
-    await subscribeLocalGeneration(outcome.runId, (event) =>
-      processor.process(event)
-    );
+    }, (event) => processor.process(event));
   } catch (error) {
     const message = error instanceof Error ? error.message : "本地生成启动失败";
     console.error("[Local Generation Error]", message, error);
@@ -262,27 +257,22 @@ export async function handleLocalCursorContinuation(
   const processor = createEventProcessor();
 
   try {
-    // 启动本地生成
-    const outcome = await startLocalGeneration({
+    await desktopTransport.startGenerationAwaitCheckpoint({
       commandId: `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       novelId,
       targetChapterId: chapterId,
-      provider: contRequest.provider || "opencode-go",
+      provider: contRequest.provider || "openai-compatible",
       model: contRequest.model || "gpt-4",
       promptVersions: {
+        chapter_draft: "chapter-draft-v1",
         source: "continuation",
         operation: contRequest.operation || "continue",
         cursorOffset: String(contRequest.cursorOffset ?? 0),
       },
-      maxAutomaticRetries: 3,
+      maxAutomaticRetries: 1,
       endpoint: modelSetup.endpoint,
       allowLocalhostHttp: modelSetup.allowLocalhostHttp,
-    });
-
-    // 订阅生成事件
-    await subscribeLocalGeneration(outcome.runId, (event) =>
-      processor.process(event)
-    );
+    }, (event) => processor.process(event));
   } catch (error) {
     const message = error instanceof Error ? error.message : "本地续写启动失败";
     console.error("[Local Continuation Error]", message, error);

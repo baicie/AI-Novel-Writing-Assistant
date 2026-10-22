@@ -152,6 +152,10 @@ async fn long_chapter_roundtrip_survives_reopen_and_preserves_user_edit_guard() 
     let volumes = reopened.list_volumes(&novel.id).await.unwrap();
     assert_eq!(volumes.len(), 1);
     assert_eq!(volumes[0].title, "第一卷：风雪");
+    assert!(matches!(
+        reopened.delete_novel(&novel.id).await,
+        Err(novel_application::PortError::Conflict(_))
+    ));
 }
 
 #[tokio::test]

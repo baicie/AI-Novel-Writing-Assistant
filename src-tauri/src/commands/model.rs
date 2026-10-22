@@ -35,8 +35,18 @@ pub struct OsModelSecrets {
 impl ModelSecrets for OsModelSecrets {
     async fn api_key(&self, provider: &str) -> Result<Option<String>, PortError> {
         use novel_platform::SecretStore;
-        self.store
+        let key = self
+            .store
             .get(provider)
+            .await
+            .map_err(|_| PortError::Storage("系统凭据暂时不可用".into()))?;
+        if key.is_some() {
+            return Ok(key);
+        }
+        // The desktop currently stores one OpenAI-compatible credential. Runs may carry a
+        // different provider label, but they still refer to that same local credential slot.
+        self.store
+            .get(novel_storage_sqlite::MODEL_SECRET_REF)
             .await
             .map_err(|_| PortError::Storage("系统凭据暂时不可用".into()))
     }

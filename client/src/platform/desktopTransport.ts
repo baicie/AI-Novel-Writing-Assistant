@@ -444,6 +444,52 @@ export async function startGeneration(
   return { runId: outcome.runId };
 }
 
+/**
+ * Open a run and wait until the first candidate checkpoint is visible to the editor.
+ * This closes the race between `open_run` and `subscribe_run` without polling.
+ */
+export async function startGenerationAwaitCheckpoint(
+  input: StartGeneration,
+  onEvent: (event: GenerationEvent) => void,
+  timeoutMs = 180_000,
+): Promise<{ runId: string }> {
+  const outcome = await invoke<CommandOutcome>("open_run", { request: input });
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      finish(new Error("本地生成等待超时，请检查模型服务后重试。"));
+    }, timeoutMs);
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        void cancelGeneration(outcome.runId).catch(() => undefined);
+        reject(error);
+        return;
+      }
+      resolve();
+    };
+    const deliver = (event: GenerationEvent) => {
+      onEvent(event);
+      if (event.kind === "checkpoint_saved") {
+        finish();
+      } else if (event.kind === "run_failed" || event.kind === "run_cancelled") {
+        finish(new Error("本地生成没有产生可用候选。"));
+      }
+    };
+    void subscribeRun({ runId: outcome.runId }, deliver)
+      .then(async () => {
+        const missed = await replayRunEvents({ runId: outcome.runId, afterSeq: 0 });
+        missed.forEach(deliver);
+      })
+      .catch((error: unknown) => {
+        finish(error instanceof Error ? error : new Error("本地生成订阅失败。"));
+      });
+  });
+  return { runId: outcome.runId };
+}
+
 export function generateText(
   input: GenerateTextInput,
   onEvent: (event: TextStreamEvent) => void,
