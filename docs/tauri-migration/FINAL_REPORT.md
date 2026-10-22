@@ -1,7 +1,7 @@
 # Tauri 2 + Rust 迁移最终报告
 
-报告时间：2026-10-23（UTC+08:00）  
-分支：`migration/tauri-2-rust`  
+报告时间：2026-10-23（UTC+08:00）
+分支：`migration/tauri-2-rust`
 基线：`8a1beae6`
 
 ## 1. 当前迁移完成状态
