@@ -74,7 +74,7 @@
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：202 tests |
+| `cargo test --workspace --exclude novel-http` | PASS：203 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
 | `cargo test -p novel-storage-sqlite` | PASS：4 + 3 tests |
 | `cargo test -p novel-llm` | PASS：8 + 3 tests |
@@ -90,14 +90,14 @@
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；DMG `bundle_dmg.sh` 失败 |
 | 隔离数据目录启动 release `.app` | PASS：进程运行、SQLite 4 个迁移、prompt seed、WebView bootstrap Command 日志；主进程 RSS 约 67–74 MB |
 | Release 路由 smoke（`/novels`） | PASS：预置 1 本书后，`NovelList` 实际调用 `list_novels` 并返回 count=1 |
-| Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel` 和 `get_chapter` |
+| Release 路由 smoke（章节编辑器） | PASS：预置章节后，编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace` |
 | Release 路由 smoke（小说编辑页） | PASS：`/novels/:id/edit` 实际调用 `get_novel`，页面无未捕获异常 |
 | Release 路由 smoke（新建小说页） | PASS：`/novels/create` 加载，实际调用 `list_novels`，无未捕获异常 |
 | Release 路由 smoke（设置页） | PASS：`/settings` 加载，无未捕获异常；模型密钥命令由 Transport 提供 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
 
-已跟踪 Rust 测试合计 257 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 258 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 8. 构建产物及路径
 

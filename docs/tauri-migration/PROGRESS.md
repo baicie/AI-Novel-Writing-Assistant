@@ -6,7 +6,7 @@
 - 截止时间：2026-10-23T10:00:00+08:00
 - 基线：`8a1beae6`
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
-- 最新本地提交：代码最新提交 `679c19d5`；文档提交紧随
+- 最新本地提交：代码最新提交 `8852b675`；文档提交紧随
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.21 MiB）
 - 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 67–74 MB；release 路由 smoke 已验证设置页、新建小说页、小说列表、小说编辑页与章节编辑器页面。
 - 可复现脚本：`scripts/smoke-tauri-route.sh`（隔离临时数据目录，不触碰用户数据库）。
@@ -58,7 +58,7 @@
 ## 最近失败/未决
 
 - `cargo test --workspace --all-targets` 仍会被用户未跟踪的 `crates/novel-http/tests/integration_runs.rs` 阻塞；该文件引用不存在的测试辅助方法，不是本次改动。
-- P3 核心书稿路径已在 release `.app` 中验证：小说列表路由实际调用 `list_novels`，章节编辑器路由实际调用 `get_novel`/`get_chapter`；任务中心写操作、自动导演、知识库、图像等仍是未迁移 API，适配器会返回明确 501 而不是静默假成功。
+- P3 核心书稿路径已在 release `.app` 中验证：小说列表路由实际调用 `list_novels`，章节编辑器路由实际调用 `get_novel`、`get_chapter` 和原生 `get_chapter_editor_workspace`；任务中心写操作、自动导演、知识库、图像等仍是未迁移 API，适配器会返回明确 501 而不是静默假成功。
 - Tauri 真实 GUI 交互尚未由用户验收；只做了编译、构建与启动/握手验证。
 - macOS DMG 生成失败（`bundle_dmg.sh`），`.app` 成功；未签名/未公证。
 - 自动导演、任务中心写操作、知识库管理、图像/短剧等旧页面仍未迁移。
