@@ -33,9 +33,9 @@
 - 处理：保留成功的 `.app`；未尝试签名、公证或上传。
 - 下一动作：在交互式 macOS 构建机或 CI 上重跑 DMG，检查 `hdiutil`/AppleScript/Finder 权限；完成后再做签名与公证。
 
-## B-006 根级 `pnpm typecheck` 默认 Node 堆不足（已缓解）
+## B-006 根级 `pnpm typecheck` 默认 Node 堆不足（已解决）
 
 - 现象：默认 Node 堆下 `pnpm typecheck` 的 server `tsc` 进程 abort（exit 134）。
 - 复现：`pnpm typecheck`；单独 server 同样失败。
 - 解决：使用 `NODE_OPTIONS=--max-old-space-size=8192 pnpm typecheck` 后 server、client、desktop 三个 typecheck 全部通过。
-- 保留说明：CI/本地需设置足够堆大小；这是旧工作区工具链资源问题，不是 Tauri 迁移运行时缺陷。
+- 已解决：根 `typecheck` 脚本和 Tauri CI 均设置 `NODE_OPTIONS=--max-old-space-size=8192`，`pnpm typecheck` 实际通过。

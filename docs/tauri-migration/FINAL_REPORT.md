@@ -81,7 +81,7 @@
 | `cargo test -p novel-domain -p novel-workflow` | PASS：13 + 6 tests |
 | `cargo test -p novel-http --test integration_novels/integration_chapters/endpoint_tests/integration` | PASS：12 + 9 + 25 + 9 tests（已跟踪测试目标） |
 | `pnpm --filter @ai-novel/client typecheck` | PASS |
-| `pnpm typecheck`（根级） | PASS（`NODE_OPTIONS=--max-old-space-size=8192`）；默认堆下 server tsc 会 abort |
+| `pnpm typecheck`（根级） | PASS；根脚本已设置 `NODE_OPTIONS=--max-old-space-size=8192` |
 | `pnpm --filter @ai-novel/client build` | PASS（有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
