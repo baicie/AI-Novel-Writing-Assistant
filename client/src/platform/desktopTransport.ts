@@ -360,7 +360,7 @@ export function updateChapterMeta(input: {
 
 export function exportNovel(input: {
   novelId: string;
-  format: "markdown" | "json";
+  format: "markdown" | "json" | "txt";
 }): Promise<string> {
   return invoke("export_novel", input);
 }

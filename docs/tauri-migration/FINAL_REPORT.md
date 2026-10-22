@@ -28,7 +28,7 @@
 | Durable Workflow | VERIFIED（最小章节链） | 状态机/事件/CAS/命令幂等/Gate/checkpoint/恢复测试通过 |
 | 旧数据导入 | VERIFIED（工具） | 双库一致性备份、只读旧库、ID 映射、关系/正文校验、未支持字段报告 |
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试 |
-| 导入导出 | PARTIAL | Rust JSON/Markdown 导出 Command；旧下载按钮未全部接入 |
+| 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | NOT_STARTED 或 PARTIAL | 未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
 | macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.21 MiB |
 | macOS arm64 DMG | BLOCKED | `bundle_dmg.sh` 在当前构建环境失败；不是代码编译失败 |

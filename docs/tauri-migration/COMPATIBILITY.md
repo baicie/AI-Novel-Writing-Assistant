@@ -18,7 +18,7 @@
 | Run 工作流 | TS LangGraph/导演 | VERIFIED（最小内核） | Run 状态机、事件、CAS、Gate、checkpoint、幂等、取消、恢复测试 |
 | 旧数据导入 | Prisma/旧 SQLite | VERIFIED（工具） | 只读旧库、双库一致性备份、ID 映射、数量/关系/正文 hash 校验、未支持项报告 |
 | FTS5 检索 | 服务型 RAG/Qdrant | VERIFIED（基础能力） | FTS5 中文 bigram/词项测试、向量余弦适配、RRF/预算组装测试 |
-| 导入导出 | Express | PARTIAL | Rust JSON/Markdown 导出 helper + Tauri command；旧 UI 下载按钮尚未全部映射 |
+| 导入导出 | Express | PARTIAL | Rust JSON/Markdown/TXT 导出 Command，整书下载适配器已接；分章/其他导出范围尚未映射 |
 | 图像/短剧/漫画/知识库 UI | Node/Prisma | NOT_STARTED | 明确返回 `NOT_MIGRATED`，不静默成功 |
 | 自动导演全链路 | Node/LangGraph | NOT_STARTED（桌面命令层） | Rust workflow 仅最小章节生产链；旧 UI 的导演状态/恢复未接入 |
 | macOS arm64 Release Bundle | Electron Builder | VERIFIED（本机） | `.app` 19.21 MiB；DMG/签名/公证未完成 |

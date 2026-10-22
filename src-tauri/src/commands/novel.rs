@@ -300,7 +300,16 @@ pub async fn export_novel(
         "json" => novel_platform::novel_json(&export)
             .map_err(|_| AppError::integrity("导出内容无法序列化。")),
         "markdown" | "md" => Ok(novel_platform::chapter_markdown(&export)),
-        _ => Err(AppError::validation("导出格式只支持 markdown 或 json。")),
+        "txt" => {
+            let mut output = format!("{}\n\n{}\n", export.title, export.description);
+            for chapter in export.chapters {
+                output.push_str(&format!("\n{}\n\n{}\n", chapter.title, chapter.content));
+            }
+            Ok(output)
+        }
+        _ => Err(AppError::validation(
+            "导出格式只支持 markdown、json 或 txt。",
+        )),
     }
 }
 

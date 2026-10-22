@@ -277,6 +277,32 @@ async function updateChapter(config: AxiosRequestConfig, novelId: string, chapte
   });
 }
 
+async function exportNovelFile(config: InternalAxiosRequestConfig, novelId: string): Promise<AxiosResponse> {
+  const query = queryOf(config);
+  const format = (query.get("format") ?? "txt").toLowerCase();
+  const scope = query.get("scope") ?? "full";
+  if (scope !== "full" || !["txt", "markdown", "json"].includes(format)) {
+    unsupported(config);
+  }
+  const text = await transport.exportNovel({
+    novelId,
+    format: format as "txt" | "markdown" | "json",
+  });
+  const mime = format === "json" ? "application/json" : format === "markdown" ? "text/markdown" : "text/plain";
+  const extension = format === "json" ? "json" : format === "markdown" ? "md" : "txt";
+  return {
+    data: new Blob([text], { type: `${mime};charset=utf-8` }),
+    status: 200,
+    statusText: "OK",
+    headers: new AxiosHeaders({
+      "content-type": `${mime};charset=utf-8`,
+      "content-disposition": `attachment; filename="novel.${extension}"`,
+    }),
+    config,
+    request: null,
+  };
+}
+
 async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   const method = methodOf(config);
   const path = pathOf(config);
@@ -570,6 +596,10 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
 
 export const desktopApiAdapter: AxiosAdapter = async (config) => {
   try {
+    const exportMatch = pathOf(config).match(/^\/novels\/([^/]+)\/export$/);
+    if (exportMatch && methodOf(config) === "get") {
+      return await exportNovelFile(config, decodeURIComponent(exportMatch[1]!));
+    }
     const data = await route(config);
     return {
       data,
