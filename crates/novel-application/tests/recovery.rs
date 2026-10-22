@@ -356,6 +356,9 @@ async fn knowledge_search_keeps_trace_to_ids() {
     )
     .await
     .unwrap();
+    let documents = KnowledgeRepository::list_documents(&kernel).await.unwrap();
+    assert_eq!(documents.len(), 2);
+    assert!(documents.iter().any(|document| document.title == "角色"));
     let hits = KnowledgeRepository::search_keyword(
         &kernel,
         "n",
