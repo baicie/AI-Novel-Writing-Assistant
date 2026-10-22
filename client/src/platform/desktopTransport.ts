@@ -493,7 +493,12 @@ export async function startGenerationAwaitCheckpoint(
       onEvent(event);
       if (event.kind === "checkpoint_saved") {
         finish();
-      } else if (event.kind === "run_failed" || event.kind === "run_cancelled") {
+      } else if (
+        event.kind === "run_failed"
+        || event.kind === "run_cancelled"
+        || event.kind === "run_paused"
+        || event.kind === "run_completed"
+      ) {
         finish(new Error("本地生成没有产生可用候选。"));
       }
     };

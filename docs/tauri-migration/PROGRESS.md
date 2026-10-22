@@ -6,9 +6,9 @@
 - 截止时间：2026-10-23T10:00:00+08:00
 - 基线：`8a1beae6`
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
-- 最新本地提交：`630574d1`（后续文档/命令改动会继续提交）
+- 最新本地提交：`d1c8ed34`（文档更新会再产生提交）
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.16 MiB）
-- 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 3 个迁移、1 条 prompt seed；主进程 RSS 约 78.5 MB。
+- 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 72 MB。
 
 ## 已完成并验证
 
@@ -66,3 +66,7 @@
 
 - 继续完成自动导演/章节工作区附属 API 的 Command 映射；补齐续写来源字段。
 - 运行最终 fmt/check/clippy、前端 build、Tauri release bundle 与人工 GUI 验收。
+
+## 发布说明
+
+本次提交是桌面内核迁移切片，不是可直接发布的用户版本；按仓库规则未写入用户可见 release notes。待 UI 验收、签名和 DMG 完成后再合并到 `beta` 并补发布说明。
