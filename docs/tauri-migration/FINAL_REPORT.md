@@ -104,6 +104,7 @@
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG 尝试路径（未成功）：`target/aarch64-apple-darwin/release/bundle/dmg/`
 - 迁移报告与文档：`docs/tauri-migration/`
+- 路由冒烟脚本：`scripts/smoke-tauri-route.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
 
 ## 9. 剩余阻塞和已知风险
