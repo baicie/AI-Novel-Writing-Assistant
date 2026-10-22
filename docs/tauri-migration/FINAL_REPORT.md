@@ -22,7 +22,7 @@
 | 卷 CRUD | VERIFIED（内核） | 卷序唯一约束、含章节删除拒绝、事务更新 |
 | 章节 CRUD/正文保存 | VERIFIED（核心路径） | CAS 版本检查、用户正文保护、重启读回 |
 | 章节修订 | VERIFIED（读取/追加） | 只追加 `chapter_revision`；尚无恢复旧版本的独立 UI |
-| 自动保存/章节切换 | PARTIAL | Plate 编辑器保存已接 Command；工作区附属数据仍有未迁移字段 |
+| 自动保存/章节切换 | VERIFIED（保存命令链路） | Renderer → Tauri `save_chapter` → SQLite 保存/重开 smoke 通过；Plate 自动保存交互仍待人工验收，工作区附属字段仍为 PARTIAL |
 | 模型设置/密钥 | VERIFIED（Command） | OS Keychain + SQLite provider credential |
 | AI 流式生成 | VERIFIED（Mock/网关） | Tauri Channel、SSE、取消、超时、有限重试、token 上限；真实付费调用未执行 |
 | Durable Workflow | VERIFIED（最小章节链） | 状态机/事件/CAS/命令幂等/Gate/checkpoint/恢复测试通过 |
