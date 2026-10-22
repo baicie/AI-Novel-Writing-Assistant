@@ -84,7 +84,7 @@ pub async fn create(
             payload.estimated_chapter_count,
             payload
                 .post_generation_style_review_enabled
-                .unwrap_or(false),
+                .unwrap_or(true),
         )
         .await
         .map_err(HttpError::from)?;
