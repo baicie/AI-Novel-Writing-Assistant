@@ -106,11 +106,16 @@ if (hasDesktopShell()) {
         `/novels/${novelId}`,
         { description: "适配器更新后的简介", postGenerationStyleReviewEnabled: true },
       );
+      const exported = await apiClient.get<Blob>(`/novels/${novelId}/export`, {
+        params: { format: "txt", scope: "full" },
+        responseType: "blob",
+      });
+      const exportText = await exported.data.text();
       reportClientRuntime({
         config: runtimeConfig ?? null,
         locationHash: window.location.hash,
         runtimeMode: APP_RUNTIME,
-        message: `adapter smoke ok version=${saved.data.data.officialVersion} chars=${reopened.data.data.content.length} updated=${updated.data.data.description}/${updated.data.data.postGenerationStyleReviewEnabled}`,
+        message: `adapter smoke ok version=${saved.data.data.officialVersion} chars=${reopened.data.data.content.length} updated=${updated.data.data.description}/${updated.data.data.postGenerationStyleReviewEnabled} export=${exportText.length}`,
       }).catch(() => undefined);
     }).catch((error: unknown) => reportError(`adapter smoke failed: ${String(error)}`));
   }
