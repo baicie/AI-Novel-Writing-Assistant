@@ -73,6 +73,16 @@ export interface CharacterSnapshot {
   updatedAt: number;
 }
 
+export interface KnowledgeDocumentSummary {
+  id: string;
+  novelId: string;
+  ownerType: string;
+  title: string;
+  version: number;
+  indexStatus: string;
+  createdAt: number;
+}
+
 export interface ChapterSnapshot {
   id: string;
   novelId: string;
@@ -583,6 +593,10 @@ export function generateText(
 
 export function cancelTextGeneration(requestId: string): Promise<void> {
   return invoke("cancel_text_generation", { requestId });
+}
+
+export function listKnowledgeDocuments(): Promise<KnowledgeDocumentSummary[]> {
+  return invoke("list_knowledge_documents");
 }
 
 export function indexKnowledge(input: IndexKnowledgeInput): Promise<void> {

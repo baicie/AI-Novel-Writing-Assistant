@@ -33,6 +33,7 @@ fn main() {
         "save_model_setup",
         "has_api_key",
         "index_knowledge",
+        "list_knowledge_documents",
         "search_knowledge",
         "search_knowledge_vector",
         "list_genres",

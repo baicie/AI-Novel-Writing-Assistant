@@ -27,10 +27,10 @@
 | AI 流式生成 | VERIFIED（Mock/网关） | Tauri Channel、SSE、取消、超时、有限重试、token 上限；真实付费调用未执行 |
 | Durable Workflow | VERIFIED（最小章节链） | 状态机/事件/CAS/命令幂等/Gate/checkpoint/恢复测试通过 |
 | 旧数据导入 | VERIFIED（工具） | 双库一致性备份、只读旧库、ID 映射、关系/正文校验、未支持字段报告 |
-| SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试 |
+| SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试；知识库列表已接只读 Command |
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心的迁移运行列表/详情由 `list_all_runs` 只读提供；自动导演、知识库、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
-| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.29 MiB |
+| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.32 MiB |
 | macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
 
@@ -86,7 +86,7 @@
 | `pnpm build`（根级） | PASS（`NODE_OPTIONS=--max-old-space-size=8192`，有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
-| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.29 MiB `.app` |
+| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.32 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；Tauri `bundle_dmg.sh` 失败 |
 | `hdiutil create/verify` 手动 DMG | PASS：8.8 MiB，校验和 VALID，内含 `.app` |
 | `scripts/audit-tauri-release.sh` | PASS：`.app` 无 Node/Electron/sidecar 文件，主二进制未链接 Node/Electron 库 |
@@ -99,6 +99,7 @@
 | Release 路由 smoke（新建小说页） | PASS：`/novels/create` 加载，实际调用 `list_novels`，无未捕获异常 |
 | Release 路由 smoke（设置页） | PASS：`/settings` 加载，无未捕获异常；模型密钥命令由 Transport 提供 |
 | Release 路由 smoke（运行记录） | PASS：预置 1 个 queued Run 后，`/tasks` 实际调用 `list_all_runs` 并返回 count=1；带 `kind/id` 查询时列表与详情投影均加载，无未捕获异常 |
+| Release 路由 smoke（知识库） | PASS：预置 1 个知识文档后，`/knowledge` 实际调用 `list_knowledge_documents` 并返回 count=1，无未捕获异常 |
 | Release 路由巡检（扩展页面） | PASS（仅渲染/不崩溃）：`/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 加载无未捕获异常；未迁移 API 仍返回 501 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
@@ -107,7 +108,7 @@
 
 ## 8. 构建产物及路径
 
-- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.29 MiB）
+- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.32 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`

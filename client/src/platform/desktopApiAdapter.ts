@@ -458,6 +458,30 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
     });
     return ok(detailToNovel(created, [], []));
   }
+  if (path === "/knowledge/documents" && method === "get") {
+    const query = queryOf(config);
+    const keyword = (query.get("keyword") ?? "").trim().toLocaleLowerCase();
+    const documents = await transport.listKnowledgeDocuments();
+    return ok(documents
+      .filter((document) => !keyword || document.title.toLocaleLowerCase().includes(keyword))
+      .map((document) => ({
+        id: document.id,
+        title: document.title,
+        fileName: document.title,
+        kind: "user_upload",
+        sourceAnalysisId: null,
+        status: "enabled",
+        activeVersionId: null,
+        activeVersionNumber: document.version,
+        latestIndexStatus: document.indexStatus === "ready" ? "succeeded" : document.indexStatus === "failed" ? "failed" : "idle",
+        latestIndexError: null,
+        lastIndexedAt: null,
+        createdAt: iso(document.createdAt),
+        updatedAt: iso(document.createdAt),
+        versionCount: 1,
+        bookAnalysisCount: 0,
+      })));
+  }
   if (path === "/genres" && method === "get") {
     const genres = await transport.listGenres();
     const now = new Date().toISOString();

@@ -1,4 +1,6 @@
-use novel_application::{AppError, KnowledgeRepository, NewDocument, NewEmbedding, SearchHit};
+use novel_application::{
+    AppError, KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, NewEmbedding, SearchHit,
+};
 use novel_context::{Lexicon, fts_query, tokenize};
 use serde::Deserialize;
 use tauri::State;
@@ -54,6 +56,18 @@ pub async fn index_knowledge(
         })
         .await
         .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn list_knowledge_documents(
+    state: State<'_, AppState>,
+) -> Result<Vec<KnowledgeDocumentSummary>, AppError> {
+    let documents = state.kernel.list_documents().await?;
+    tracing::info!(
+        count = documents.len(),
+        "knowledge documents served to webview"
+    );
+    Ok(documents)
 }
 
 #[tauri::command]

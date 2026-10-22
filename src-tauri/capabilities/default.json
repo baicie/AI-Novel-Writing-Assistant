@@ -40,6 +40,7 @@
     "allow-save-model-setup",
     "allow-has-api-key",
     "allow-index-knowledge",
+    "allow-list-knowledge-documents",
     "allow-search-knowledge",
     "allow-search-knowledge-vector",
     "allow-list-genres",

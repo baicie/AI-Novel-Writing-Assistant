@@ -7,7 +7,7 @@
 - 基线：`8a1beae6`
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
 - 最新本地提交：代码最新提交 `d94df349`；文档提交紧随
-- 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.29 MiB）
+- 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.32 MiB）
 - 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 67–74 MB；release 路由 smoke 已验证设置页、新建小说页、小说列表、小说编辑页（含人物列表）、章节编辑器页面；`/tasks` 已验证迁移运行列表；`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 仅验证渲染不崩溃，未迁移 API 仍返回 501。
 - 可复现脚本：`scripts/smoke-tauri-route.sh`、`scripts/smoke-tauri-save.sh`、`scripts/smoke-tauri-adapter.sh`（均使用隔离临时数据目录，不触碰用户数据库）。
 
@@ -53,7 +53,7 @@
 
 - Run 状态机、持久化事件、RunContract、命令幂等、CAS、Approval Gate、step checkpoint、取消与恢复已在 Rust application/storage/workflow 层存在。
 - 单书单活跃 Run 由部分唯一索引保证。
-- 证据：`cargo test -p novel-application` 158 个测试通过；`cargo test -p novel-application --test recovery` 6 个测试通过；`novel-domain` 13 个、`novel-workflow` 6 个测试通过；`/tasks` 路由 smoke 实际调用 `list_all_runs`，预置 queued Run 时返回 count=1；带 `kind/id` 查询时详情投影也加载。
+- 证据：`cargo test -p novel-application` 158 个测试通过；`cargo test -p novel-application --test recovery` 6 个测试通过；`novel-domain` 13 个、`novel-workflow` 6 个测试通过；`/tasks` 路由 smoke 实际调用 `list_all_runs`，预置 queued Run 时返回 count=1；带 `kind/id` 查询时详情投影也加载；`/knowledge` 实际调用 `list_knowledge_documents`，预置文档返回 count=1。
 
 ## 最近失败/未决
 

@@ -1,7 +1,10 @@
 use std::ops::DerefMut;
 
 use async_trait::async_trait;
-use novel_application::{KnowledgeRepository, NewDocument, PortError, RetrievalTrace, SearchHit};
+use novel_application::{
+    KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, PortError, RetrievalTrace,
+    SearchHit,
+};
 use novel_context::{cosine, decode_f32, encode_f32};
 use sqlx::Row;
 
@@ -52,6 +55,29 @@ impl KnowledgeRepository for SqliteKernel {
         }
         tx.commit().await.map_err(map_sql)?;
         Ok(())
+    }
+
+    async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, owner_type, title, version, index_status, created_at
+             FROM knowledge_document ORDER BY created_at DESC LIMIT 500",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(KnowledgeDocumentSummary {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    owner_type: row.try_get("owner_type").map_err(map_sql)?,
+                    title: row.try_get("title").map_err(map_sql)?,
+                    version: row.try_get("version").map_err(map_sql)?,
+                    index_status: row.try_get("index_status").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
     }
 
     async fn search_keyword(

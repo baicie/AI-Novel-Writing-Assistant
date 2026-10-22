@@ -9,9 +9,9 @@ use novel_workflow::AttemptView;
 
 use crate::dto::{
     ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
-    CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary,
-    RecoverableTaskSummary, RunContract, RunSummary, TaskOverviewSummary, UpdateNovelFields,
-    VolumeSnapshot,
+    CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult, NovelDetail,
+    NovelSummary, RecoverableTaskSummary, RunContract, RunSummary, TaskOverviewSummary,
+    UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -485,6 +485,7 @@ pub trait WorkflowRepository: Send + Sync {
 #[async_trait]
 pub trait KnowledgeRepository: Send + Sync {
     async fn index_document(&self, document: NewDocument) -> Result<(), PortError>;
+    async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError>;
     async fn search_keyword(
         &self,
         novel_id: &str,

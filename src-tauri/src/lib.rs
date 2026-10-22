@@ -161,6 +161,7 @@ pub fn run() {
             commands::model::save_model_setup,
             commands::model::has_api_key,
             commands::knowledge::index_knowledge,
+            commands::knowledge::list_knowledge_documents,
             commands::knowledge::search_knowledge,
             commands::knowledge::search_knowledge_vector,
             commands::setup::list_genres,

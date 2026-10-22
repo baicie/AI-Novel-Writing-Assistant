@@ -184,6 +184,19 @@ pub struct ChapterRevisionSnapshot {
     pub created_at: i64,
 }
 
+/// 知识文档只读摘要，用于桌面知识库列表。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeDocumentSummary {
+    pub id: String,
+    pub novel_id: String,
+    pub owner_type: String,
+    pub title: String,
+    pub version: i64,
+    pub index_status: String,
+    pub created_at: i64,
+}
+
 /// 运行摘要，用于列表展示。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
