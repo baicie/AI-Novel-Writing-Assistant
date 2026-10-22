@@ -43,3 +43,12 @@
 - 前端启动会调用 `report_client_runtime` 记录 runtime mode、hash 和未捕获异常；命令日志中出现 `novel list served` / `chapter served` 可确认路由确实经过 Tauri Command，而不是只加载了空壳。
 - 产物必须使用 `AI_NOVEL_CLIENT_BASE=relative` 构建 Vite 资源，否则 Tauri 自定义协议下懒加载 chunk 可能失败。
 - 不要把 `report_client_runtime` 记录扩展为携带正文、API Key 或用户输入；它只用于运行时/路由诊断。
+
+## Legacy SQLite Import Boundaries
+
+- 旧库只以 `query_only` 只读连接打开；导入前后分别对源库和目标库做 `VACUUM INTO` 一致性备份，禁止把旧库直接当成新库修改。
+- 导入保留旧 ID，并在 `legacy_id_map` 中记录 legacy table/id、new table/id；重复导入通过映射跳过，不重复创建。
+- 当前导入范围是 Novel、World、Character、VolumePlan/VolumeChapterPlan、Chapter 和旧 Director Run 的最小核心数据。旧表其他字段不猜测语义，写入 `unsupported` 报告，由用户决定后续补迁。
+- `Novel.worldId` 只在对应 World 已成功映射时写入新 `novel.world_id`；找不到映射时保留为空，不制造悬空外键。
+- 旧 running/waiting Run 一律转为 paused + migration_review_required，不自动重放，避免迁移时重复调用模型或重复计费。
+- 校验包括源/目标数量、章节归属、小说世界归属、正文内容与 SHA-256。出现不一致时导入失败，不静默接受部分数据。
