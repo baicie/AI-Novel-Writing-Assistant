@@ -51,7 +51,7 @@
 - `client/src/platform/desktopTransport.ts`：唯一 Tauri invoke/Channel 边界，使用官方 `@tauri-apps/api/core`。
 - `client/src/platform/desktopApiAdapter.ts`：对旧页面保留 REST 形态，但把核心小说/章节/卷/设置/任务读取请求转成 Tauri Commands；未实现路径返回 `NOT_MIGRATED` 501。
 - 小说列表、创建小说基础字段、详情读取、章节保存、章节列表、模型密钥设置、任务概览/恢复候选读取已接入。
-- 章节编辑器继续使用现有 Plate 文档和快捷保存；保存使用 `officialVersion` CAS。小说创建在桌面模式跳过云端 workflow bootstrap。
+- 章节编辑器继续使用现有 Plate 文档和快捷保存；工作区投影由 `get_chapter_editor_workspace` Tauri Command 返回；保存使用 `officialVersion` CAS。小说创建在桌面模式跳过云端 workflow bootstrap。
 - 未迁移的旧页面不会被假成功掩盖；错误会显式显示。
 
 ## 5. SQLite 和旧数据迁移状态
