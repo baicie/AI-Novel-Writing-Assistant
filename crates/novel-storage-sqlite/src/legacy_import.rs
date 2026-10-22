@@ -27,6 +27,8 @@ pub struct MigrationReport {
     pub source_commit: String,
     pub status: String,
     pub novels: usize,
+    pub worlds: usize,
+    pub characters: usize,
     pub volumes: usize,
     pub chapters: usize,
     pub runs_paused_for_review: usize,
@@ -76,6 +78,8 @@ pub async fn import_legacy(
         source_commit: LEGACY_SCHEMA_COMMIT.into(),
         status: "verified".into(),
         novels: 0,
+        worlds: 0,
+        characters: 0,
         volumes: 0,
         chapters: 0,
         runs_paused_for_review: 0,
@@ -89,7 +93,9 @@ pub async fn import_legacy(
     };
     collect_gaps(&source_pool, &mut report).await?;
     let mut tx = target_kernel.pool().begin().await.map_err(map_sql)?;
+    import_worlds(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_novels(&source_pool, &mut tx, now_ms, &mut report).await?;
+    import_characters(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_volumes(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_chapters(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_runs(&source_pool, &mut tx, now_ms, &mut report).await?;
@@ -128,6 +134,8 @@ async fn collect_gaps(source: &SqlitePool, report: &mut MigrationReport) -> Resu
         ) {
             let allowed: &[&str] = match table.as_str() {
                 "Novel" => &["id", "title", "description", "status"],
+                "World" => &["id", "name", "description", "overviewSummary", "status"],
+                "Character" => &["id", "novelId", "name", "role"],
                 "VolumePlan" => &["id", "novelId", "sortOrder", "title", "summary"],
                 "VolumeChapterPlan" => &["id", "volumeId", "chapterId", "chapterOrder"],
                 "Chapter" => &["id", "novelId", "title", "content", "order"],
@@ -160,6 +168,98 @@ async fn collect_gaps(source: &SqlitePool, report: &mut MigrationReport) -> Resu
                 reason: "这张旧表不在第一阶段可导入的创作资料里。".into(),
             });
         }
+    }
+    Ok(())
+}
+
+async fn import_worlds(
+    source: &SqlitePool,
+    tx: &mut crate::db::Tx<'_>,
+    now_ms: i64,
+    report: &mut MigrationReport,
+) -> Result<(), PortError> {
+    if !table_names(source)
+        .await?
+        .iter()
+        .any(|table| table == "World")
+    {
+        return Ok(());
+    }
+    let rows = sqlx::query("SELECT id, name, description, overviewSummary, status FROM World")
+        .fetch_all(source)
+        .await
+        .map_err(map_sql)?;
+    for row in rows {
+        let id: String = row.try_get("id").map_err(map_sql)?;
+        if mapped(tx, "World", &id).await? {
+            report.worlds += 1;
+            continue;
+        }
+        let name: String = row.try_get("name").map_err(map_sql)?;
+        let description: Option<String> = row.try_get("description").map_err(map_sql)?;
+        let overview: Option<String> = row.try_get("overviewSummary").map_err(map_sql)?;
+        let status: Option<String> = row.try_get("status").map_err(map_sql)?;
+        sqlx::query(
+            "INSERT INTO world(id, name, description, overview_summary, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(&name)
+        .bind(description.unwrap_or_default())
+        .bind(overview.unwrap_or_default())
+        .bind(status.unwrap_or_else(|| "draft".into()))
+        .bind(now_ms)
+        .bind(now_ms)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        remember(tx, "World", &id, "world", &id, None).await?;
+        report.worlds += 1;
+    }
+    Ok(())
+}
+
+async fn import_characters(
+    source: &SqlitePool,
+    tx: &mut crate::db::Tx<'_>,
+    now_ms: i64,
+    report: &mut MigrationReport,
+) -> Result<(), PortError> {
+    if !table_names(source)
+        .await?
+        .iter()
+        .any(|table| table == "Character")
+    {
+        return Ok(());
+    }
+    let rows = sqlx::query("SELECT id, novelId, name, role FROM Character")
+        .fetch_all(source)
+        .await
+        .map_err(map_sql)?;
+    for row in rows {
+        let id: String = row.try_get("id").map_err(map_sql)?;
+        if mapped(tx, "Character", &id).await? {
+            report.characters += 1;
+            continue;
+        }
+        let novel_id: String = row.try_get("novelId").map_err(map_sql)?;
+        let name: String = row.try_get("name").map_err(map_sql)?;
+        let role: Option<String> = row.try_get("role").map_err(map_sql)?;
+        sqlx::query(
+            "INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, '{}', ?, ?)",
+        )
+        .bind(&id)
+        .bind(&novel_id)
+        .bind(&name)
+        .bind(role.unwrap_or_default())
+        .bind(now_ms)
+        .bind(now_ms)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        remember(tx, "Character", &id, "character", &id, None).await?;
+        report.characters += 1;
     }
     Ok(())
 }
@@ -443,10 +543,22 @@ async fn verify_import(
     report: &mut MigrationReport,
 ) -> Result<(), PortError> {
     let source_novels = count_if_table(source, "Novel").await?;
+    let source_worlds = count_if_table(source, "World").await?;
+    let source_characters = count_if_table(source, "Character").await?;
     let source_chapters = count_if_table(source, "Chapter").await?;
     let source_volumes = count_if_table(source, "VolumePlan").await?;
     let target_novels: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'Novel'")
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    let target_worlds: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'World'")
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    let target_characters: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'Character'")
             .fetch_one(tx.deref_mut())
             .await
             .map_err(map_sql)?;
@@ -461,6 +573,8 @@ async fn verify_import(
             .await
             .map_err(map_sql)?;
     if target_novels < source_novels
+        || target_worlds < source_worlds
+        || target_characters < source_characters
         || target_volumes < source_volumes
         || target_chapters < source_chapters
     {

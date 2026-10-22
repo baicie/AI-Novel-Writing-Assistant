@@ -95,6 +95,20 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO Novel (id, title, description, status, secretNote) VALUES ('n1','旧书','简介','draft','不要丢')")
         .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE Character (id TEXT PRIMARY KEY, novelId TEXT, name TEXT, role TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO Character (id, novelId, name, role) VALUES ('ch1','n1','林动','protagonist')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE World (id TEXT PRIMARY KEY, name TEXT, description TEXT, overviewSummary TEXT, status TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO World (id, name, description, overviewSummary, status) VALUES ('w1','旧世界','旧描述','旧概览','active')")
+        .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE VolumePlan (id TEXT PRIMARY KEY, novelId TEXT, sortOrder INTEGER, title TEXT, summary TEXT)")
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO VolumePlan (id, novelId, sortOrder, title, summary) VALUES ('v1','n1',1,'第一卷','旧卷摘要')")
@@ -139,6 +153,8 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
             .any(|item| item.table == "ImageJob")
     );
     assert_eq!(report.runs_paused_for_review, 1);
+    assert_eq!(report.worlds, 1);
+    assert_eq!(report.characters, 1);
     assert_eq!(report.volumes, 1);
     assert!(report.content_verified);
     assert!(report.relationships_verified);

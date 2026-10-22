@@ -16,7 +16,7 @@
 | 基础设置 | Express + Prisma | PARTIAL | 小说基础字段、生成后风格复审开关、模型设置已迁移；模型路由、任务策略等未迁移 |
 | AI 流式生成 | Express SSE / LangGraph | VERIFIED（Mock + 网关） | reqwest SSE、Tauri Channel、超时、取消、有限重试、token 上限测试；未做真实付费调用 |
 | Run 工作流 | TS LangGraph/导演 | VERIFIED（最小内核） | Run 状态机、事件、CAS、Gate、checkpoint、幂等、取消、恢复测试 |
-| 旧数据导入 | Prisma/旧 SQLite | VERIFIED（工具） | 只读旧库、双库一致性备份、ID 映射、卷/章节归属、数量/关系/正文 hash 校验、未支持项报告 |
+| 旧数据导入 | Prisma/旧 SQLite | VERIFIED（工具） | 只读旧库、双库一致性备份、ID 映射、世界/角色/卷/章节归属、数量/关系/正文 hash 校验、未支持项报告 |
 | FTS5 检索 | 服务型 RAG/Qdrant | VERIFIED（基础能力） | FTS5 中文 bigram/词项测试、向量余弦适配、RRF/预算组装测试 |
 | 导入导出 | Express | PARTIAL | Rust JSON/Markdown/TXT 导出 Command，整书下载适配器已接；分章/其他导出范围尚未映射 |
 | 图像/短剧/漫画/知识库 UI | Node/Prisma | NOT_STARTED | 明确返回 `NOT_MIGRATED`，不静默成功 |
