@@ -45,9 +45,9 @@
 ### P4 旧库导入
 
 - 旧库只读打开（`query_only=ON`）；导入前对源库和目标库分别做 `VACUUM INTO` 一致性备份。
-- 旧 ID 保留并写 `legacy_id_map`；running/waiting 旧 Run 不自动重放，转 `paused + migration_review_required`。
+- 旧 ID 保留并写 `legacy_id_map`；旧 `VolumePlan`/`VolumeChapterPlan` 导入为卷及章节归属；running/waiting 旧 Run 不自动重放，转 `paused + migration_review_required`。
 - 校验小说/章节数量、章节关系、正文 SHA-256 与正文内容；未支持字段/表写入报告。
-- 证据：`cargo test -p novel-storage-sqlite --test invariants` 通过，含 >1MB 旧正文、备份文件存在、原库字节不变、重复导入。
+- 证据：`cargo test -p novel-storage-sqlite --test invariants` 通过，含 >1MB 旧正文、卷/章节归属、备份文件存在、原库字节不变、重复导入。
 
 ### P5 Durable Workflow
 

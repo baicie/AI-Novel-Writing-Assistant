@@ -95,6 +95,14 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO Novel (id, title, description, status, secretNote) VALUES ('n1','旧书','简介','draft','不要丢')")
         .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE VolumePlan (id TEXT PRIMARY KEY, novelId TEXT, sortOrder INTEGER, title TEXT, summary TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO VolumePlan (id, novelId, sortOrder, title, summary) VALUES ('v1','n1',1,'第一卷','旧卷摘要')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE VolumeChapterPlan (id TEXT PRIMARY KEY, volumeId TEXT, chapterId TEXT, chapterOrder INTEGER)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO VolumeChapterPlan (id, volumeId, chapterId, chapterOrder) VALUES ('vp1','v1','c1',1)")
+        .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE Chapter (id TEXT PRIMARY KEY, novelId TEXT, title TEXT, content TEXT, \"order\" INTEGER)")
         .execute(&pool).await.unwrap();
     let legacy_content = "旧正文长段落。".repeat(80_000);
@@ -131,6 +139,7 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
             .any(|item| item.table == "ImageJob")
     );
     assert_eq!(report.runs_paused_for_review, 1);
+    assert_eq!(report.volumes, 1);
     assert!(report.content_verified);
     assert!(report.relationships_verified);
     assert!(Path::new(&report.source_backup).is_file());
@@ -142,6 +151,12 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     assert_eq!(chapter.content.len(), legacy_content.len());
     assert_eq!(chapter.content, legacy_content);
     assert_eq!(chapter.protection, "user_edited");
+    let volume_id: Option<String> =
+        sqlx::query_scalar("SELECT volume_id FROM chapter WHERE id = 'c1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(volume_id.as_deref(), Some("v1"));
     let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = 'r1'")
         .fetch_one(kernel.pool())
         .await

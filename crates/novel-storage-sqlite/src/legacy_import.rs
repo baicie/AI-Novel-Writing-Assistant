@@ -27,6 +27,7 @@ pub struct MigrationReport {
     pub source_commit: String,
     pub status: String,
     pub novels: usize,
+    pub volumes: usize,
     pub chapters: usize,
     pub runs_paused_for_review: usize,
     pub source_backup: String,
@@ -75,6 +76,7 @@ pub async fn import_legacy(
         source_commit: LEGACY_SCHEMA_COMMIT.into(),
         status: "verified".into(),
         novels: 0,
+        volumes: 0,
         chapters: 0,
         runs_paused_for_review: 0,
         source_backup: source_backup.display().to_string(),
@@ -88,6 +90,7 @@ pub async fn import_legacy(
     collect_gaps(&source_pool, &mut report).await?;
     let mut tx = target_kernel.pool().begin().await.map_err(map_sql)?;
     import_novels(&source_pool, &mut tx, now_ms, &mut report).await?;
+    import_volumes(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_chapters(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_runs(&source_pool, &mut tx, now_ms, &mut report).await?;
     verify_import(&source_pool, &mut tx, &mut report).await?;
@@ -116,10 +119,17 @@ async fn collect_gaps(source: &SqlitePool, report: &mut MigrationReport) -> Resu
     for table in &tables {
         if matches!(
             table.as_str(),
-            "Novel" | "Chapter" | "DirectorNextRun" | "DirectorNextRunControl"
+            "Novel"
+                | "VolumePlan"
+                | "VolumeChapterPlan"
+                | "Chapter"
+                | "DirectorNextRun"
+                | "DirectorNextRunControl"
         ) {
             let allowed: &[&str] = match table.as_str() {
                 "Novel" => &["id", "title", "description", "status"],
+                "VolumePlan" => &["id", "novelId", "sortOrder", "title", "summary"],
+                "VolumeChapterPlan" => &["id", "volumeId", "chapterId", "chapterOrder"],
                 "Chapter" => &["id", "novelId", "title", "content", "order"],
                 "DirectorNextRun" => &["id", "novelId", "planVersion", "contractJson"],
                 "DirectorNextRunControl" => &[
@@ -196,6 +206,51 @@ async fn import_novels(
     Ok(())
 }
 
+async fn import_volumes(
+    source: &SqlitePool,
+    tx: &mut crate::db::Tx<'_>,
+    now_ms: i64,
+    report: &mut MigrationReport,
+) -> Result<(), PortError> {
+    if !table_names(source)
+        .await?
+        .iter()
+        .any(|table| table == "VolumePlan")
+    {
+        return Ok(());
+    }
+    let rows = sqlx::query("SELECT id, novelId, sortOrder, title, summary FROM VolumePlan")
+        .fetch_all(source)
+        .await
+        .map_err(map_sql)?;
+    for row in rows {
+        let id: String = row.try_get("id").map_err(map_sql)?;
+        if mapped(tx, "VolumePlan", &id).await? {
+            report.volumes += 1;
+            continue;
+        }
+        let novel_id: String = row.try_get("novelId").map_err(map_sql)?;
+        let sort_order: i64 = row.try_get("sortOrder").map_err(map_sql)?;
+        let title: String = row.try_get("title").map_err(map_sql)?;
+        let summary: Option<String> = row.try_get("summary").map_err(map_sql)?;
+        sqlx::query(
+            "INSERT INTO volume(id, novel_id, title, sort_order, summary) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind(&novel_id)
+        .bind(&title)
+        .bind(sort_order)
+        .bind(summary.unwrap_or_default())
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        remember(tx, "VolumePlan", &id, "volume", &id, None).await?;
+        report.volumes += 1;
+    }
+    let _ = now_ms;
+    Ok(())
+}
+
 async fn import_chapters(
     source: &SqlitePool,
     tx: &mut crate::db::Tx<'_>,
@@ -224,6 +279,13 @@ async fn import_chapters(
         let title: String = row.try_get("title").map_err(map_sql)?;
         let content: Option<String> = row.try_get("content").map_err(map_sql)?;
         let sort_order: i64 = row.try_get("sort_order").map_err(map_sql)?;
+        let volume_id: Option<String> = sqlx::query_scalar(
+            "SELECT volumeId FROM VolumeChapterPlan WHERE chapterId = ? ORDER BY chapterOrder LIMIT 1",
+        )
+        .bind(&id)
+        .fetch_optional(source)
+        .await
+        .unwrap_or(None);
         let content = content.unwrap_or_default();
         let hash = hex_sha256(content.as_bytes());
         let protection = if content.is_empty() {
@@ -231,9 +293,10 @@ async fn import_chapters(
         } else {
             "user_edited"
         };
-        sqlx::query("INSERT INTO chapter(id, novel_id, title, sort_order, protection, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO chapter(id, novel_id, volume_id, title, sort_order, protection, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&id)
             .bind(&novel_id)
+            .bind(volume_id.as_deref())
             .bind(&title)
             .bind(sort_order)
             .bind(protection)
@@ -381,6 +444,7 @@ async fn verify_import(
 ) -> Result<(), PortError> {
     let source_novels = count_if_table(source, "Novel").await?;
     let source_chapters = count_if_table(source, "Chapter").await?;
+    let source_volumes = count_if_table(source, "VolumePlan").await?;
     let target_novels: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'Novel'")
             .fetch_one(tx.deref_mut())
@@ -391,7 +455,15 @@ async fn verify_import(
             .fetch_one(tx.deref_mut())
             .await
             .map_err(map_sql)?;
-    if target_novels < source_novels || target_chapters < source_chapters {
+    let target_volumes: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'VolumePlan'")
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    if target_novels < source_novels
+        || target_volumes < source_volumes
+        || target_chapters < source_chapters
+    {
         return Err(PortError::Integrity("导入后的书稿数量少于旧库。".into()));
     }
     let orphaned: i64 = sqlx::query_scalar(

@@ -59,7 +59,7 @@
 - 新库路径：Tauri app data dir 下的 `novel.sqlite`；已启用 WAL、`foreign_keys=ON`、5 秒 busy timeout。
 - migrations 由 Rust 内嵌加载，事务逐条执行并记录 `schema_migration`。
 - 长正文验证：>1MB 中文正文写入、版本冲突、关闭并重开读取、用户保护正文阻止 AI promotion。
-- 旧库导入：源库只读；导入前分别生成源库/目标库 `VACUUM INTO` 备份；保留旧 ID 映射；校验小说/章节数量、章节归属、正文 SHA-256 和正文内容；未支持表/列写入报告。
+- 旧库导入：源库只读；导入前分别生成源库/目标库 `VACUUM INTO` 备份；保留旧 ID 映射；校验小说/卷/章节数量、章节归属、正文 SHA-256 和正文内容；未支持表/列写入报告。
 - 旧 running Run 转为 `paused + migration_review_required`，不自动重放。
 
 ## 6. LLM / Workflow / RAG 状态
