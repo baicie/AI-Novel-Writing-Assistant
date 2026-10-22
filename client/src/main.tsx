@@ -82,6 +82,34 @@ if (hasDesktopShell()) {
       }).catch(() => undefined);
     })().catch((error: unknown) => reportError(`save smoke failed: ${String(error)}`));
   }
+
+  if ((window as Window & { __AI_NOVEL_SMOKE_ADAPTER__?: unknown }).__AI_NOVEL_SMOKE_ADAPTER__ === true) {
+    void import("./api/client").then(async ({ apiClient }) => {
+      const created = await apiClient.post<{ data: { id: string } }>("/novels", {
+        title: "适配器烟测",
+        description: "",
+      });
+      const novelId = created.data.data.id;
+      const chapter = await apiClient.post<{ data: { id: string; title: string } }>(
+        `/novels/${novelId}/chapters`,
+        { title: "第一章", order: 1 },
+      );
+      const chapterId = chapter.data.data.id;
+      const saved = await apiClient.put<{ data: { officialVersion: number; content: string } }>(
+        `/novels/${novelId}/chapters/${chapterId}`,
+        { expectedVersion: 0, title: "第一章", content: "适配器保存正文。" },
+      );
+      const reopened = await apiClient.get<{ data: { content: string } }>(
+        `/novels/${novelId}/chapters/${chapterId}`,
+      );
+      reportClientRuntime({
+        config: runtimeConfig ?? null,
+        locationHash: window.location.hash,
+        runtimeMode: APP_RUNTIME,
+        message: `adapter smoke ok version=${saved.data.data.officialVersion} chars=${reopened.data.data.content.length}`,
+      }).catch(() => undefined);
+    }).catch((error: unknown) => reportError(`adapter smoke failed: ${String(error)}`));
+  }
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

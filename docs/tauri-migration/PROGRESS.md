@@ -9,7 +9,7 @@
 - 最新本地提交：代码最新提交 `2a476dcd`；文档提交紧随
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.25 MiB）
 - 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 67–74 MB；release 路由 smoke 已验证设置页、新建小说页、小说列表、小说编辑页（含人物列表）、章节编辑器页面；扩展页面 `/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 仅验证渲染不崩溃，未迁移 API 仍返回 501。
-- 可复现脚本：`scripts/smoke-tauri-route.sh`、`scripts/smoke-tauri-save.sh`（均使用隔离临时数据目录，不触碰用户数据库）。
+- 可复现脚本：`scripts/smoke-tauri-route.sh`、`scripts/smoke-tauri-save.sh`、`scripts/smoke-tauri-adapter.sh`（均使用隔离临时数据目录，不触碰用户数据库）。
 
 ## 已完成并验证
 
@@ -31,7 +31,7 @@
 - 章节：创建（可绑定卷）、读取、列表、正文保存、元数据更新、删除；正文保存和删除均做 `officialVersion` CAS。
 - 修订：`chapter_revision` 追加写入，`list_chapter_revisions` 可读取。
 - 手工编辑后 `protection=user_edited`；AI `promote_candidate` 在保护状态下返回 `Blocked`。
-- 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands。
+- 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands；Adapter 的创建/保存/重开全链路 smoke 已通过。
 - 证据：`cargo test -p novel-storage-sqlite` 8 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书；`scripts/smoke-tauri-save.sh` 已验证 Renderer → Tauri `save_chapter` → SQLite 的真实保存/重开链路。
 
 ### P2 LLM 网关

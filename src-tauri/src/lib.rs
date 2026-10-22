@@ -90,6 +90,11 @@ pub fn run() {
             } else {
                 ""
             };
+            let adapter_smoke_script = if std::env::var("BIZ_NOVEL_SMOKE_ADAPTER").is_ok() {
+                "window.__AI_NOVEL_SMOKE_ADAPTER__ = true;"
+            } else {
+                ""
+            };
             let runtime_script = format!(
                 "window.__AI_NOVEL_RUNTIME__ = {}; window.__AI_NOVEL_START_ROUTE__ = {}; {route_script}",
                 serde_json::json!({
@@ -101,7 +106,7 @@ pub fn run() {
                 }),
                 serde_json::json!(start_route)
             );
-            let runtime_script = format!("{runtime_script}{save_smoke_script}");
+            let runtime_script = format!("{runtime_script}{save_smoke_script}{adapter_smoke_script}");
             let webview_url = if tauri::is_dev() {
                 let dev_url = app
                     .config()
