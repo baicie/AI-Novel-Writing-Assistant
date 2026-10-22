@@ -29,7 +29,7 @@
 | 旧数据导入 | VERIFIED（工具） | 双库一致性备份、只读旧库、ID 映射、关系/正文校验、未支持字段报告 |
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试 |
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
-| 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心的迁移运行列表由 `list_all_runs` 只读提供；自动导演、知识库、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
+| 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心的迁移运行列表/详情由 `list_all_runs` 只读提供；自动导演、知识库、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
 | macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.29 MiB |
 | macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
@@ -131,7 +131,7 @@
 
 1. 由用户确认并处理 `crates/novel-http/tests/integration_runs.rs`；恢复全 workspace `--all-targets`。
 2. 在用户批准的测试凭据/预算下验证真实 OpenAI-compatible 流式调用与取消。
-3. 完成剩余旧 UI API → Tauri Command 映射，优先自动导演运行投影、任务中心只读详情、章节工作区附属数据。
+3. 完成剩余旧 UI API → Tauri Command 映射，优先自动导演运行投影、章节工作区附属数据和知识库管理。
 4. 补齐续写来源字段和其他旧模型字段迁移。
 5. 修复/重做 DMG 打包、签名/公证；在 macOS arm64 上完成人工输入法与长文验收。
 6. 再评估 Windows x64/Linux x64；不要以 Node sidecar 补缺口。
