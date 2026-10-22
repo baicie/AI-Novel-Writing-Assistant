@@ -321,6 +321,7 @@ impl Worker {
                     endpoint: claimed.contract.endpoint.clone(),
                     api_key,
                     allow_localhost_http: claimed.contract.allow_localhost_http,
+                    max_output_tokens: claimed.contract.token_budget,
                 },
                 sender,
                 cancel,
@@ -668,10 +669,31 @@ impl Worker {
             &claimed.run_id,
             committed.seq,
             kind,
-            step_id,
+            step_id.clone(),
             payload,
             occurred_at,
         ) {
+            self.hub.emit(event);
+        }
+        // `save_candidate` already persisted a checkpoint event before the step event. Re-emit
+        // that exact stored event on the live channel so subscribers see the same seq they would
+        // receive after reconnecting and replaying.
+        if kind == "step_succeeded"
+            && step_id.as_deref() == Some("draft")
+            && let Ok(stored_events) = self.runs.events_after(&claimed.run_id, 0).await
+            && let Some(stored) = stored_events
+                .iter()
+                .rev()
+                .find(|event| event.kind == "checkpoint_saved")
+            && let Some(event) = event_from_stored(
+                &stored.run_id,
+                stored.seq,
+                &stored.kind,
+                stored.step_id.clone(),
+                &stored.payload_json,
+                stored.occurred_at,
+            )
+        {
             self.hub.emit(event);
         }
         tracing::info!(run_id = %claimed.run_id, status = committed.control.status.as_str(), "run advanced");

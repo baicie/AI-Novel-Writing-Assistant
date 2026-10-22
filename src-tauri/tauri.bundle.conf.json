@@ -1,12 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "build": {
-    "beforeBuildCommand": "pnpm build:desktop:backend && pnpm --filter @ai-novel/client build && pnpm stage:tauri-sidecar"
-  },
   "bundle": {
-    "externalBin": ["../target/tauri-sidecar/bin/node"],
-    "resources": {
-      "../target/tauri-sidecar/server/": "server/"
-    }
+    "targets": [
+      "app",
+      "dmg"
+    ]
   }
 }

@@ -45,20 +45,31 @@ impl LookupRepository for SqliteKernel {
         .await
         .map_err(map_sql)?;
 
-        let (current_milestone, attention, latest_novel_id, latest_chapter_id, latest_chapter_title) =
-            if novel_count == 0 {
-                ("environment", true, None, None, None)
-            } else {
-                match first_chapter {
-                    Some(row) => {
-                        let id: String = row.try_get("id").map_err(map_sql)?;
-                        let title: String = row.try_get("title").map_err(map_sql)?;
-                        let novel_id: String = row.try_get("novel_id").map_err(map_sql)?;
-                        ("first_chapter", false, Some(novel_id), Some(id), Some(title))
-                    }
-                    None => ("first_chapter", true, None, None, None),
+        let (
+            current_milestone,
+            attention,
+            latest_novel_id,
+            latest_chapter_id,
+            latest_chapter_title,
+        ) = if novel_count == 0 {
+            ("environment", true, None, None, None)
+        } else {
+            match first_chapter {
+                Some(row) => {
+                    let id: String = row.try_get("id").map_err(map_sql)?;
+                    let title: String = row.try_get("title").map_err(map_sql)?;
+                    let novel_id: String = row.try_get("novel_id").map_err(map_sql)?;
+                    (
+                        "first_chapter",
+                        false,
+                        Some(novel_id),
+                        Some(id),
+                        Some(title),
+                    )
                 }
-            };
+                None => ("first_chapter", true, None, None, None),
+            }
+        };
 
         let milestones = build_milestones(current_milestone, attention);
         Ok(FirstNovelOnboarding {
@@ -94,11 +105,31 @@ fn story_mode_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<StoryMode, PortE
 
 fn build_milestones(current: &str, attention: bool) -> Vec<FirstNovelMilestone> {
     let definitions: &[(&str, &str, &str)] = &[
-        ("environment", "创作环境", "配置一个能完成规划、正文和审校的文本模型。"),
-        ("idea_direction", "灵感与方向", "写下一句话灵感，并从 AI 给出的方向中选择一套。"),
-        ("preparation", "开书准备", "AI 准备故事、世界、角色、卷章规划和执行资源。"),
-        ("production_choice", "生产方式", "选择 AI 持续写完整本书，或进入专业工作台。"),
-        ("first_chapter", "首章成稿", "等待第一章完成后，打开正文开始阅读。"),
+        (
+            "environment",
+            "创作环境",
+            "配置一个能完成规划、正文和审校的文本模型。",
+        ),
+        (
+            "idea_direction",
+            "灵感与方向",
+            "写下一句话灵感，并从 AI 给出的方向中选择一套。",
+        ),
+        (
+            "preparation",
+            "开书准备",
+            "AI 准备故事、世界、角色、卷章规划和执行资源。",
+        ),
+        (
+            "production_choice",
+            "生产方式",
+            "选择 AI 持续写完整本书，或进入专业工作台。",
+        ),
+        (
+            "first_chapter",
+            "首章成稿",
+            "等待第一章完成后，打开正文开始阅读。",
+        ),
     ];
     let current_index = definitions
         .iter()

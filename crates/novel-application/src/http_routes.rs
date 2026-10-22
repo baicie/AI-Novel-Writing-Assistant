@@ -1,5 +1,5 @@
 //! HTTP 层 - 路由集成示例
-//! 
+//!
 //! 展示如何将 UseCase 与 HTTP 层集成。
 //! 实际使用时需要与 actix-web 或其他框架集成。
 
@@ -9,7 +9,7 @@ use crate::http_request::ValidateRequest;
 pub trait HttpHandler {
     type Request: ValidateRequest;
     type Response;
-    
+
     /// 处理 HTTP 请求并返回响应
     fn handle(request: Self::Request) -> Result<Self::Response, String>;
 }
@@ -36,17 +36,17 @@ impl HttpRouteRegistry {
             "POST /api/runs/:run_id/approve",
         ]
     }
-    
+
     /// 获取路由端点总数
     pub fn endpoint_count() -> usize {
         Self::endpoints().len()
     }
-    
+
     /// 检查某个端点是否存在
     pub fn has_endpoint(path: &str) -> bool {
         Self::endpoints().contains(&path)
     }
-    
+
     /// 获取特定类型的路由数量
     pub fn count_by_method(method: &str) -> usize {
         Self::endpoints()
@@ -64,10 +64,12 @@ impl RouteMapping {
     pub fn novel_routes() -> Vec<&'static str> {
         HttpRouteRegistry::endpoints()
             .into_iter()
-            .filter(|e| e.contains("/api/novels") && !e.contains("/chapters") && !e.contains("/runs"))
+            .filter(|e| {
+                e.contains("/api/novels") && !e.contains("/chapters") && !e.contains("/runs")
+            })
             .collect()
     }
-    
+
     /// 获取章节相关的路由
     pub fn chapter_routes() -> Vec<&'static str> {
         HttpRouteRegistry::endpoints()
@@ -75,7 +77,7 @@ impl RouteMapping {
             .filter(|e| e.contains("/chapters"))
             .collect()
     }
-    
+
     /// 获取运行相关的路由
     pub fn run_routes() -> Vec<&'static str> {
         HttpRouteRegistry::endpoints()
@@ -108,11 +110,11 @@ mod tests {
         // 小说路由 (6 个)
         let novel_routes = RouteMapping::novel_routes();
         assert_eq!(novel_routes.len(), 6);
-        
+
         // 章节路由 (5 个)
         let chapter_routes = RouteMapping::chapter_routes();
         assert_eq!(chapter_routes.len(), 5);
-        
+
         // 运行路由 (2 个)
         let run_routes = RouteMapping::run_routes();
         assert_eq!(run_routes.len(), 2);
@@ -121,12 +123,12 @@ mod tests {
     #[test]
     fn test_all_http_methods_covered() {
         let endpoints = HttpRouteRegistry::endpoints();
-        
+
         let has_post = endpoints.iter().any(|e| e.starts_with("POST"));
         let has_get = endpoints.iter().any(|e| e.starts_with("GET"));
         let has_put = endpoints.iter().any(|e| e.starts_with("PUT"));
         let has_delete = endpoints.iter().any(|e| e.starts_with("DELETE"));
-        
+
         assert!(has_post, "应该有 POST 端点");
         assert!(has_get, "应该有 GET 端点");
         assert!(has_put, "应该有 PUT 端点");
@@ -146,10 +148,10 @@ mod tests {
         let get_count = HttpRouteRegistry::count_by_method("GET");
         let put_count = HttpRouteRegistry::count_by_method("PUT");
         let delete_count = HttpRouteRegistry::count_by_method("DELETE");
-        
-        assert_eq!(post_count, 6);  // POST: novels, chapters, runs, creation-experience, promote, approve
-        assert_eq!(get_count, 4);   // GET: novels, chapters (multiple)
-        assert_eq!(put_count, 2);   // PUT: novels, chapters
+
+        assert_eq!(post_count, 6); // POST: novels, chapters, runs, creation-experience, promote, approve
+        assert_eq!(get_count, 4); // GET: novels, chapters (multiple)
+        assert_eq!(put_count, 2); // PUT: novels, chapters
         assert_eq!(delete_count, 1); // DELETE: novels
     }
 
@@ -181,7 +183,7 @@ mod tests {
         let novel = RouteMapping::novel_routes();
         let chapter = RouteMapping::chapter_routes();
         let run = RouteMapping::run_routes();
-        
+
         let total = novel.len() + chapter.len() + run.len();
         assert_eq!(total, 13, "所有路由应该被分类覆盖");
     }
@@ -189,27 +191,31 @@ mod tests {
     #[test]
     fn test_rest_conventions() {
         let endpoints = HttpRouteRegistry::endpoints();
-        
+
         // POST 用于创建
-        let creates = endpoints.iter()
+        let creates = endpoints
+            .iter()
             .filter(|e| e.starts_with("POST"))
             .collect::<Vec<_>>();
         assert!(creates.iter().all(|e| e.contains("POST")));
-        
+
         // GET 用于查询
-        let reads = endpoints.iter()
+        let reads = endpoints
+            .iter()
             .filter(|e| e.starts_with("GET"))
             .collect::<Vec<_>>();
         assert!(reads.iter().all(|e| e.contains("GET")));
-        
+
         // PUT 用于更新
-        let updates = endpoints.iter()
+        let updates = endpoints
+            .iter()
             .filter(|e| e.starts_with("PUT"))
             .collect::<Vec<_>>();
         assert!(updates.iter().all(|e| e.contains("PUT")));
-        
+
         // DELETE 用于删除
-        let deletes = endpoints.iter()
+        let deletes = endpoints
+            .iter()
             .filter(|e| e.starts_with("DELETE"))
             .collect::<Vec<_>>();
         assert!(deletes.iter().all(|e| e.contains("DELETE")));
@@ -231,10 +237,10 @@ mod tests {
 //         return HttpResponse::BadRequest()
 //             .json(ErrorResponse::new("VALIDATION", e));
 //     }
-//     
+//
 //     // 调用 UseCase 并处理响应
 //     // ...
-//     
+//
 //     HttpResponse::Created().finish()
 // }
 //

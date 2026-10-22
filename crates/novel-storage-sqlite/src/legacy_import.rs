@@ -1,5 +1,5 @@
 use std::ops::DerefMut;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use novel_application::PortError;
 use novel_domain::{PauseKind, RunPause, StopSignalKind};
@@ -29,6 +29,10 @@ pub struct MigrationReport {
     pub novels: usize,
     pub chapters: usize,
     pub runs_paused_for_review: usize,
+    pub source_backup: String,
+    pub target_backup: Option<String>,
+    pub content_verified: bool,
+    pub relationships_verified: bool,
     pub unsupported: Vec<UnsupportedItem>,
 }
 
@@ -40,6 +44,18 @@ pub async fn import_legacy(
     if source == target {
         return Err(PortError::Conflict("不能把旧库直接当成新库来改。".into()));
     }
+    if !source.is_file() {
+        return Err(PortError::NotFound("没有找到旧资料库。".into()));
+    }
+    let source_backup = backup_path(source, "source-backup", now_ms);
+    consistent_backup(source, &source_backup).await?;
+    let target_backup = if target.exists() {
+        let path = backup_path(target, "target-backup", now_ms);
+        consistent_backup(target, &path).await?;
+        Some(path)
+    } else {
+        None
+    };
     let source_pool =
         SqlitePool::connect_with(SqliteConnectOptions::new().filename(source).read_only(true))
             .await
@@ -55,6 +71,12 @@ pub async fn import_legacy(
         novels: 0,
         chapters: 0,
         runs_paused_for_review: 0,
+        source_backup: source_backup.display().to_string(),
+        target_backup: target_backup
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        content_verified: false,
+        relationships_verified: false,
         unsupported: Vec::new(),
     };
     collect_gaps(&source_pool, &mut report).await?;
@@ -62,6 +84,7 @@ pub async fn import_legacy(
     import_novels(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_chapters(&source_pool, &mut tx, now_ms, &mut report).await?;
     import_runs(&source_pool, &mut tx, now_ms, &mut report).await?;
+    verify_import(&source_pool, &mut tx, &mut report).await?;
     if !report.unsupported.is_empty() {
         report.status = "completed_with_gaps".into();
     }
@@ -312,6 +335,118 @@ async fn import_runs(
         remember(tx, "DirectorNextRun", &id, "workflow_run", &id, None).await?;
     }
     Ok(())
+}
+
+fn backup_path(path: &Path, label: &str, now_ms: i64) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("novel.sqlite");
+    path.with_file_name(format!("{file_name}.{label}-{now_ms}.sqlite"))
+}
+
+async fn consistent_backup(source: &Path, backup: &Path) -> Result<(), PortError> {
+    if backup.exists() {
+        return Err(PortError::Conflict("备份文件已存在，不会覆盖。".into()));
+    }
+    let pool =
+        SqlitePool::connect_with(SqliteConnectOptions::new().filename(source).read_only(true))
+            .await
+            .map_err(map_sql)?;
+    let escaped = backup.display().to_string().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{escaped}'"))
+        .execute(&pool)
+        .await
+        .map_err(map_sql)?;
+    pool.close().await;
+    let size = std::fs::metadata(backup)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    if size == 0 {
+        return Err(PortError::Integrity("一致性备份没有生成有效文件。".into()));
+    }
+    Ok(())
+}
+
+async fn verify_import(
+    source: &SqlitePool,
+    tx: &mut crate::db::Tx<'_>,
+    report: &mut MigrationReport,
+) -> Result<(), PortError> {
+    let source_novels = count_if_table(source, "Novel").await?;
+    let source_chapters = count_if_table(source, "Chapter").await?;
+    let target_novels: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'Novel'")
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    let target_chapters: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM legacy_id_map WHERE legacy_table = 'Chapter'")
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    if target_novels < source_novels || target_chapters < source_chapters {
+        return Err(PortError::Integrity("导入后的书稿数量少于旧库。".into()));
+    }
+    let orphaned: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM legacy_id_map map
+         LEFT JOIN chapter c ON c.id = map.new_id AND map.new_table = 'chapter'
+         LEFT JOIN novel n ON n.id = c.novel_id
+         WHERE map.legacy_table = 'Chapter' AND n.id IS NULL",
+    )
+    .fetch_one(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    if orphaned != 0 {
+        return Err(PortError::Integrity("导入后有章节找不到所属小说。".into()));
+    }
+    if source_chapters > 0 {
+        let rows = sqlx::query("SELECT id, content FROM Chapter")
+            .fetch_all(source)
+            .await
+            .map_err(map_sql)?;
+        for row in rows {
+            let legacy_id: String = row.try_get("id").map_err(map_sql)?;
+            let source_content: Option<String> = row.try_get("content").map_err(map_sql)?;
+            let source_content = source_content.unwrap_or_default();
+            let expected_hash = hex_sha256(source_content.as_bytes());
+            let stored: Option<(String, String)> = sqlx::query_as(
+                "SELECT r.content, r.content_sha256
+                 FROM legacy_id_map map
+                 JOIN chapter_revision r ON r.id = 'legacy-revision-' || map.new_id
+                 WHERE map.legacy_table = 'Chapter' AND map.legacy_id = ?",
+            )
+            .bind(&legacy_id)
+            .fetch_optional(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+            let Some((content, hash)) = stored else {
+                if source_content.is_empty() {
+                    continue;
+                }
+                return Err(PortError::Integrity("导入后有章节正文缺失。".into()));
+            };
+            if hash != expected_hash || content != source_content {
+                return Err(PortError::Integrity(
+                    "导入后的章节正文与旧库校验不一致。".into(),
+                ));
+            }
+        }
+    }
+    report.content_verified = true;
+    report.relationships_verified = true;
+    Ok(())
+}
+
+async fn count_if_table(pool: &SqlitePool, table: &str) -> Result<i64, PortError> {
+    if !table_names(pool).await?.iter().any(|name| name == table) {
+        return Ok(0);
+    }
+    sqlx::query_scalar(&format!("SELECT COUNT(*) FROM \"{table}\""))
+        .fetch_one(pool)
+        .await
+        .map_err(map_sql)
 }
 
 fn map_legacy_status(status: &str) -> (&'static str, Option<RunPause>) {

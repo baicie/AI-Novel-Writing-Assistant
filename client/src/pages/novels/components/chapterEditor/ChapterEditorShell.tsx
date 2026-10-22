@@ -127,6 +127,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const [selectedDiagnosticId, setSelectedDiagnosticId] = useState<string | null>(null);
   const [isVersionDrawerOpen, setIsVersionDrawerOpen] = useState(false);
   const [loadedSnapshotId, setLoadedSnapshotId] = useState<string | null>(null);
+  const [savedOfficialVersion, setSavedOfficialVersion] = useState(chapter?.officialVersion ?? 0);
 
   const draft = useChapterDraft({
     novelId,
@@ -146,6 +147,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     setRevisionScope("selection");
     setIsVersionDrawerOpen(false);
     setLoadedSnapshotId(null);
+    setSavedOfficialVersion(chapter?.officialVersion ?? 0);
     lastPreviewRequestRef.current = null;
     lastContinuationRequestRef.current = null;
   }, [chapter?.id]);
@@ -215,13 +217,20 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           label: `chapter-editor:before-version-load:${chapter.order}:${Date.now()}`,
         });
       }
-      return updateNovelChapter(novelId, chapter.id, { content: nextContent, expectedUpdatedAt: draft.savedUpdatedAt });
+      return updateNovelChapter(novelId, chapter.id, {
+        content: nextContent,
+        expectedUpdatedAt: draft.savedUpdatedAt,
+        expectedVersion: savedOfficialVersion,
+      });
     },
     onMutate: () => {
       setSaveStatus("saving");
     },
     onSuccess: async (response, nextContent) => {
       draft.acknowledgeSave(nextContent, { content: response.data?.content, updatedAt: String(response.data?.updatedAt ?? Date.now()) });
+      if (typeof response.data?.officialVersion === "number") {
+        setSavedOfficialVersion(response.data.officialVersion);
+      }
       setLoadedSnapshotId(null);
       setSaveStatus("saved");
       await invalidateChapterQueries();

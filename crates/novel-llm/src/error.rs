@@ -18,6 +18,8 @@ pub enum LlmError {
     EndpointRejected(String),
     #[error("{0}")]
     StructuredOutput(String),
+    #[error("{0}")]
+    BudgetExceeded(String),
 }
 
 impl LlmError {
@@ -29,7 +31,8 @@ impl LlmError {
             | Self::Unauthorized
             | Self::InvalidResponse(_)
             | Self::EndpointRejected(_)
-            | Self::StructuredOutput(_) => false,
+            | Self::StructuredOutput(_)
+            | Self::BudgetExceeded(_) => false,
         }
     }
 }

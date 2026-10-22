@@ -674,7 +674,7 @@ impl WorkflowRepository for SqliteKernel {
             let contract_json: String = row.try_get("contract_json").map_err(map_sql)?;
             let contract: RunContract = serde_json::from_str(&contract_json)
                 .map_err(|_| PortError::Integrity("运行合同无法解析。".into()))?;
-            
+
             results.push(RunSummary {
                 id: row.try_get("id").map_err(map_sql)?,
                 novel_id: row.try_get("novel_id").map_err(map_sql)?,
@@ -691,7 +691,11 @@ impl WorkflowRepository for SqliteKernel {
     }
 
     /// Phase 2.1: 获取章节的完整详情。
-    async fn get_chapter_full(&self, novel_id: &str, chapter_id: &str) -> Result<ChapterFullDetail, PortError> {
+    async fn get_chapter_full(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<ChapterFullDetail, PortError> {
         let row = sqlx::query(
             "SELECT c.id, c.novel_id, c.title, c.sort_order, c.created_at, c.updated_at,
                     COALESCE(cr.content, '') as content

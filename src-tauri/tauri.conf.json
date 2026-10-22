@@ -6,13 +6,14 @@
   "build": {
     "frontendDist": "../client/dist",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeDevCommand": "pnpm exec concurrently \"pnpm dev:shared\" \"pnpm dev:server\" \"pnpm dev:client:wait\"",
+    "beforeDevCommand": "pnpm --filter @ai-novel/client dev",
     "beforeBuildCommand": "pnpm --filter @ai-novel/client build"
   },
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*; img-src 'self' asset: http://asset: data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+      "devCsp": "default-src 'self' 'unsafe-inline' http://127.0.0.1:5173 ws://127.0.0.1:5173; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:5173 ws://127.0.0.1:5173; img-src 'self' asset: http://asset: data: blob: http://127.0.0.1:5173; style-src 'self' 'unsafe-inline' http://127.0.0.1:5173; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:5173"
     },
     "windows": [
       {
@@ -36,6 +37,9 @@
       "icons/app-icon-256.png",
       "icons/app-icon-512.png"
     ],
-    "targets": ["dmg", "app"]
+    "targets": [
+      "dmg",
+      "app"
+    ]
   }
 }

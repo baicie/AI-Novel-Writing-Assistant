@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { API_BASE_URL, API_TIMEOUT_MS } from "@/lib/constants";
+import { desktopApiAdapter, shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
 import { notifyAccessRequired } from "@/components/layout/AccessGate";
 import { toast } from "@/components/ui/toast";
 
@@ -19,6 +20,7 @@ export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: API_TIMEOUT_MS,
   withCredentials: true,
+  ...(shouldUseDesktopApiAdapter() ? { adapter: desktopApiAdapter } : {}),
 });
 
 const AUTO_DISMISS_SERVER_ERROR_TOAST = {

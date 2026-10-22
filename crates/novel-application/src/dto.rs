@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use novel_domain::{
-    CreationExperience, NarrativeForm, ProjectMode, WritingMode,
-};
+use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -104,6 +102,7 @@ pub struct UpdateNovelFields {
     pub storyline_status: Option<String>,
     pub outline_status: Option<String>,
     pub resource_ready_score: Option<i32>,
+    pub status: Option<String>,
 }
 
 /// 创建小说时的输入，比 Phase 1 的 `NewNovel` 多 setup 字段。
@@ -142,6 +141,30 @@ pub struct ChapterSnapshot {
     pub official_version: i64,
     pub content: String,
     pub updated_at: i64,
+}
+
+/// 卷是章节的稳定分组；排序在单本小说内唯一。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeSnapshot {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub summary: String,
+}
+
+/// 章节修订只追加、不覆盖；恢复正文必须走新的用户修订。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterRevisionSnapshot {
+    pub id: String,
+    pub chapter_id: String,
+    pub version: i64,
+    pub origin: String,
+    pub content: String,
+    pub content_sha256: String,
+    pub created_at: i64,
 }
 
 /// 运行摘要，用于列表展示。
@@ -255,6 +278,12 @@ pub enum GenerationEvent {
         seq: i64,
         occurred_at: i64,
     },
+    #[serde(rename = "run_cancelled", rename_all = "camelCase")]
+    RunCancelled {
+        run_id: String,
+        seq: i64,
+        occurred_at: i64,
+    },
     #[serde(rename = "run_completed", rename_all = "camelCase")]
     RunCompleted {
         run_id: String,
@@ -274,6 +303,7 @@ impl GenerationEvent {
             | Self::StepSucceeded { run_id, .. }
             | Self::RunPaused { run_id, .. }
             | Self::RunFailed { run_id, .. }
+            | Self::RunCancelled { run_id, .. }
             | Self::RunCompleted { run_id, .. } => run_id,
         }
     }
@@ -288,6 +318,7 @@ impl GenerationEvent {
             | Self::StepSucceeded { seq, .. }
             | Self::RunPaused { seq, .. }
             | Self::RunFailed { seq, .. }
+            | Self::RunCancelled { seq, .. }
             | Self::RunCompleted { seq, .. } => Some(*seq),
         }
     }
@@ -368,6 +399,11 @@ pub fn event_from_stored(
             occurred_at,
         },
         "run_failed" => GenerationEvent::RunFailed {
+            run_id: run_id.into(),
+            seq,
+            occurred_at,
+        },
+        "run_cancelled" => GenerationEvent::RunCancelled {
             run_id: run_id.into(),
             seq,
             occurred_at,

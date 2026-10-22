@@ -1,5 +1,5 @@
 //! HTTP 层 - 错误映射
-//! 
+//!
 //! 将应用层错误映射到 HTTP 响应。
 
 use crate::error::{AppError, AppErrorCode};
@@ -129,7 +129,7 @@ mod tests {
     fn test_map_validation_error() {
         let app_error = AppError::validation("Invalid input");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::BadRequest);
         assert_eq!(http_error.error_response.code, "VALIDATION");
     }
@@ -138,7 +138,7 @@ mod tests {
     fn test_map_not_found_error() {
         let app_error = AppError::not_found("Novel not found");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::NotFound);
         assert_eq!(http_error.error_response.code, "NOT_FOUND");
     }
@@ -147,7 +147,7 @@ mod tests {
     fn test_map_conflict_error() {
         let app_error = AppError::conflict("Chapter already exists");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::Conflict);
         assert_eq!(http_error.error_response.code, "CONFLICT");
     }
@@ -156,7 +156,7 @@ mod tests {
     fn test_map_integrity_error() {
         let app_error = AppError::integrity("Data integrity issue");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::InternalServerError);
         assert_eq!(http_error.error_response.code, "INTEGRITY_ERROR");
     }
@@ -172,7 +172,7 @@ mod tests {
             value: "test".to_string(),
         };
         let response = HttpResponse::ok(data.clone());
-        
+
         assert_eq!(response.status_code, HttpStatusCode::OK);
         assert_eq!(response.data, Some(data));
         assert!(response.error.is_none());
@@ -189,7 +189,7 @@ mod tests {
             value: "created".to_string(),
         };
         let response = HttpResponse::created(data.clone());
-        
+
         assert_eq!(response.status_code, HttpStatusCode::Created);
         assert_eq!(response.data, Some(data));
         assert!(response.error.is_none());
@@ -199,7 +199,7 @@ mod tests {
     fn test_http_response_from_app_error() {
         let app_error = AppError::validation("Invalid input");
         let response: HttpResponse<String> = HttpResponse::from_app_error(app_error);
-        
+
         assert_eq!(response.status_code, HttpStatusCode::BadRequest);
         assert!(response.data.is_none());
         assert!(response.error.is_some());
@@ -207,21 +207,24 @@ mod tests {
 
     #[test]
     fn test_http_error_response_structure() {
-        let error_response = ErrorResponse::new("VALIDATION", "Invalid input")
-            .with_details("Field: title");
+        let error_response =
+            ErrorResponse::new("VALIDATION", "Invalid input").with_details("Field: title");
         let http_error = HttpErrorResponse::new(HttpStatusCode::BadRequest, error_response);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::BadRequest);
         assert_eq!(http_error.error_response.code, "VALIDATION");
         assert_eq!(http_error.error_response.message, "Invalid input");
-        assert_eq!(http_error.error_response.details, Some("Field: title".to_string()));
+        assert_eq!(
+            http_error.error_response.details,
+            Some("Field: title".to_string())
+        );
     }
 
     #[test]
     fn test_error_message_preservation() {
         let app_error = AppError::not_found("Novel ID: 123 not found");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.error_response.message, "Novel ID: 123 not found");
     }
 
@@ -230,7 +233,7 @@ mod tests {
         // 冲突错误是可重试的，但 HTTP 409 不是重试状态
         let app_error = AppError::conflict("Chapter version conflict");
         let http_error = map_error_to_http(app_error);
-        
+
         assert_eq!(http_error.status_code, HttpStatusCode::Conflict);
         // 实际的重试逻辑应该由客户端根据业务规则决定
     }

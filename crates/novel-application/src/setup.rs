@@ -109,11 +109,7 @@ impl SetupService {
         // 阶段 1 的 model_setup 直接挂在 `SqliteKernel` 上，但 SetupService 不持有 SqliteKernel
         // （保持只通过 port 协作）。这里通过 ModelSecrets 探一下默认 provider 的 key 是否存在，
         // 真正的模型 endpoint / model 由前端从 `get_model_setup` 单独拿。
-        let has_api_key = self
-            .secrets
-            .api_key("openai-compatible")
-            .await?
-            .is_some();
+        let has_api_key = self.secrets.api_key("openai-compatible").await?.is_some();
         let ready = has_api_key;
         let next_step = if ready {
             "可以创建第一本书并开始创作。"

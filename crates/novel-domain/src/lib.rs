@@ -10,8 +10,8 @@ mod workflow;
 
 pub use chapter::{ChapterProtection, can_mark_stale, ensure_can_promote};
 pub use entities::{
-    Character, Chapter, Novel, NovelMode, NovelStatus, QualityIssue, RunContract,
-    WorldSetting, WorkflowStep, WorkflowStepType, StepStatus,
+    Chapter, Character, Novel, NovelMode, NovelStatus, QualityIssue, RunContract, StepStatus,
+    WorkflowStep, WorkflowStepType, WorldSetting,
 };
 pub use error::DomainError;
 pub use run::{

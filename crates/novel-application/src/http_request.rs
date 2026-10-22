@@ -1,5 +1,5 @@
 //! HTTP 层 - 请求 DTO
-//! 
+//!
 //! 定义从客户端发送的请求数据结构。
 
 use serde::{Deserialize, Serialize};

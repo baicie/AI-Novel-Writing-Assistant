@@ -31,8 +31,8 @@ export async function saveLocalModelSetup(input: {
     return await desktopTransport.saveModelSetup({
       endpoint: input.endpoint,
       model: input.model,
-      api_key: input.apiKey,
-      allow_localhost_http: input.allowLocalhostHttp ?? false,
+      apiKey: input.apiKey,
+      allowLocalhostHttp: input.allowLocalhostHttp ?? false,
     });
   } catch (error) {
     console.error("保存模型配置失败", error);

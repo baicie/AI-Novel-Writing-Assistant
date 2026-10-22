@@ -8,9 +8,7 @@ use novel_application::{
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_llm::UnconfiguredProvider;
 use novel_storage_sqlite::SqliteKernel;
-use novel_testkit::{
-    BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds,
-};
+use novel_testkit::{BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds};
 use novel_workflow::{book_scope, chapter_scope};
 use sqlx::Row;
 
@@ -466,4 +464,65 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
         }
         other => panic!("expected Advanced(cancelled), got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn mock_draft_stream_reaches_event_subscribers_before_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let llm = Arc::new(MockLlm::new("流式候选正文"));
+    let runtime = runtime(kernel.clone(), llm, Arc::new(novel_application::NoFault)).await;
+    let novel = runtime
+        .director
+        .create_novel("流式验证", "验证 Tauri Channel 的上游事件")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    seed_ready_for_draft(&kernel, &novel.id, &chapter.id).await;
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "stream-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(256),
+            max_automatic_retries: 0,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+        })
+        .await
+        .unwrap();
+    let mut events = runtime.hub.subscribe();
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { .. }),
+        "unexpected {outcome:?}"
+    );
+    let mut saw_token = false;
+    let mut saw_checkpoint = false;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            GenerationEvent::TokenDelta { run_id, text, .. } if run_id == opened.run_id => {
+                assert_eq!(text, "流式候选正文");
+                saw_token = true;
+            }
+            GenerationEvent::CheckpointSaved { run_id, .. } if run_id == opened.run_id => {
+                saw_checkpoint = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_token, "subscription must receive streamed tokens");
+    assert!(saw_checkpoint, "worker must persist a candidate checkpoint");
 }

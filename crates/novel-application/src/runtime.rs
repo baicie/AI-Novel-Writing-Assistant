@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::director::DirectorService;
 use crate::hub::EventHub;
 use crate::ports::{
-    Clock, FaultInjector, Ids, LookupRepository, ModelSecrets, NovelRepository, TaskCenterRepository,
-    WorkflowRepository, WorldRepository,
+    Clock, FaultInjector, Ids, LookupRepository, ModelSecrets, NovelRepository,
+    TaskCenterRepository, WorkflowRepository, WorldRepository,
 };
 use crate::setup::SetupService;
 use crate::tasks::TaskCenterService;

@@ -113,18 +113,25 @@ pub fn map_sql(error: sqlx::Error) -> PortError {
 async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
     const SCRIPTS: &[(&str, &str)] = &[
         ("0001", include_str!("../../../migrations/0001_init.sql")),
-        ("0002", include_str!("../../../migrations/0002_model_setup.sql")),
-        ("0003", include_str!("../../../migrations/0003_setup_fields.sql")),
+        (
+            "0002",
+            include_str!("../../../migrations/0002_model_setup.sql"),
+        ),
+        (
+            "0003",
+            include_str!("../../../migrations/0003_setup_fields.sql"),
+        ),
     ];
     ensure_schema_migration_table(pool).await?;
     for (version, script) in SCRIPTS {
         if migration_applied(pool, version).await? {
             continue;
         }
-        let now_ms = sqlx::query_scalar::<_, i64>("SELECT CAST(strftime('%s','now')*1000 AS INTEGER)")
-            .fetch_one(pool)
-            .await
-            .map_err(map_sql)?;
+        let now_ms =
+            sqlx::query_scalar::<_, i64>("SELECT CAST(strftime('%s','now')*1000 AS INTEGER)")
+                .fetch_one(pool)
+                .await
+                .map_err(map_sql)?;
         let mut tx = pool.begin().await.map_err(map_sql)?;
         for statement in split_sql(script) {
             sqlx::query(&statement)

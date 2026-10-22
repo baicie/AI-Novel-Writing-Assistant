@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use serde::Serialize;
 use dashmap::DashMap;
+use serde::Serialize;
 
 use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use novel_llm::authorize_endpoint;
@@ -10,14 +10,16 @@ use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
 use crate::dto::{
-    ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult,
-    NovelDetail, NovelSummary, RunContract, UpdateNovelFields, event_from_stored,
+    ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery,
+    ListNovelsResult, NovelDetail, NovelSummary, RunContract, UpdateNovelFields, VolumeSnapshot,
+    event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
 use crate::ports::{
-    Clock, CommandOutcome, Ids, NewChapter, NewNovel, NovelRepository,
-    OpenRunRecord, SaveChapterRecord, WorkflowRepository,
+    Clock, CommandOutcome, DeleteChapterRecord, Ids, NewChapter, NewNovel, NewVolume,
+    NovelRepository, OpenRunRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
+    WorkflowRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -51,7 +53,7 @@ impl EventCache {
     pub fn record_event(&self, run_id: String, seq: i64, event: GenerationEvent) {
         let mut entry = self.active_runs.entry(run_id).or_insert_with(Vec::new);
         entry.push((seq, event));
-        
+
         // 只保留最近 1000 条事件，防止内存无限增长
         if entry.len() > 1000 {
             entry.drain(0..100);
@@ -237,6 +239,17 @@ impl DirectorService {
         title: &str,
         sort_order: i32,
     ) -> Result<ChapterSnapshot, AppError> {
+        self.create_chapter_in_volume(novel_id, title, sort_order, None)
+            .await
+    }
+
+    pub async fn create_chapter_in_volume(
+        &self,
+        novel_id: &str,
+        title: &str,
+        sort_order: i32,
+        volume_id: Option<String>,
+    ) -> Result<ChapterSnapshot, AppError> {
         let title = title.trim();
         if title.is_empty() || sort_order < 1 {
             return Err(AppError::validation("章节需要标题和从 1 开始的顺序。"));
@@ -248,6 +261,7 @@ impl DirectorService {
                 novel_id: novel_id.to_string(),
                 title: title.to_string(),
                 sort_order,
+                volume_id,
                 now_ms: self.clock.now_ms(),
             })
             .await?)
@@ -291,6 +305,115 @@ impl DirectorService {
                 now_ms: self.clock.now_ms(),
             })
             .await?)
+    }
+
+    pub async fn delete_chapter(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        expected_version: i64,
+    ) -> Result<(), AppError> {
+        Ok(self
+            .novels
+            .delete_chapter(DeleteChapterRecord {
+                novel_id: novel_id.to_string(),
+                chapter_id: chapter_id.to_string(),
+                expected_version,
+            })
+            .await?)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_chapter_meta(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        expected_version: i64,
+        title: &str,
+        sort_order: i32,
+        volume_id: Option<String>,
+    ) -> Result<ChapterSnapshot, AppError> {
+        let title = title.trim();
+        if title.is_empty() || sort_order < 1 {
+            return Err(AppError::validation("章节需要标题和从 1 开始的顺序。"));
+        }
+        Ok(self
+            .novels
+            .update_chapter_meta(UpdateChapterMetaRecord {
+                novel_id: novel_id.to_string(),
+                chapter_id: chapter_id.to_string(),
+                expected_version,
+                title: title.to_string(),
+                sort_order,
+                volume_id,
+            })
+            .await?)
+    }
+
+    pub async fn list_chapter_revisions(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterRevisionSnapshot>, AppError> {
+        Ok(self
+            .novels
+            .list_chapter_revisions(novel_id, chapter_id)
+            .await?)
+    }
+
+    pub async fn create_volume(
+        &self,
+        novel_id: &str,
+        title: &str,
+        sort_order: i32,
+        summary: &str,
+    ) -> Result<VolumeSnapshot, AppError> {
+        let title = title.trim();
+        if title.is_empty() || sort_order < 1 {
+            return Err(AppError::validation("卷需要标题和从 1 开始的顺序。"));
+        }
+        Ok(self
+            .novels
+            .create_volume(NewVolume {
+                id: self.ids.new_id(),
+                novel_id: novel_id.to_string(),
+                title: title.to_string(),
+                sort_order,
+                summary: summary.trim().to_string(),
+            })
+            .await?)
+    }
+
+    pub async fn list_volumes(&self, novel_id: &str) -> Result<Vec<VolumeSnapshot>, AppError> {
+        Ok(self.novels.list_volumes(novel_id).await?)
+    }
+
+    pub async fn update_volume(
+        &self,
+        novel_id: &str,
+        volume_id: &str,
+        title: &str,
+        sort_order: i32,
+        summary: &str,
+    ) -> Result<VolumeSnapshot, AppError> {
+        let title = title.trim();
+        if title.is_empty() || sort_order < 1 {
+            return Err(AppError::validation("卷需要标题和从 1 开始的顺序。"));
+        }
+        Ok(self
+            .novels
+            .update_volume(UpdateVolumeRecord {
+                novel_id: novel_id.to_string(),
+                volume_id: volume_id.to_string(),
+                title: title.to_string(),
+                sort_order,
+                summary: summary.trim().to_string(),
+            })
+            .await?)
+    }
+
+    pub async fn delete_volume(&self, novel_id: &str, volume_id: &str) -> Result<(), AppError> {
+        Ok(self.novels.delete_volume(novel_id, volume_id).await?)
     }
 
     pub async fn open_run(&self, input: OpenRunInput) -> Result<CommandOutcome, AppError> {
@@ -390,7 +513,7 @@ impl DirectorService {
         // 1. 优先查询缓存
         let cached = self.cache.get_events(run_id, after_seq);
         if !cached.is_empty() {
-            return Ok(cached);  // 缓存命中
+            return Ok(cached); // 缓存命中
         }
 
         // 2. 缓存未命中，查询数据库
@@ -412,7 +535,8 @@ impl DirectorService {
         // 3. 记录到缓存供下次使用
         for event in &events {
             if let Some(seq) = event.seq() {
-                self.cache.record_event(run_id.to_string(), seq, event.clone());
+                self.cache
+                    .record_event(run_id.to_string(), seq, event.clone());
             }
         }
 

@@ -58,9 +58,7 @@ impl TaskCenterRepository for SqliteKernel {
         Ok(overview)
     }
 
-    async fn list_recovery_candidates(
-        &self,
-    ) -> Result<Vec<RecoverableTaskSummary>, PortError> {
+    async fn list_recovery_candidates(&self) -> Result<Vec<RecoverableTaskSummary>, PortError> {
         // 主体查询：paused + 有 failure_reason 的 auto_director run。
         // 关联 novel 拿到标题和创作体验（用于 sourceRoute 决策）。
         // 排序用 workflow_run.created_at desc，因为 workflow_control 本身没有 updated_at。
@@ -91,8 +89,7 @@ impl TaskCenterRepository for SqliteKernel {
             let novel_title: String = row.try_get("novel_title").map_err(map_sql)?;
             let creation_experience: String =
                 row.try_get("creation_experience").map_err(map_sql)?;
-            let cursor_step_id: Option<String> =
-                row.try_get("cursor_step_id").map_err(map_sql)?;
+            let cursor_step_id: Option<String> = row.try_get("cursor_step_id").map_err(map_sql)?;
             let failure_reason: String = row.try_get("failure_reason").map_err(map_sql)?;
 
             // 关联 quality_debt：取这条 run 的最近一条债作为 hint，比纯 failure_reason 更有上下文。

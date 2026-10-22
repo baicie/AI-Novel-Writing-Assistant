@@ -15,3 +15,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros"] }
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

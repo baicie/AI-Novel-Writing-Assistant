@@ -1,9 +1,4 @@
-const IPC_KEY = "__TAURI_TO_IPC_KEY__";
-
-type TauriInternals = {
-  invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
-  transformCallback: (callback: (response: unknown) => void, once?: boolean) => number;
-};
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 
 export type AppErrorCode =
   | "VALIDATION"
@@ -26,6 +21,43 @@ export interface NovelSummary {
   title: string;
   description: string;
   status: string;
+  creationExperience: string;
+  narrativeForm: string;
+  writingMode: string;
+  projectMode: string;
+  updatedAt: number;
+}
+
+export interface NovelDetail {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  creationExperience: string;
+  narrativeForm: string;
+  targetAudience: string;
+  bookSellingPoint: string;
+  competingFeel: string;
+  first30ChapterPromise: string;
+  commercialTags: string[];
+  genreId: string | null;
+  primaryStoryModeId: string | null;
+  secondaryStoryModeId: string | null;
+  worldId: string | null;
+  writingMode: string;
+  projectMode: string;
+  narrativePov: string | null;
+  pacePreference: string | null;
+  styleTone: string;
+  emotionIntensity: string | null;
+  aiFreedom: string | null;
+  defaultChapterLength: number | null;
+  estimatedChapterCount: number | null;
+  projectStatus: string;
+  storylineStatus: string;
+  outlineStatus: string;
+  resourceReadyScore: number;
+  createdAt: number;
   updatedAt: number;
 }
 
@@ -38,6 +70,24 @@ export interface ChapterSnapshot {
   officialVersion: number;
   content: string;
   updatedAt: number;
+}
+
+export interface ChapterRevisionSnapshot {
+  id: string;
+  chapterId: string;
+  version: number;
+  origin: string;
+  content: string;
+  contentSha256: string;
+  createdAt: number;
+}
+
+export interface VolumeSnapshot {
+  id: string;
+  novelId: string;
+  title: string;
+  sortOrder: number;
+  summary: string;
 }
 
 export interface CommandOutcome {
@@ -68,82 +118,199 @@ export type GenerationEvent =
   | { kind: "step_succeeded"; runId: string; seq: number; stepId: string; occurredAt: number }
   | { kind: "run_paused"; runId: string; seq: number; stepId?: string; occurredAt: number }
   | { kind: "run_failed"; runId: string; seq: number; occurredAt: number }
+  | { kind: "run_cancelled"; runId: string; seq: number; occurredAt: number }
   | { kind: "run_completed"; runId: string; seq: number; occurredAt: number };
 
-function internals(): TauriInternals {
-  const host = window as Window & { 
-    __TAURI_INTERNALS__?: TauriInternals;
-    __TAURI__?: { core?: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
-  };
-  
-  // Try to use Tauri's native API first
-  if (host.__TAURI__?.core?.invoke) {
-    return {
-      invoke: (command: string, args?: Record<string, unknown>) => {
-        return host.__TAURI__!.core!.invoke(command, args);
-      },
-      transformCallback: (callback: (response: unknown) => void, once?: boolean) => {
-        // Tauri handles callbacks differently, but we return an ID for compatibility
-        return 0;
-      },
-    };
-  }
-  
-  // Fall back to Electron IPC setup
-  if (host.__TAURI_INTERNALS__) {
-    return host.__TAURI_INTERNALS__;
-  }
-  
-  throw new Error("当前窗口没有连接到本地创作内核。");
+export interface TextStreamEvent {
+  kind: "delta" | "done" | "error";
+  requestId: string;
+  text?: string;
+  usage?: { promptTokens: number | null; completionTokens: number | null };
+  code?: string;
+  message?: string;
+  retryable: boolean;
 }
 
-class IpcChannel<T> {
-  readonly id: number;
-
-  constructor(private onMessage: (payload: T) => void) {
-    this.id = Math.random();
-  }
-
-  toJSON() {
-    // Return a special marker that Tauri IPC can understand
-    // The actual channel handling is done by Tauri's core
-    return {
-      __tauri_ipc__: {
-        type: "channel",
-        id: this.id,
-      },
-    };
-  }
-
-  [IPC_KEY](): string {
-    return `__CHANNEL__:${this.id}`;
-  }
+export interface GenerateTextInput {
+  requestId: string;
+  prompt: string;
+  maxOutputTokens?: number;
+  model?: string;
 }
 
-function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  return internals().invoke(command, args) as Promise<T>;
+export interface Genre {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  sortOrder: number;
 }
+
+export interface StoryMode {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  sortOrder: number;
+}
+
+export interface World {
+  id: string;
+  name: string;
+  description: string;
+  overviewSummary: string;
+  sourceTemplateId: string | null;
+  ownerNovelId: string | null;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface KnowledgeHit {
+  chunkId: string;
+  ownerType: string;
+  body: string;
+}
+
+export interface IndexKnowledgeInput {
+  id: string;
+  novelId: string;
+  ownerType: "world" | "character" | "chapter" | "style" | "document";
+  title: string;
+  body: string;
+  embedding?: number[];
+  embeddingModel?: string;
+}
+
+export interface ModelSetupView {
+  endpoint: string;
+  model: string;
+  allowLocalhostHttp: boolean;
+  hasApiKey: boolean;
+}
+
+export interface SaveModelSetupInput {
+  endpoint: string;
+  model: string;
+  allowLocalhostHttp: boolean;
+  apiKey: string;
+}
+
+export interface DesktopShellBootstrap {
+  state: "launching" | "starting-server" | "ready" | "error";
+  stage: string;
+  title: string;
+  detail: string;
+  logDir: string;
+  logFile: string;
+  updatedAtMs: number;
+  canRetry: boolean;
+}
+
+const liveChannels = new Set<Channel<GenerationEvent>>();
+const liveTextChannels = new Set<Channel<TextStreamEvent>>();
 
 function eventKey(event: GenerationEvent): string | null {
-  if (event.kind === "token_delta") {
-    return null;
-  }
-  return `${event.kind}:${event.seq}`;
+  return event.kind === "token_delta" ? null : `${event.kind}:${event.seq}`;
+}
+
+export function hasDesktopShell(): boolean {
+  return typeof window !== "undefined" && isTauri();
 }
 
 export function listNovels(): Promise<NovelSummary[]> {
   return invoke("list_novels");
 }
 
+export function getNovel(novelId: string): Promise<NovelDetail> {
+  return invoke("get_novel", { novelId });
+}
+
 export function createNovel(input: { title: string; description: string }): Promise<NovelSummary> {
   return invoke("create_novel", input);
 }
 
-export function createChapter(input: { novelId: string; title: string; sortOrder: number }): Promise<ChapterSnapshot> {
+export interface CreateNovelSetupInput {
+  title: string;
+  description?: string;
+  targetAudience?: string;
+  bookSellingPoint?: string;
+  competingFeel?: string;
+  first30ChapterPromise?: string;
+  commercialTags?: string[];
+  genreId?: string;
+  primaryStoryModeId?: string;
+  secondaryStoryModeId?: string;
+  worldId?: string;
+  writingMode?: string;
+  projectMode?: string;
+  creationExperience?: string;
+  narrativeForm?: string;
+  styleTone?: string;
+  defaultChapterLength?: number;
+  estimatedChapterCount?: number;
+}
+
+export function createNovelWithSetup(input: CreateNovelSetupInput): Promise<NovelDetail> {
+  return invoke("create_novel_with_setup", { request: input });
+}
+
+export interface UpdateNovelInput {
+  novelId: string;
+  title?: string;
+  description?: string;
+  targetAudience?: string | null;
+  bookSellingPoint?: string | null;
+  competingFeel?: string | null;
+  first30ChapterPromise?: string | null;
+  commercialTags?: string[] | null;
+  genreId?: string | null;
+  primaryStoryModeId?: string | null;
+  secondaryStoryModeId?: string | null;
+  worldId?: string | null;
+  narrativeForm?: string;
+  writingMode?: string;
+  projectMode?: string;
+  narrativePov?: string | null;
+  pacePreference?: string | null;
+  styleTone?: string | null;
+  emotionIntensity?: string | null;
+  aiFreedom?: string | null;
+  defaultChapterLength?: number | null;
+  estimatedChapterCount?: number | null;
+  projectStatus?: string;
+  storylineStatus?: string;
+  outlineStatus?: string;
+  resourceReadyScore?: number;
+  status?: string;
+}
+
+export function updateNovel(input: UpdateNovelInput): Promise<NovelDetail> {
+  const { novelId, ...request } = input;
+  return invoke("update_novel", { novelId, request });
+}
+
+export function deleteNovel(novelId: string): Promise<void> {
+  return invoke("delete_novel", { novelId });
+}
+
+export function listChapters(novelId: string): Promise<ChapterSnapshot[]> {
+  return invoke("list_chapters", { novelId });
+}
+
+export function createChapter(input: {
+  novelId: string;
+  title: string;
+  sortOrder: number;
+  volumeId?: string;
+}): Promise<ChapterSnapshot> {
   return invoke("create_chapter", input);
 }
 
-export function getChapter(input: { novelId: string; chapterId: string }): Promise<ChapterSnapshot> {
+export function getChapter(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<ChapterSnapshot> {
   return invoke("get_chapter", input);
 }
 
@@ -157,6 +324,66 @@ export function saveChapter(input: {
   return invoke("save_chapter", input);
 }
 
+export function deleteChapter(input: {
+  novelId: string;
+  chapterId: string;
+  expectedVersion: number;
+}): Promise<void> {
+  return invoke("delete_chapter", input);
+}
+
+export function updateChapterMeta(input: {
+  novelId: string;
+  chapterId: string;
+  expectedVersion: number;
+  title: string;
+  sortOrder: number;
+  volumeId?: string;
+}): Promise<ChapterSnapshot> {
+  return invoke("update_chapter_meta", input);
+}
+
+export function exportNovel(input: {
+  novelId: string;
+  format: "markdown" | "json";
+}): Promise<string> {
+  return invoke("export_novel", input);
+}
+
+export function listChapterRevisions(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<ChapterRevisionSnapshot[]> {
+  return invoke("list_chapter_revisions", input);
+}
+
+export function listVolumes(novelId: string): Promise<VolumeSnapshot[]> {
+  return invoke("list_volumes", { novelId });
+}
+
+export function createVolume(input: {
+  novelId: string;
+  title: string;
+  sortOrder: number;
+  summary: string;
+}): Promise<VolumeSnapshot> {
+  return invoke("create_volume", input);
+}
+
+export function updateVolume(input: {
+  novelId: string;
+  volumeId: string;
+  title: string;
+  sortOrder: number;
+  summary: string;
+}): Promise<VolumeSnapshot> {
+  return invoke("update_volume", input);
+}
+
+export function deleteVolume(input: { novelId: string; volumeId: string }): Promise<void> {
+  return invoke("delete_volume", input);
+}
+
 export function approveRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {
   return invoke("approve_run", input);
 }
@@ -165,16 +392,34 @@ export function cancelRun(input: { runId: string; commandId: string }): Promise<
   return invoke("cancel_run", input);
 }
 
-export function resumeRun(input: { runId: string; commandId: string; acceptCandidate: boolean }): Promise<CommandOutcome> {
+export function resumeRun(input: {
+  runId: string;
+  commandId: string;
+  acceptCandidate: boolean;
+}): Promise<CommandOutcome> {
   return invoke("resume_run", input);
 }
 
-export function replayRunEvents(input: { runId: string; afterSeq: number }): Promise<GenerationEvent[]> {
+export function replayRunEvents(input: {
+  runId: string;
+  afterSeq: number;
+}): Promise<GenerationEvent[]> {
   return invoke("replay_run", input);
 }
 
-export function subscribeRun(input: { runId: string }, onEvent: (event: GenerationEvent) => void): Promise<void> {
-  return invoke("subscribe_run", { runId: input.runId, channel: new IpcChannel(onEvent) });
+export function subscribeRun(
+  input: { runId: string },
+  onEvent: (event: GenerationEvent) => void,
+): Promise<void> {
+  const channel = new Channel<GenerationEvent>();
+  channel.onmessage = (event) => {
+    onEvent(event);
+    if (event.kind === "run_completed" || event.kind === "run_failed" || event.kind === "run_cancelled") {
+      liveChannels.delete(channel);
+    }
+  };
+  liveChannels.add(channel);
+  return invoke("subscribe_run", { runId: input.runId, channel });
 }
 
 export async function startGeneration(
@@ -199,30 +444,65 @@ export async function startGeneration(
   return { runId: outcome.runId };
 }
 
-// 本地创作特定命令
-
-export interface ModelSetupView {
-  endpoint: string;
-  model: string;
-  allowLocalhostHttp: boolean;
-  hasApiKey: boolean;
+export function generateText(
+  input: GenerateTextInput,
+  onEvent: (event: TextStreamEvent) => void,
+): Promise<void> {
+  const channel = new Channel<TextStreamEvent>();
+  channel.onmessage = onEvent;
+  liveTextChannels.add(channel);
+  return invoke<void>("generate_text", { request: input, channel }).finally(() => {
+    liveTextChannels.delete(channel);
+  });
 }
 
-export function listChapters(novelId: string): Promise<ChapterSnapshot[]> {
-  return invoke("list_chapters", { novelId });
+export function cancelTextGeneration(requestId: string): Promise<void> {
+  return invoke("cancel_text_generation", { requestId });
+}
+
+export function indexKnowledge(input: IndexKnowledgeInput): Promise<void> {
+  return invoke("index_knowledge", { request: input });
+}
+
+export function searchKnowledge(input: {
+  novelId: string;
+  query: string;
+  limit?: number;
+}): Promise<KnowledgeHit[]> {
+  return invoke("search_knowledge", input);
+}
+
+export function searchKnowledgeVector(input: {
+  novelId: string;
+  model: string;
+  vector: number[];
+  limit?: number;
+}): Promise<KnowledgeHit[]> {
+  return invoke("search_knowledge_vector", input);
+}
+
+export function listGenres(): Promise<Genre[]> {
+  return invoke("list_genres");
+}
+
+export function listStoryModes(): Promise<StoryMode[]> {
+  return invoke("list_story_modes");
+}
+
+export function listWorlds(): Promise<World[]> {
+  return invoke("list_worlds");
 }
 
 export function getModelSetup(): Promise<ModelSetupView | null> {
   return invoke("get_model_setup");
 }
 
-export function saveModelSetup(input: {
-  endpoint: string;
-  model: string;
-  api_key: string;
-  allow_localhost_http: boolean;
-}): Promise<ModelSetupView> {
-  return invoke("save_model_setup", input as Record<string, unknown>);
+export function saveModelSetup(input: SaveModelSetupInput): Promise<ModelSetupView> {
+  return invoke("save_model_setup", { request: input });
+}
+
+export function hasApiKey(): Promise<boolean> {
+  return invoke("has_api_key");
 }
 
 export function cancelGeneration(runId: string): Promise<void> {
@@ -231,36 +511,6 @@ export function cancelGeneration(runId: string): Promise<void> {
 
 export function openRun(input: StartGeneration): Promise<CommandOutcome> {
   return invoke("open_run", { request: input });
-}
-
-export interface DesktopShellBootstrap {
-  state: "launching" | "starting-server" | "ready" | "error";
-  stage: string;
-  title: string;
-  detail: string;
-  logDir: string;
-  logFile: string;
-  updatedAtMs: number;
-  canRetry: boolean;
-}
-
-export function hasDesktopShell(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const host = window as Window & {
-    __TAURI_INTERNALS__?: unknown;
-    __TAURI__?: unknown;
-    __AI_NOVEL_RUNTIME__?: unknown;
-  };
-  // Tauri 1 注入 __TAURI_INTERNALS__，Tauri 2 注入 __TAURI__。
-  // 任意一个存在就说明 WebView 跑在本地内核里。
-  // 同时只要 __AI_NOVEL_RUNTIME__ 注入成功，也视为 desktop 环境。
-  return (
-    host.__TAURI_INTERNALS__ !== undefined
-    || host.__TAURI__ !== undefined
-    || host.__AI_NOVEL_RUNTIME__ !== undefined
-  );
 }
 
 export function getDesktopShellBootstrap(): Promise<DesktopShellBootstrap> {

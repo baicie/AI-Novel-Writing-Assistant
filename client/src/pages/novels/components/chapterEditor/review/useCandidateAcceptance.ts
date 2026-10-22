@@ -7,7 +7,7 @@ import type { ChapterEditorSessionState } from "../chapterEditorTypes";
 
 export function useCandidateAcceptance(input: {
   novelId: string;
-  chapter?: { id: string; order: number };
+  chapter?: { id: string; order: number; officialVersion?: number };
   session: ChapterEditorSessionState;
   candidate: ChapterEditorCandidate | null;
   selectedChangeIds: ReadonlySet<string>;
@@ -35,6 +35,7 @@ export function useCandidateAcceptance(input: {
       });
       const response = await updateNovelChapter(input.novelId, chapter.id, {
         content: nextContent, expectedUpdatedAt: input.savedUpdatedAt,
+        expectedVersion: chapter.officialVersion ?? 0,
       });
       return { nextContent, saved: response.data };
     },

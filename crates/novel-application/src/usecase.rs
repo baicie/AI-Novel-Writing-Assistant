@@ -1,5 +1,5 @@
 //! 应用层 UseCase 抽象层
-//! 
+//!
 //! 这层提供清晰的业务操作接口，连接 HTTP 路由和 Repository 实现。
 //! 每个 UseCase 都：
 //! - 验证输入
@@ -7,13 +7,13 @@
 //! - 转换结果为 DTO
 //! - 映射错误
 
-use async_trait::async_trait;
 use crate::dto::{
-    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult,
-    NovelDetail, UpdateNovelFields, RunSummary,
+    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail, RunSummary,
+    UpdateNovelFields,
 };
 use crate::error::AppError;
-use crate::ports::{SaveChapterRecord, PromoteOutcome as DomainPromoteOutcome};
+use crate::ports::{PromoteOutcome as DomainPromoteOutcome, SaveChapterRecord};
+use async_trait::async_trait;
 
 /// 小说操作 UseCase 接口
 #[async_trait]
@@ -67,10 +67,7 @@ pub trait ChapterUseCases: Send + Sync {
     ) -> Result<ChapterSnapshot, AppError>;
 
     /// 保存章节内容
-    async fn save_chapter(
-        &self,
-        input: SaveChapterRecord,
-    ) -> Result<ChapterSnapshot, AppError>;
+    async fn save_chapter(&self, input: SaveChapterRecord) -> Result<ChapterSnapshot, AppError>;
 
     /// 提升候选为正式版本
     async fn promote_chapter(
@@ -85,11 +82,7 @@ pub trait ChapterUseCases: Send + Sync {
 #[async_trait]
 pub trait RunUseCases: Send + Sync {
     /// 开启运行
-    async fn start_run(
-        &self,
-        novel_id: &str,
-        command_id: &str,
-    ) -> Result<RunSummary, AppError>;
+    async fn start_run(&self, novel_id: &str, command_id: &str) -> Result<RunSummary, AppError>;
 
     /// 批准运行命令
     async fn approve_run_command(
@@ -110,15 +103,9 @@ pub enum PromoteOutcomeDto {
 impl From<DomainPromoteOutcome> for PromoteOutcomeDto {
     fn from(outcome: DomainPromoteOutcome) -> Self {
         match outcome {
-            DomainPromoteOutcome::Promoted { version } => {
-                Self::Promoted { version }
-            }
-            DomainPromoteOutcome::Blocked => {
-                Self::Blocked
-            }
-            DomainPromoteOutcome::MissingCandidate => {
-                Self::MissingCandidate
-            }
+            DomainPromoteOutcome::Promoted { version } => Self::Promoted { version },
+            DomainPromoteOutcome::Blocked => Self::Blocked,
+            DomainPromoteOutcome::MissingCandidate => Self::MissingCandidate,
         }
     }
 }
@@ -129,9 +116,7 @@ mod tests {
 
     #[test]
     fn test_promote_outcome_conversion() {
-        let domain_outcome = DomainPromoteOutcome::Promoted {
-            version: 42,
-        };
+        let domain_outcome = DomainPromoteOutcome::Promoted { version: 42 };
 
         let dto_outcome: PromoteOutcomeDto = domain_outcome.into();
 

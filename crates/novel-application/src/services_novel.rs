@@ -1,9 +1,11 @@
 //! 小说 UseCase 实现
-//! 
+//!
 //! 在 DirectorService 基础上提供清晰的小说操作接口。
 
 use crate::director::DirectorService;
-use crate::dto::{CreateNovelInput, NovelDetail, UpdateNovelFields, ListNovelsQuery, ListNovelsResult};
+use crate::dto::{
+    CreateNovelInput, ListNovelsQuery, ListNovelsResult, NovelDetail, UpdateNovelFields,
+};
 use crate::error::AppError;
 use crate::usecase::NovelUseCases;
 use async_trait::async_trait;
@@ -21,7 +23,9 @@ impl NovelUseCases for DirectorService {
         }
 
         if input.description.len() > 2000 {
-            return Err(AppError::validation("Description cannot exceed 2000 characters"));
+            return Err(AppError::validation(
+                "Description cannot exceed 2000 characters",
+            ));
         }
 
         // 调用现有的 Repository 创建小说（直接使用 DirectorService 的公共方法）
@@ -86,7 +90,9 @@ impl NovelUseCases for DirectorService {
         experience: String,
     ) -> Result<NovelDetail, AppError> {
         // 验证体验值
-        if !["complete_beginner", "casual_reader", "writing_enthusiast"].contains(&experience.as_str()) {
+        if !["complete_beginner", "casual_reader", "writing_enthusiast"]
+            .contains(&experience.as_str())
+        {
             return Err(AppError::validation(
                 "Invalid creation experience. Must be one of: complete_beginner, casual_reader, writing_enthusiast",
             ));

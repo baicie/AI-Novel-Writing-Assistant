@@ -1,5 +1,5 @@
 //! Task 3.3 综合集成测试
-//! 
+//!
 //! 验证所有三个 UseCase 实现的正确性和集成。
 
 #[cfg(test)]
@@ -193,10 +193,19 @@ mod integration_tests {
     #[test]
     fn test_error_message_clarity() {
         let errors = vec![
-            ("Title cannot be empty", AppError::validation("Title cannot be empty")),
-            ("Chapter not found", AppError::not_found("Chapter not found")),
+            (
+                "Title cannot be empty",
+                AppError::validation("Title cannot be empty"),
+            ),
+            (
+                "Chapter not found",
+                AppError::not_found("Chapter not found"),
+            ),
             ("Novel not found", AppError::not_found("Novel not found")),
-            ("Failed to save chapter: conflict", AppError::conflict("Failed to save chapter: conflict")),
+            (
+                "Failed to save chapter: conflict",
+                AppError::conflict("Failed to save chapter: conflict"),
+            ),
         ];
 
         for (expected, actual) in errors {
@@ -218,12 +227,7 @@ mod integration_tests {
 
     #[test]
     fn test_chapter_state_values() {
-        let states = vec![
-            "draft",
-            "submitted",
-            "approved",
-            "published",
-        ];
+        let states = vec!["draft", "submitted", "approved", "published"];
 
         for state in states {
             assert!(!state.is_empty());
@@ -354,7 +358,7 @@ mod integration_tests {
 #[cfg(test)]
 mod doc_tests {
     //! 这个测试套件验证了 Task 3.3 中实现的三个 UseCase 的完整性和正确性：
-    //! 
+    //!
     //! 1. NovelUseCases - 小说操作
     //!    - create_novel(): 创建小说（验证、存储）
     //!    - list_novels(): 列表查询

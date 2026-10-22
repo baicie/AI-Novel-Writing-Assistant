@@ -1,5 +1,5 @@
 //! 应用程序集成模块
-//! 
+//!
 //! 提供应用程序的初始化、配置和生命周期管理。
 
 use crate::error::AppError;
@@ -194,7 +194,7 @@ impl AppMetadata {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        
+
         current_time.saturating_sub(self.start_time)
     }
 }
@@ -408,9 +408,7 @@ mod tests {
     #[test]
     fn test_app_metadata_uptime() {
         let metadata = AppMetadata::new();
-        let uptime = metadata.uptime_seconds();
-        assert!(uptime >= 0);
-        assert!(uptime <= 1); // 应该立即完成
+        assert!(metadata.uptime_seconds() <= 1); // 应该立即完成
     }
 
     #[test]

@@ -8,9 +8,9 @@ use novel_domain::{
 use novel_workflow::AttemptView;
 
 use crate::dto::{
-    ChapterFullDetail, ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult,
-    NovelDetail, NovelSummary, RecoverableTaskSummary, RunContract, RunSummary,
-    TaskOverviewSummary, UpdateNovelFields,
+    ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, ListNovelsQuery,
+    ListNovelsResult, NovelDetail, NovelSummary, RecoverableTaskSummary, RunContract, RunSummary,
+    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -28,6 +28,7 @@ pub struct NewChapter {
     pub novel_id: String,
     pub title: String,
     pub sort_order: i32,
+    pub volume_id: Option<String>,
     pub now_ms: i64,
 }
 
@@ -42,6 +43,41 @@ pub struct SaveChapterRecord {
     pub artifact_id: String,
     pub content_sha256: String,
     pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewVolume {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateVolumeRecord {
+    pub novel_id: String,
+    pub volume_id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeleteChapterRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub expected_version: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateChapterMetaRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub expected_version: i64,
+    pub title: String,
+    pub sort_order: i32,
+    pub volume_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +224,8 @@ pub struct NewEmbedding {
     pub vector: Vec<f32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchHit {
     pub chunk_id: String,
     pub owner_type: String,
@@ -297,6 +334,20 @@ pub trait NovelRepository: Send + Sync {
         &self,
         input: SaveChapterRecord,
     ) -> Result<ChapterSnapshot, PortError>;
+    async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError>;
+    async fn update_chapter_meta(
+        &self,
+        input: UpdateChapterMetaRecord,
+    ) -> Result<ChapterSnapshot, PortError>;
+    async fn list_chapter_revisions(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterRevisionSnapshot>, PortError>;
+    async fn create_volume(&self, volume: NewVolume) -> Result<VolumeSnapshot, PortError>;
+    async fn list_volumes(&self, novel_id: &str) -> Result<Vec<VolumeSnapshot>, PortError>;
+    async fn update_volume(&self, input: UpdateVolumeRecord) -> Result<VolumeSnapshot, PortError>;
+    async fn delete_volume(&self, novel_id: &str, volume_id: &str) -> Result<(), PortError>;
     async fn promote_candidate(
         &self,
         chapter_id: &str,
@@ -362,7 +413,11 @@ pub trait WorkflowRepository: Send + Sync {
     /// 列出某小说的所有运行（按时间倒序）。
     async fn list_runs(&self, novel_id: &str) -> Result<Vec<RunSummary>, PortError>;
     /// 获取章节的完整详情。
-    async fn get_chapter_full(&self, novel_id: &str, chapter_id: &str) -> Result<ChapterFullDetail, PortError>;
+    async fn get_chapter_full(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<ChapterFullDetail, PortError>;
     async fn insert_external_artifact(&self, artifact: NewArtifact) -> Result<(), PortError>;
     async fn start_attempt(&self, attempt: NewAttempt) -> Result<(), PortError>;
     async fn mark_remote_started(

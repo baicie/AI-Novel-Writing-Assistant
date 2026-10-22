@@ -1,7 +1,7 @@
 //! HTTP 处理器集成模块
-//! 
+//!
 //! 将 UseCase 与 HTTP 层集成，实现所有 REST 端点的处理器。
-//! 
+//!
 //! 注意：这个模块提供处理器的框架结构。
 //! 实际的处理器实现需要与具体的 Web 框架（如 actix-web）集成。
 
@@ -49,9 +49,9 @@ impl HttpHandlers {
     /// 按类别统计处理器数量
     pub fn count_by_category(category: &str) -> usize {
         match category {
-            "novel" => 6,    // create, list, get, update, delete, set_experience
-            "chapter" => 5,  // create, list, get, save, promote
-            "run" => 2,      // start, approve
+            "novel" => 6,   // create, list, get, update, delete, set_experience
+            "chapter" => 5, // create, list, get, save, promote
+            "run" => 2,     // start, approve
             _ => 0,
         }
     }
@@ -69,9 +69,7 @@ pub trait HttpHandler {
     /// 处理 HTTP 请求
     fn handle(request: Self::Request) -> Result<Self::Response, AppError> {
         // 1. 验证请求
-        request
-            .validate()
-            .map_err(|e| AppError::validation(&e))?;
+        request.validate().map_err(|e| AppError::validation(&e))?;
 
         // 2. 处理逻辑（由子类型实现）
         // 3. 返回响应
@@ -267,4 +265,3 @@ mod tests {
         }
     }
 }
-

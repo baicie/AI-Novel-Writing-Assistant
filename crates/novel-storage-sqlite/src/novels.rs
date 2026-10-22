@@ -2,9 +2,10 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    ChapterSnapshot, CreateNovelInput, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel,
-    NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
-    UpdateNovelFields,
+    ChapterRevisionSnapshot, ChapterSnapshot, CreateNovelInput, DeleteChapterRecord,
+    ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel, NewVolume, NovelDetail,
+    NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
+    UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
@@ -43,7 +44,10 @@ impl NovelRepository for SqliteKernel {
             .narrative_form
             .as_deref()
             .filter(|value| !value.is_empty());
-        let writing_mode = query.writing_mode.as_deref().filter(|value| !value.is_empty());
+        let writing_mode = query
+            .writing_mode
+            .as_deref()
+            .filter(|value| !value.is_empty());
 
         // 简单实现：用条件分支拼 SQL，避免引入动态 binding 框架。
         let total: i64 = if let Some(like) = &like {
@@ -81,7 +85,10 @@ impl NovelRepository for SqliteKernel {
         .await
         .map_err(map_sql)?;
 
-        let items = rows.iter().map(novel_from_row).collect::<Result<Vec<_>, _>>()?;
+        let items = rows
+            .iter()
+            .map(novel_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ListNovelsResult {
             items,
             page,
@@ -194,14 +201,15 @@ impl NovelRepository for SqliteKernel {
         fields: &UpdateNovelFields,
         now_ms: i64,
     ) -> Result<NovelDetail, PortError> {
-        // 字段是稀疏的；动态 SQL 用宏 + match 处理。注意 null vs unset：外层 Option 是
-        // "是否要更新"，内层 Option 是"更新成 null 还是具体值"。
+        // 字段是稀疏的；null vs unset 由外层/内层 Option 表示。所有列更新在一个事务内提交，
+        // 避免保存到一半时留下一本字段互相矛盾的半成品小说。
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
         if let Some(value) = &fields.title {
             sqlx::query("UPDATE novel SET title = ?, updated_at = ? WHERE id = ?")
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -210,7 +218,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -219,7 +227,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -228,7 +236,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -237,7 +245,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -248,7 +256,7 @@ impl NovelRepository for SqliteKernel {
             .bind(value.as_deref())
             .bind(now_ms)
             .bind(id)
-            .execute(&self.pool)
+            .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
         }
@@ -261,7 +269,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(json)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -270,7 +278,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -279,25 +287,27 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
         if let Some(value) = &fields.secondary_story_mode_id {
-            sqlx::query("UPDATE novel SET secondary_story_mode_id = ?, updated_at = ? WHERE id = ?")
-                .bind(value.as_deref())
-                .bind(now_ms)
-                .bind(id)
-                .execute(&self.pool)
-                .await
-                .map_err(map_sql)?;
+            sqlx::query(
+                "UPDATE novel SET secondary_story_mode_id = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(value.as_deref())
+            .bind(now_ms)
+            .bind(id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
         }
         if let Some(value) = &fields.world_id {
             sqlx::query("UPDATE novel SET world_id = ?, updated_at = ? WHERE id = ?")
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -306,7 +316,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -315,7 +325,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -324,7 +334,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -333,7 +343,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -342,7 +352,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -351,7 +361,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -360,7 +370,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -369,7 +379,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value.as_deref())
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -378,25 +388,27 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
         if let Some(value) = &fields.estimated_chapter_count {
-            sqlx::query("UPDATE novel SET estimated_chapter_count = ?, updated_at = ? WHERE id = ?")
-                .bind(value)
-                .bind(now_ms)
-                .bind(id)
-                .execute(&self.pool)
-                .await
-                .map_err(map_sql)?;
+            sqlx::query(
+                "UPDATE novel SET estimated_chapter_count = ?, updated_at = ? WHERE id = ?",
+            )
+            .bind(value)
+            .bind(now_ms)
+            .bind(id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
         }
         if let Some(value) = fields.project_status.as_deref() {
             sqlx::query("UPDATE novel SET project_status = ?, updated_at = ? WHERE id = ?")
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -405,7 +417,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -414,7 +426,7 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
@@ -423,10 +435,20 @@ impl NovelRepository for SqliteKernel {
                 .bind(value)
                 .bind(now_ms)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
+        if let Some(value) = fields.status.as_deref() {
+            sqlx::query("UPDATE novel SET status = ?, updated_at = ? WHERE id = ?")
+                .bind(value)
+                .bind(now_ms)
+                .bind(id)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        }
+        tx.commit().await.map_err(map_sql)?;
         self.get_novel(id).await
     }
 
@@ -459,16 +481,31 @@ impl NovelRepository for SqliteKernel {
     }
 
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError> {
-        sqlx::query("INSERT INTO chapter(id, novel_id, title, sort_order, protection, created_at, updated_at) VALUES (?, ?, ?, ?, 'none', ?, ?)")
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(volume_id) = chapter.volume_id.as_deref() {
+            let belongs: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM volume WHERE id = ? AND novel_id = ?")
+                    .bind(volume_id)
+                    .bind(&chapter.novel_id)
+                    .fetch_one(tx.deref_mut())
+                    .await
+                    .map_err(map_sql)?;
+            if belongs == 0 {
+                return Err(PortError::NotFound("没有找到这一卷。".into()));
+            }
+        }
+        sqlx::query("INSERT INTO chapter(id, novel_id, volume_id, title, sort_order, protection, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'none', ?, ?)")
             .bind(&chapter.id)
             .bind(&chapter.novel_id)
+            .bind(chapter.volume_id.as_deref())
             .bind(&chapter.title)
             .bind(chapter.sort_order)
             .bind(chapter.now_ms)
             .bind(chapter.now_ms)
-            .execute(&self.pool)
+            .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
         Ok(ChapterSnapshot {
             id: chapter.id,
             novel_id: chapter.novel_id,
@@ -577,6 +614,243 @@ impl NovelRepository for SqliteKernel {
         self.get_chapter(&input.novel_id, &input.chapter_id).await
     }
 
+    async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let current = sqlx::query(
+            "SELECT r.version AS official_version
+             FROM chapter c
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE c.id = ? AND c.novel_id = ?",
+        )
+        .bind(&input.chapter_id)
+        .bind(&input.novel_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到这一章。".into()))?;
+        let version: Option<i64> = current.try_get("official_version").map_err(map_sql)?;
+        if version.unwrap_or(0) != input.expected_version {
+            return Err(PortError::Conflict(
+                "章节内容已经变化，请重新打开后再删除。".into(),
+            ));
+        }
+        sqlx::query("DELETE FROM chapter_candidate WHERE chapter_id = ?")
+            .bind(&input.chapter_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sqlx::query("DELETE FROM chapter_revision WHERE chapter_id = ?")
+            .bind(&input.chapter_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sqlx::query("DELETE FROM chapter WHERE id = ? AND novel_id = ?")
+            .bind(&input.chapter_id)
+            .bind(&input.novel_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn update_chapter_meta(
+        &self,
+        input: UpdateChapterMetaRecord,
+    ) -> Result<ChapterSnapshot, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let current = sqlx::query(
+            "SELECT r.version AS official_version
+             FROM chapter c LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE c.id = ? AND c.novel_id = ?",
+        )
+        .bind(&input.chapter_id)
+        .bind(&input.novel_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到这一章。".into()))?;
+        let version: Option<i64> = current.try_get("official_version").map_err(map_sql)?;
+        if version.unwrap_or(0) != input.expected_version {
+            return Err(PortError::Conflict(
+                "章节内容已经变化，请重新打开后再保存。".into(),
+            ));
+        }
+        if let Some(volume_id) = input.volume_id.as_deref() {
+            let belongs: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM volume WHERE id = ? AND novel_id = ?")
+                    .bind(volume_id)
+                    .bind(&input.novel_id)
+                    .fetch_one(tx.deref_mut())
+                    .await
+                    .map_err(map_sql)?;
+            if belongs == 0 {
+                return Err(PortError::NotFound("没有找到这一卷。".into()));
+            }
+        }
+        sqlx::query(
+            "UPDATE chapter SET title = ?, sort_order = ?, volume_id = ?, updated_at = ?
+             WHERE id = ? AND novel_id = ?",
+        )
+        .bind(&input.title)
+        .bind(input.sort_order)
+        .bind(input.volume_id.as_deref())
+        .bind(novel_platform_now())
+        .bind(&input.chapter_id)
+        .bind(&input.novel_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        self.get_chapter(&input.novel_id, &input.chapter_id).await
+    }
+
+    async fn list_chapter_revisions(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterRevisionSnapshot>, PortError> {
+        let rows = sqlx::query(
+            "SELECT r.id, r.chapter_id, r.version, r.origin, r.content, r.content_sha256, r.created_at
+             FROM chapter_revision r
+             JOIN chapter c ON c.id = r.chapter_id
+             WHERE c.novel_id = ? AND c.id = ?
+             ORDER BY r.version DESC",
+        )
+        .bind(novel_id)
+        .bind(chapter_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if rows.is_empty() {
+            let exists: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM chapter WHERE id = ? AND novel_id = ?")
+                    .bind(chapter_id)
+                    .bind(novel_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(map_sql)?;
+            if exists == 0 {
+                return Err(PortError::NotFound("没有找到这一章。".into()));
+            }
+        }
+        rows.iter()
+            .map(|row| {
+                Ok(ChapterRevisionSnapshot {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+                    version: row.try_get("version").map_err(map_sql)?,
+                    origin: row.try_get("origin").map_err(map_sql)?,
+                    content: row.try_get("content").map_err(map_sql)?,
+                    content_sha256: row.try_get("content_sha256").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn create_volume(&self, volume: NewVolume) -> Result<VolumeSnapshot, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        ensure_novel_exists(&mut tx, &volume.novel_id).await?;
+        sqlx::query(
+            "INSERT INTO volume(id, novel_id, title, sort_order, summary) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&volume.id)
+        .bind(&volume.novel_id)
+        .bind(&volume.title)
+        .bind(volume.sort_order)
+        .bind(&volume.summary)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_volume_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(VolumeSnapshot {
+            id: volume.id,
+            novel_id: volume.novel_id,
+            title: volume.title,
+            sort_order: volume.sort_order,
+            summary: volume.summary,
+        })
+    }
+
+    async fn list_volumes(&self, novel_id: &str) -> Result<Vec<VolumeSnapshot>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, title, sort_order, summary
+             FROM volume WHERE novel_id = ? ORDER BY sort_order",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(VolumeSnapshot {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    title: row.try_get("title").map_err(map_sql)?,
+                    sort_order: row.try_get("sort_order").map_err(map_sql)?,
+                    summary: row.try_get("summary").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn update_volume(&self, input: UpdateVolumeRecord) -> Result<VolumeSnapshot, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let affected = sqlx::query(
+            "UPDATE volume SET title = ?, sort_order = ?, summary = ?
+             WHERE id = ? AND novel_id = ?",
+        )
+        .bind(&input.title)
+        .bind(input.sort_order)
+        .bind(&input.summary)
+        .bind(&input.volume_id)
+        .bind(&input.novel_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_volume_sql)?
+        .rows_affected();
+        if affected == 0 {
+            return Err(PortError::NotFound("没有找到这一卷。".into()));
+        }
+        tx.commit().await.map_err(map_sql)?;
+        Ok(VolumeSnapshot {
+            id: input.volume_id,
+            novel_id: input.novel_id,
+            title: input.title,
+            sort_order: input.sort_order,
+            summary: input.summary,
+        })
+    }
+
+    async fn delete_volume(&self, novel_id: &str, volume_id: &str) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let chapters: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM chapter WHERE volume_id = ? AND novel_id = ?")
+                .bind(volume_id)
+                .bind(novel_id)
+                .fetch_one(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        if chapters > 0 {
+            return Err(PortError::Conflict(
+                "这一卷里还有章节，先移动或删除章节再删卷。".into(),
+            ));
+        }
+        let affected = sqlx::query("DELETE FROM volume WHERE id = ? AND novel_id = ?")
+            .bind(volume_id)
+            .bind(novel_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?
+            .rows_affected();
+        if affected == 0 {
+            return Err(PortError::NotFound("没有找到这一卷。".into()));
+        }
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
     async fn promote_candidate(
         &self,
         chapter_id: &str,
@@ -642,6 +916,34 @@ impl NovelRepository for SqliteKernel {
     }
 }
 
+fn novel_platform_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+async fn ensure_novel_exists(tx: &mut crate::db::Tx<'_>, novel_id: &str) -> Result<(), PortError> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM novel WHERE id = ?")
+        .bind(novel_id)
+        .fetch_one(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    if exists == 0 {
+        return Err(PortError::NotFound("没有找到这本书。".into()));
+    }
+    Ok(())
+}
+
+fn map_volume_sql(error: sqlx::Error) -> PortError {
+    let text = error.to_string();
+    if text.contains("UNIQUE constraint failed: volume.novel_id, volume.sort_order") {
+        PortError::Conflict("这个卷序已经被占用，请换一个顺序。".into())
+    } else {
+        map_sql(error)
+    }
+}
+
 fn novel_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelSummary, PortError> {
     Ok(NovelSummary {
         id: row.try_get("id").map_err(map_sql)?,
@@ -657,11 +959,9 @@ fn novel_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelSummary, PortErr
 }
 
 fn novel_detail_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelDetail, PortError> {
-    let commercial_tags_json: String = row
-        .try_get("commercial_tags_json")
-        .map_err(map_sql)?;
-    let commercial_tags = serde_json::from_str::<Vec<String>>(&commercial_tags_json)
-        .unwrap_or_default();
+    let commercial_tags_json: String = row.try_get("commercial_tags_json").map_err(map_sql)?;
+    let commercial_tags =
+        serde_json::from_str::<Vec<String>>(&commercial_tags_json).unwrap_or_default();
     Ok(NovelDetail {
         id: row.try_get("id").map_err(map_sql)?,
         title: row.try_get("title").map_err(map_sql)?,

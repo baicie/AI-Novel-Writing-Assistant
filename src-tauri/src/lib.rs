@@ -1,410 +1,41 @@
-mod node_backend;
+mod commands;
+mod state;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use node_backend::{BootstrapSnapshot, NodeBackend};
-use novel_application::{
-    AppError, ChapterSnapshot, CommandOutcome, GenerationEvent, ModelSecrets, NoFault, NovelSummary,
-    OpenRunInput, PortError, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
-};
-use novel_http::KernelState;
-use novel_llm::UnconfiguredProvider;
+use novel_application::{Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds};
+use novel_llm::OpenAiCompatibleProvider;
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
-use serde::Deserialize;
-use tauri::ipc::Channel;
-use tauri::{Manager, State};
-
-struct AppState {
-    runtime: Arc<Runtime>,
-    kernel: Arc<SqliteKernel>,
-    secrets: Arc<OsSecretStore>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpenRunRequest {
-    command_id: String,
-    novel_id: String,
-    target_chapter_id: String,
-    provider: String,
-    model: String,
-    prompt_versions: std::collections::BTreeMap<String, String>,
-    token_budget: Option<u64>,
-    max_automatic_retries: u8,
-    endpoint: String,
-    allow_localhost_http: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveModelSetupRequest {
-    endpoint: String,
-    model: String,
-    allow_localhost_http: bool,
-    api_key: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModelSetupView {
-    endpoint: String,
-    model: String,
-    allow_localhost_http: bool,
-    has_api_key: bool,
-}
-
-struct OsModelSecrets {
-    store: Arc<OsSecretStore>,
-}
-
-#[async_trait::async_trait]
-impl ModelSecrets for OsModelSecrets {
-    async fn api_key(&self, provider: &str) -> Result<Option<String>, PortError> {
-        use novel_platform::SecretStore;
-        self.store
-            .get(provider)
-            .await
-            .map_err(|_| PortError::Storage("系统凭据暂时不可用".into()))
-    }
-}
-
-fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("BIZ_NOVEL_DATA_DIR") {
-        return PathBuf::from(dir);
-    }
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Biz Novel Studio")
-}
-
-#[tauri::command]
-fn get_desktop_bootstrap_snapshot(backend: State<'_, NodeBackend>) -> BootstrapSnapshot {
-    backend.snapshot()
-}
-
-#[tauri::command]
-fn open_desktop_logs_directory(backend: State<'_, NodeBackend>) -> Result<(), String> {
-    backend
-        .reveal_logs_directory()
-        .map_err(|error| format!("无法打开日志目录：{error}"))
-}
-
-#[tauri::command]
-async fn restart_desktop_app(
-    app: tauri::AppHandle,
-    backend: State<'_, NodeBackend>,
-) -> Result<(), String> {
-    backend.stop();
-    app.request_restart();
-    Ok(())
-}
-
-#[tauri::command]
-async fn list_chapters(
-    state: State<'_, AppState>,
-    novel_id: String,
-) -> Result<Vec<ChapterSnapshot>, AppError> {
-    state.runtime.director.list_chapters(&novel_id).await
-}
-
-#[tauri::command]
-async fn get_model_setup(state: State<'_, AppState>) -> Result<Option<ModelSetupView>, AppError> {
-    let kernel: Arc<SqliteKernel> = state.kernel.clone();
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    let view =
-        read_model_setup(kernel.as_ref(), secrets.as_ref()).await?;
-    Ok(view)
-}
-
-#[tauri::command]
-async fn save_model_setup(
-    state: State<'_, AppState>,
-    request: SaveModelSetupRequest,
-) -> Result<ModelSetupView, AppError> {
-    let kernel: Arc<SqliteKernel> = state.kernel.clone();
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    write_model_setup(
-        kernel.as_ref(),
-        secrets.as_ref(),
-        &request.endpoint,
-        &request.model,
-        request.allow_localhost_http,
-        &request.api_key,
-    )
-    .await
-}
-
-#[tauri::command]
-async fn has_api_key(state: State<'_, AppState>) -> Result<bool, AppError> {
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    check_has_api_key(secrets.as_ref()).await
-}
-
-async fn read_model_setup(
-    kernel: &SqliteKernel,
-    secrets: &OsSecretStore,
-) -> Result<Option<ModelSetupView>, AppError> {
-    use novel_platform::SecretStore;
-    let stored = kernel.load_model_setup().await.map_err(AppError::from)?;
-    Ok(match stored {
-        Some(stored) => {
-            let has_api_key = secrets
-                .get(&stored.secret_ref)
-                .await
-                .map(|value| value.is_some())
-                .unwrap_or(false);
-            Some(ModelSetupView {
-                endpoint: stored.endpoint,
-                model: stored.model,
-                allow_localhost_http: stored.allow_localhost_http,
-                has_api_key,
-            })
-        }
-        None => None,
-    })
-}
-
-async fn write_model_setup(
-    kernel: &SqliteKernel,
-    secrets: &OsSecretStore,
-    endpoint: &str,
-    model: &str,
-    allow_localhost_http: bool,
-    api_key: &str,
-) -> Result<ModelSetupView, AppError> {
-    use novel_platform::SecretStore;
-    let now = novel_platform::now_ms();
-    let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF.to_string();
-    secrets
-        .put(&secret_ref, api_key.trim())
-        .await
-        .map_err(|_| AppError::from(PortError::Storage("无法写入系统凭据。".into())))?;
-    kernel
-        .save_model_setup(endpoint, model, allow_localhost_http, now)
-        .await
-        .map_err(AppError::from)?;
-    Ok(ModelSetupView {
-        endpoint: endpoint.to_string(),
-        model: model.to_string(),
-        allow_localhost_http,
-        has_api_key: !api_key.trim().is_empty(),
-    })
-}
-
-async fn check_has_api_key(secrets: &OsSecretStore) -> Result<bool, AppError> {
-    use novel_platform::SecretStore;
-    let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF;
-    // 尝试读取密钥。如果系统密钥存储不可用或未初始化，返回 false
-    // 这允许应用在首次启动或系统密钥存储受限的情况下继续启动
-    let value = secrets
-        .get(secret_ref)
-        .await
-        .unwrap_or(None); // 忽略存储访问错误，将其视为"未配置"
-    Ok(value.is_some())
-}
-
-#[tauri::command]
-async fn cancel_generation(state: State<'_, AppState>, run_id: String) -> Result<(), AppError> {
-    state.runtime.worker.cancel_generation(&run_id);
-    Ok(())
-}
-
-#[tauri::command]
-async fn list_novels(state: State<'_, AppState>) -> Result<Vec<NovelSummary>, AppError> {
-    state.runtime.director.list_novels().await
-}
-
-#[tauri::command]
-async fn create_novel(
-    state: State<'_, AppState>,
-    title: String,
-    description: String,
-) -> Result<NovelSummary, AppError> {
-    state
-        .runtime
-        .director
-        .create_novel(&title, &description)
-        .await
-}
-
-#[tauri::command]
-async fn create_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    title: String,
-    sort_order: i32,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .create_chapter(&novel_id, &title, sort_order)
-        .await
-}
-
-#[tauri::command]
-async fn get_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    chapter_id: String,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .get_chapter(&novel_id, &chapter_id)
-        .await
-}
-
-#[tauri::command]
-async fn save_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    chapter_id: String,
-    expected_version: i64,
-    title: String,
-    content: String,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .save_chapter(&novel_id, &chapter_id, expected_version, &title, &content)
-        .await
-}
-
-#[tauri::command]
-async fn open_run(
-    state: State<'_, AppState>,
-    request: OpenRunRequest,
-) -> Result<CommandOutcome, AppError> {
-    state
-        .runtime
-        .director
-        .open_run(OpenRunInput {
-            command_id: request.command_id,
-            novel_id: request.novel_id,
-            target_chapter_id: request.target_chapter_id,
-            provider: request.provider,
-            model: request.model,
-            prompt_versions: request.prompt_versions,
-            token_budget: request.token_budget,
-            max_automatic_retries: request.max_automatic_retries,
-            endpoint: request.endpoint,
-            allow_localhost_http: request.allow_localhost_http,
-        })
-        .await
-}
-
-#[tauri::command]
-async fn approve_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.approve(&command_id, &run_id).await
-}
-
-#[tauri::command]
-async fn cancel_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.cancel(&command_id, &run_id).await
-}
-
-#[tauri::command]
-async fn resume_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-    accept_candidate: bool,
-) -> Result<CommandOutcome, AppError> {
-    state
-        .runtime
-        .director
-        .resume(&command_id, &run_id, accept_candidate)
-        .await
-}
-
-#[tauri::command]
-async fn replay_run(
-    state: State<'_, AppState>,
-    run_id: String,
-    after_seq: i64,
-) -> Result<Vec<GenerationEvent>, AppError> {
-    state.runtime.director.replay(&run_id, after_seq).await
-}
-
-#[tauri::command]
-async fn subscribe_run(
-    state: State<'_, AppState>,
-    run_id: String,
-    channel: Channel<GenerationEvent>,
-) -> Result<(), AppError> {
-    let mut receiver = state.runtime.hub.subscribe();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            match receiver.recv().await {
-                Ok(event) if event.run_id() == run_id => {
-                    if channel.send(event).is_err() {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-    Ok(())
-}
+use state::AppState;
+use tauri::Manager;
 
 pub fn run() {
     novel_platform::init_logging();
 
     tauri::Builder::default()
         .setup(|app| {
-            let dir = data_dir();
-            std::fs::create_dir_all(&dir)
+            let data_dir = std::env::var_os("BIZ_NOVEL_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    app.path()
+                        .app_data_dir()
+                        .map_err(|error| format!("无法准备本地资料目录：{error}"))
+                })?;
+            std::fs::create_dir_all(&data_dir)
                 .map_err(|error| format!("无法准备本地资料目录：{error}"))?;
+            std::fs::create_dir_all(data_dir.join("logs"))
+                .map_err(|error| format!("无法准备日志目录：{error}"))?;
 
-            let backend = NodeBackend::prepare(app.handle(), &dir);
-            backend.start();
-            let main_window = app
-                .config()
-                .app
-                .windows
-                .iter()
-                .find(|window| window.label == "main")
-                .cloned()
-                .ok_or("缺少主窗口配置")?;
-            let runtime_script = backend.runtime_script(&app.package_info().version.to_string());
-            tracing::info!(script_len = runtime_script.len(), "Tauri 即将创建主窗口并注入 runtime script");
-            // dev 模式下 devUrl 存在时优先使用，替代 from_config 默认的 App("index.html")，
-            // 否则 dev 模式 WebView 会加载不存在的本地 dist 资源导致卡在空白页。
-            let webview_url = if let Some(dev_url) = app.config().build.dev_url.as_ref() {
-                eprintln!("[tauri-setup] dev mode: 使用 devUrl {}", dev_url);
-                tauri::WebviewUrl::External(dev_url.clone())
-            } else {
-                eprintln!("[tauri-setup] packaged mode: 使用 frontendDist/index.html");
-                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
-            };
-            tauri::WebviewWindowBuilder::new(app.handle(), &main_window.label, webview_url)
-                .title(&main_window.title)
-                .inner_size(main_window.width, main_window.height)
-                .min_inner_size(main_window.min_width.unwrap_or(1000.0), main_window.min_height.unwrap_or(700.0))
-                .initialization_script(runtime_script)
-                .build()
-                .map_err(|e| format!("无法创建主窗口：{e}"))?;
-            app.manage(backend);
-
-            let db_path = dir.join("novel.sqlite");
+            let db_path = data_dir.join("novel.sqlite");
             let secrets: Arc<OsSecretStore> = Arc::new(OsSecretStore);
-            let model_secrets: Arc<dyn ModelSecrets> = Arc::new(OsModelSecrets {
-                store: secrets.clone(),
-            });
-            let (kernel, runtime) = tauri::async_runtime::block_on(async move {
+            let model_secrets: Arc<dyn novel_application::ModelSecrets> =
+                Arc::new(commands::model::OsModelSecrets {
+                    store: secrets.clone(),
+                });
+            let llm: Arc<dyn novel_llm::LlmProvider> = Arc::new(OpenAiCompatibleProvider::new());
+            let (kernel, runtime) = tauri::async_runtime::block_on(async {
                 let kernel = Arc::new(
                     SqliteKernel::open(&db_path)
                         .await
@@ -416,10 +47,10 @@ pub fn run() {
                     worlds: kernel.clone(),
                     lookups: kernel.clone(),
                     task_center: kernel.clone(),
-                    llm: Arc::new(UnconfiguredProvider),
+                    llm: llm.clone(),
                     clock: Arc::new(SystemClock),
                     ids: Arc::new(UuidIds),
-                    faults: Arc::new(NoFault),
+                    faults: Arc::new(novel_application::NoFault),
                     secrets: model_secrets,
                     owner: format!("desktop-{}", std::process::id()),
                     lease_ms: 30_000,
@@ -427,12 +58,16 @@ pub fn run() {
                 }));
                 Ok::<_, String>((kernel, runtime))
             })?;
-            let worker = runtime.clone();
+
             app.manage(AppState {
                 runtime: runtime.clone(),
-                kernel: kernel.clone(),
-                secrets: secrets.clone(),
+                kernel,
+                secrets,
+                llm,
+                cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
             });
+
+            let worker = runtime.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     match worker.worker.tick().await {
@@ -444,58 +79,83 @@ pub fn run() {
                 }
             });
 
-            // stage 1 切流：当 `AI_NOVEL_KERNEL_BACKEND=1` 时，Tauri 进程直接起
-            // novel-http 的 axum server 监听 3000 端口，不生成 Node sidecar。
-            // 这是后端 Rust 化的开关；默认仍是 sidecar 模式，行为不变。
-            if std::env::var("AI_NOVEL_KERNEL_BACKEND")
-                .ok()
-                .filter(|value| !value.is_empty() && value != "0" && value != "false")
-                .is_some()
-            {
-                let kernel_state = KernelState::new(runtime.clone(), secrets.clone(), kernel.clone());
-                let host = std::env::var("AI_NOVEL_KERNEL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-                let port = std::env::var("AI_NOVEL_SERVER_PORT")
-                    .ok()
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(3000_u16);
-                tracing::info!(host = %host, port, "kernel-integrated mode: Tauri 进程内起 axum server");
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = novel_http::serve(kernel_state, &host, port).await {
-                        tracing::error!(%error, "本地创作内核 HTTP server 启动失败");
-                    }
-                });
-            }
-
+            let runtime_script = format!(
+                "window.__AI_NOVEL_RUNTIME__ = {};",
+                serde_json::json!({
+                    "mode": "desktop",
+                    "isPackaged": !tauri::is_dev(),
+                    "appVersion": app.package_info().version.to_string(),
+                    "isPortable": false,
+                    "updateChannel": "beta",
+                })
+            );
+            let webview_url = if tauri::is_dev() {
+                let dev_url = app
+                    .config()
+                    .build
+                    .dev_url
+                    .clone()
+                    .ok_or("开发模式缺少前端地址")?;
+                tauri::WebviewUrl::External(dev_url)
+            } else {
+                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+            };
+            tauri::WebviewWindowBuilder::new(app.handle(), "main", webview_url)
+                .title("Biz Novel Studio")
+                .inner_size(1400.0, 900.0)
+                .min_inner_size(1000.0, 700.0)
+                .initialization_script(runtime_script)
+                .build()
+                .map_err(|error| format!("无法创建主窗口：{error}"))?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            list_novels,
-            list_chapters,
-            create_novel,
-            create_chapter,
-            get_chapter,
-            save_chapter,
-            open_run,
-            approve_run,
-            cancel_run,
-            cancel_generation,
-            resume_run,
-            replay_run,
-            subscribe_run,
-            get_model_setup,
-            save_model_setup,
-            has_api_key,
-            get_desktop_bootstrap_snapshot,
-            open_desktop_logs_directory,
-            restart_desktop_app
+            commands::novel::list_novels,
+            commands::novel::get_novel,
+            commands::novel::create_novel,
+            commands::novel::create_novel_with_setup,
+            commands::novel::update_novel,
+            commands::novel::delete_novel,
+            commands::novel::list_chapters,
+            commands::novel::create_chapter,
+            commands::novel::get_chapter,
+            commands::novel::save_chapter,
+            commands::novel::delete_chapter,
+            commands::novel::update_chapter_meta,
+            commands::novel::export_novel,
+            commands::novel::list_chapter_revisions,
+            commands::novel::list_volumes,
+            commands::novel::create_volume,
+            commands::novel::update_volume,
+            commands::novel::delete_volume,
+            commands::run::open_run,
+            commands::run::approve_run,
+            commands::run::cancel_run,
+            commands::run::resume_run,
+            commands::run::replay_run,
+            commands::run::subscribe_run,
+            commands::run::cancel_generation,
+            commands::model::get_model_setup,
+            commands::model::save_model_setup,
+            commands::model::has_api_key,
+            commands::knowledge::index_knowledge,
+            commands::knowledge::search_knowledge,
+            commands::knowledge::search_knowledge_vector,
+            commands::setup::list_genres,
+            commands::setup::list_story_modes,
+            commands::setup::list_worlds,
+            commands::setup::create_world,
+            commands::setup::delete_world,
+            commands::generation::generate_text,
+            commands::generation::cancel_text_generation,
+            commands::shell::get_desktop_bootstrap_snapshot,
+            commands::shell::open_desktop_logs_directory,
+            commands::shell::restart_desktop_app,
         ])
         .build(tauri::generate_context!())
         .expect("无法打开本地创作窗口")
-        .run(move |app, event| {
+        .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
-                if let Some(backend) = app.try_state::<NodeBackend>() {
-                    backend.stop();
-                }
                 if let Some(state) = app.try_state::<AppState>() {
                     state.runtime.worker.stop();
                 }

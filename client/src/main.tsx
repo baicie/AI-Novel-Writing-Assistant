@@ -11,6 +11,7 @@ import AppRouter from "./router";
 import { Toaster } from "./components/ui/toast";
 import "./index.css";
 import { ThemeProvider } from "./components/theme/ThemeProvider";
+import { getDesktopShellBootstrap, hasDesktopShell } from "./platform/desktopTransport";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,6 +23,12 @@ const queryClient = new QueryClient({
 });
 
 const AppRouterProvider = APP_RUNTIME === "desktop" ? HashRouter : BrowserRouter;
+
+if (hasDesktopShell()) {
+  void getDesktopShellBootstrap()
+    .then((snapshot) => console.info("[desktop] local kernel ready", snapshot.stage))
+    .catch((error: unknown) => console.error("[desktop] local kernel handshake failed", error));
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

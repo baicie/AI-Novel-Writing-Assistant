@@ -1,12 +1,12 @@
 //! 章节 UseCase 实现
-//! 
+//!
 //! 在现有服务基础上提供清晰的章节操作接口。
 
 use crate::director::DirectorService;
 use crate::dto::ChapterSnapshot;
 use crate::error::AppError;
-use crate::usecase::{ChapterUseCases, PromoteOutcomeDto};
 use crate::ports::SaveChapterRecord;
+use crate::usecase::{ChapterUseCases, PromoteOutcomeDto};
 use async_trait::async_trait;
 
 #[async_trait]
@@ -23,7 +23,9 @@ impl ChapterUseCases for DirectorService {
         }
 
         if title.len() > 200 {
-            return Err(AppError::validation("Chapter title cannot exceed 200 characters"));
+            return Err(AppError::validation(
+                "Chapter title cannot exceed 200 characters",
+            ));
         }
 
         if sort_order < 0 {
@@ -39,9 +41,7 @@ impl ChapterUseCases for DirectorService {
         // 调用 DirectorService 的 create_chapter 方法
         self.create_chapter(novel_id, title, sort_order)
             .await
-            .map_err(|e| {
-                AppError::validation(format!("Failed to create chapter: {}", e))
-            })
+            .map_err(|e| AppError::validation(format!("Failed to create chapter: {}", e)))
     }
 
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, AppError> {
@@ -77,10 +77,7 @@ impl ChapterUseCases for DirectorService {
             .map_err(|_| AppError::not_found("Chapter not found"))
     }
 
-    async fn save_chapter(
-        &self,
-        input: SaveChapterRecord,
-    ) -> Result<ChapterSnapshot, AppError> {
+    async fn save_chapter(&self, input: SaveChapterRecord) -> Result<ChapterSnapshot, AppError> {
         // 验证输入
         if input.title.trim().is_empty() {
             return Err(AppError::validation("Chapter title cannot be empty"));
@@ -91,7 +88,9 @@ impl ChapterUseCases for DirectorService {
         }
 
         if input.content.len() > 100_000 {
-            return Err(AppError::validation("Chapter content is too large (max 100KB)"));
+            return Err(AppError::validation(
+                "Chapter content is too large (max 100KB)",
+            ));
         }
 
         // 验证小说存在
@@ -110,9 +109,7 @@ impl ChapterUseCases for DirectorService {
             &input.content,
         )
         .await
-        .map_err(|e| {
-            AppError::validation(format!("Failed to save chapter: {}", e))
-        })
+        .map_err(|e| AppError::validation(format!("Failed to save chapter: {}", e)))
     }
 
     async fn promote_chapter(
@@ -142,8 +139,8 @@ impl ChapterUseCases for DirectorService {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::AppError;
     use super::*;
+    use crate::error::AppError;
 
     #[test]
     fn test_validate_empty_title() {

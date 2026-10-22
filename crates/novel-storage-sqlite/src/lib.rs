@@ -9,5 +9,5 @@ mod workflow;
 mod worlds;
 
 pub use db::SqliteKernel;
-pub use legacy_import::{import_legacy, MigrationReport, UnsupportedItem, LEGACY_SCHEMA_COMMIT};
-pub use model::{StoredModelSetup, MODEL_SECRET_REF};
+pub use legacy_import::{LEGACY_SCHEMA_COMMIT, MigrationReport, UnsupportedItem, import_legacy};
+pub use model::{MODEL_SECRET_REF, StoredModelSetup};

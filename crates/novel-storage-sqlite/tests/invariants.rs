@@ -42,6 +42,7 @@ async fn chapter_round_trip_keeps_one_hundred_thousand_characters() {
             novel_id: novel.id.clone(),
             title: "第一章".into(),
             sort_order: 1,
+            volume_id: None,
             now_ms: 1,
         },
     )
@@ -96,7 +97,9 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE Chapter (id TEXT PRIMARY KEY, novelId TEXT, title TEXT, content TEXT, \"order\" INTEGER)")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','n1','第一章','旧正文',1)")
+    let legacy_content = "旧正文长段落。".repeat(80_000);
+    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','n1','第一章',?1,1)")
+        .bind(&legacy_content)
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE DirectorNextRun (id TEXT PRIMARY KEY, novelId TEXT, planVersion TEXT, contractJson TEXT)")
         .execute(&pool).await.unwrap();
@@ -128,11 +131,16 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
             .any(|item| item.table == "ImageJob")
     );
     assert_eq!(report.runs_paused_for_review, 1);
+    assert!(report.content_verified);
+    assert!(report.relationships_verified);
+    assert!(Path::new(&report.source_backup).is_file());
+    assert!(fs::metadata(&report.source_backup).unwrap().len() > 0);
     let kernel = SqliteKernel::open(&target).await.unwrap();
     let chapter = NovelRepository::get_chapter(&kernel, "n1", "c1")
         .await
         .unwrap();
-    assert_eq!(chapter.content, "旧正文");
+    assert_eq!(chapter.content.len(), legacy_content.len());
+    assert_eq!(chapter.content, legacy_content);
     assert_eq!(chapter.protection, "user_edited");
     let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = 'r1'")
         .fetch_one(kernel.pool())
@@ -144,6 +152,13 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     let again = import_legacy(&source, &target, 11).await.unwrap();
     assert_eq!(again.novels, 1);
     assert_eq!(again.chapters, 1);
+    assert!(
+        again
+            .target_backup
+            .as_ref()
+            .is_some_and(|path| Path::new(path).is_file())
+    );
+    assert!(again.content_verified);
     let _ = WorkflowRepository::remote_call_count(&kernel, "r1", "draft")
         .await
         .unwrap();
@@ -173,6 +188,7 @@ async fn list_chapters_returns_them_in_sort_order_with_the_official_content() {
             novel_id: novel.id.clone(),
             title: "第二章".into(),
             sort_order: 2,
+            volume_id: None,
             now_ms: 2,
         },
     )
@@ -185,6 +201,7 @@ async fn list_chapters_returns_them_in_sort_order_with_the_official_content() {
             novel_id: novel.id.clone(),
             title: "第一章".into(),
             sort_order: 1,
+            volume_id: None,
             now_ms: 3,
         },
     )
@@ -226,7 +243,12 @@ async fn model_setup_round_trip_keeps_endpoint_model_and_local_flag() {
         .await
         .unwrap();
     kernel
-        .save_model_setup("https://example.com/v1/chat/completions", "gpt-test", false, 1)
+        .save_model_setup(
+            "https://example.com/v1/chat/completions",
+            "gpt-test",
+            false,
+            1,
+        )
         .await
         .unwrap();
     let loaded = kernel.load_model_setup().await.unwrap().unwrap();
@@ -235,10 +257,18 @@ async fn model_setup_round_trip_keeps_endpoint_model_and_local_flag() {
     assert!(!loaded.allow_localhost_http);
     assert_eq!(loaded.secret_ref, novel_storage_sqlite::MODEL_SECRET_REF);
     kernel
-        .save_model_setup("http://127.0.0.1:8080/v1/chat/completions", "gpt-test", true, 2)
+        .save_model_setup(
+            "http://127.0.0.1:8080/v1/chat/completions",
+            "gpt-test",
+            true,
+            2,
+        )
         .await
         .unwrap();
     let updated = kernel.load_model_setup().await.unwrap().unwrap();
-    assert_eq!(updated.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
+    assert_eq!(
+        updated.endpoint,
+        "http://127.0.0.1:8080/v1/chat/completions"
+    );
     assert!(updated.allow_localhost_http);
 }

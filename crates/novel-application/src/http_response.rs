@@ -1,5 +1,5 @@
 //! HTTP 层 - 响应 DTO
-//! 
+//!
 //! 定义发送给客户端的响应数据结构。
 
 use serde::{Deserialize, Serialize};
@@ -176,8 +176,8 @@ mod tests {
 
     #[test]
     fn test_error_response_with_details() {
-        let error = ErrorResponse::new("NOT_FOUND", "Novel not found")
-            .with_details("Novel ID: 123");
+        let error =
+            ErrorResponse::new("NOT_FOUND", "Novel not found").with_details("Novel ID: 123");
         assert_eq!(error.code, "NOT_FOUND");
         assert_eq!(error.message, "Novel not found");
         assert_eq!(error.details, Some("Novel ID: 123".to_string()));

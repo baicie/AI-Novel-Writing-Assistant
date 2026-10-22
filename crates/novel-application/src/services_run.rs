@@ -1,5 +1,5 @@
 //! 运行 UseCase 实现
-//! 
+//!
 //! 在现有 DirectorService 基础上提供清晰的运行操作接口。
 
 use crate::director::{DirectorService, OpenRunInput};
@@ -11,11 +11,7 @@ use std::collections::BTreeMap;
 
 #[async_trait]
 impl RunUseCases for DirectorService {
-    async fn start_run(
-        &self,
-        novel_id: &str,
-        command_id: &str,
-    ) -> Result<RunSummary, AppError> {
+    async fn start_run(&self, novel_id: &str, command_id: &str) -> Result<RunSummary, AppError> {
         // 验证输入
         if novel_id.is_empty() {
             return Err(AppError::validation("Novel ID cannot be empty"));
@@ -105,8 +101,8 @@ impl RunUseCases for DirectorService {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::AppError;
     use super::*;
+    use crate::error::AppError;
 
     #[test]
     fn test_validate_empty_novel_id() {
@@ -140,7 +136,7 @@ mod tests {
             endpoint: String::new(),
             allow_localhost_http: false,
         };
-        
+
         assert_eq!(input.max_automatic_retries, 3);
         assert_eq!(input.provider, "openai");
     }
@@ -158,7 +154,7 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4".to_string(),
         };
-        
+
         assert_eq!(summary.state, "queued");
         assert_eq!(summary.provider, "openai");
     }
