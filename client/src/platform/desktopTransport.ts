@@ -347,6 +347,42 @@ export function deleteChapter(input: {
   return invoke("delete_chapter", input);
 }
 
+export interface ChapterEditorWorkspace {
+  chapterMeta: {
+    chapterId: string;
+    order: number;
+    title: string;
+    wordCount: number;
+    openIssueCount: number;
+    styleSummary?: string | null;
+    updatedAt: string;
+  };
+  macroContext: {
+    chapterRoleInVolume: string;
+    volumeTitle: string;
+    volumePositionLabel: string;
+    volumePhaseLabel: string;
+    paceDirective: string;
+    chapterMission: string;
+    previousChapterBridge: string;
+    nextChapterBridge: string;
+    activePlotThreads: string[];
+    characterStateSummary: string;
+    worldConstraintSummary: string;
+    mustKeepConstraints: string[];
+  };
+  diagnosticCards: unknown[];
+  recommendedTask: unknown | null;
+  refreshReason: string;
+}
+
+export function getChapterEditorWorkspace(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<ChapterEditorWorkspace> {
+  return invoke("get_chapter_editor_workspace", input);
+}
+
 export function updateChapterMeta(input: {
   novelId: string;
   chapterId: string;

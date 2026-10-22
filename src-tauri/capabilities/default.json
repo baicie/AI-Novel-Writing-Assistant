@@ -17,6 +17,7 @@
     "allow-create-chapter",
     "allow-get-chapter",
     "allow-save-chapter",
+    "allow-get-chapter-editor-workspace",
     "allow-delete-chapter",
     "allow-update-chapter-meta",
     "allow-export-novel",

@@ -10,6 +10,7 @@ fn main() {
         "create_chapter",
         "get_chapter",
         "save_chapter",
+        "get_chapter_editor_workspace",
         "delete_chapter",
         "update_chapter_meta",
         "export_novel",

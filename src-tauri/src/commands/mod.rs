@@ -1,3 +1,4 @@
+pub mod editor;
 pub mod generation;
 pub mod knowledge;
 pub mod model;

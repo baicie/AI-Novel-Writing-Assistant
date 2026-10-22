@@ -561,35 +561,7 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   if (workspace && method === "get") {
     const novelId = decodeURIComponent(workspace[1]!);
     const chapterId = decodeURIComponent(workspace[2]!);
-    const row = await transport.getChapter({ novelId, chapterId });
-    return ok({
-      chapterMeta: {
-        chapterId: row.id,
-        order: row.sortOrder,
-        title: row.title,
-        wordCount: row.content.replace(/\s+/g, "").length,
-        openIssueCount: 0,
-        styleSummary: null,
-        updatedAt: iso(row.updatedAt),
-      },
-      macroContext: {
-        chapterRoleInVolume: "",
-        volumeTitle: "",
-        volumePositionLabel: "",
-        volumePhaseLabel: "",
-        paceDirective: "",
-        chapterMission: "",
-        previousChapterBridge: "",
-        nextChapterBridge: "",
-        activePlotThreads: [],
-        characterStateSummary: "",
-        worldConstraintSummary: "",
-        mustKeepConstraints: [],
-      },
-      diagnosticCards: [],
-      recommendedTask: null,
-      refreshReason: "local-kernel",
-    });
+    return ok(await transport.getChapterEditorWorkspace({ novelId, chapterId }));
   }
   return unsupported(config);
 }

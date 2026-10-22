@@ -127,6 +127,7 @@ pub fn run() {
             commands::novel::create_chapter,
             commands::novel::get_chapter,
             commands::novel::save_chapter,
+            commands::editor::get_chapter_editor_workspace,
             commands::novel::delete_chapter,
             commands::novel::update_chapter_meta,
             commands::novel::export_novel,
