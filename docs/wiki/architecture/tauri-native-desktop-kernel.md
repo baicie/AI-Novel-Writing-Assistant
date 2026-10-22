@@ -36,3 +36,10 @@
 - `src-tauri/src/commands/`
 - `client/src/platform/desktopTransport.ts`
 - `client/src/platform/desktopApiAdapter.ts`
+
+## Debugging
+
+- 发布包 smoke 可用 `BIZ_NOVEL_DATA_DIR` 隔离数据目录，并用 `BIZ_NOVEL_START_ROUTE=/novels` 或 `/novels/:id/chapters/:chapterId` 直接打开路由。
+- 前端启动会调用 `report_client_runtime` 记录 runtime mode、hash 和未捕获异常；命令日志中出现 `novel list served` / `chapter served` 可确认路由确实经过 Tauri Command，而不是只加载了空壳。
+- 产物必须使用 `AI_NOVEL_CLIENT_BASE=relative` 构建 Vite 资源，否则 Tauri 自定义协议下懒加载 chunk 可能失败。
+- 不要把 `report_client_runtime` 记录扩展为携带正文、API Key 或用户输入；它只用于运行时/路由诊断。
