@@ -109,7 +109,7 @@
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`
-- 路由冒烟脚本：`scripts/smoke-tauri-route.sh`
+- 路由冒烟脚本：`scripts/smoke-tauri-route.sh`（支持 `TAURI_ROUTE`/`TAURI_EXPECT_LOG`）
 - 保存冒烟脚本：`scripts/smoke-tauri-save.sh`
 - Release bundle 审计脚本：`scripts/audit-tauri-release.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
