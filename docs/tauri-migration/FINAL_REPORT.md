@@ -29,7 +29,7 @@
 | 旧数据导入 | VERIFIED（工具） | 双库一致性备份、只读旧库、ID 映射、关系/正文校验、未支持字段报告 |
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试；知识库列表已接只读 Command |
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
-| 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心的迁移运行列表/详情由 `list_all_runs` 只读提供；自动导演、知识库、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
+| 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心运行列表/详情和知识库文档列表已由只读 Commands 提供；自动导演、知识库管理写操作、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
 | macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.32 MiB |
 | macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
@@ -123,7 +123,7 @@
 - 未跟踪测试文件阻塞全工作区 `--all-targets` 编译；没有修改或删除用户文件。
 - Tauri DMG 脚本失败；手动 `hdiutil` DMG 已生成并校验，但 `.app`/DMG 未签名、未公证，不能作为公开分发包。
 - 真实模型 endpoint、额度、429、usage 字段未验证；不做无限真实调用。
-- 仅核心书稿页面接入 Tauri；自动导演/任务中心写操作/知识库/图像/短剧仍走未迁移路径。
+- 仅核心书稿页面、任务中心只读运行和知识库只读列表接入 Tauri；自动导演、知识库管理写操作、图像、短剧仍走未迁移路径。
 - 未做 Windows/Linux 交叉打包；`better-sqlite3`/Node 旧路径仍存在于 Electron workspace，但不在 Tauri release 内。
 - Tauri release 的 WKWebView 输入法、粘贴、撤销、长文本滚动和选择行为需人工验收。
 - 续写来源字段等旧模型字段在桌面适配器中未完整持久化，已由 501 边界或兼容矩阵限制，不能宣称全量等价；`postGenerationStyleReviewEnabled` 已补入 SQLite migration 0004。
