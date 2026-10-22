@@ -33,9 +33,9 @@
 - 处理：保留成功的 `.app`；未尝试签名、公证或上传。
 - 下一动作：在交互式 macOS 构建机或 CI 上重跑 DMG，检查 `hdiutil`/AppleScript/Finder 权限；完成后再做签名与公证。
 
-## B-006 根级 `pnpm typecheck` 的 server 子任务崩溃
+## B-006 根级 `pnpm typecheck` 默认 Node 堆不足（已缓解）
 
-- 现象：`pnpm typecheck` 在 `@ai-novel/server` 的 `tsc -p tsconfig.json --noEmit` 阶段被 Node/V8 中止（exit 134），客户端单独 typecheck 通过。
-- 分类：旧 server 工作区工具链/资源问题，未在本次 Tauri 迁移范围内修复。
-- 处理：不修改 server 业务源码掩盖崩溃；记录原始命令结果。
-- 下一动作：单独复现 `pnpm --filter @ai-novel/server typecheck`，检查 Node/TypeScript 内存与 Prisma 生成环境。
+- 现象：默认 Node 堆下 `pnpm typecheck` 的 server `tsc` 进程 abort（exit 134）。
+- 复现：`pnpm typecheck`；单独 server 同样失败。
+- 解决：使用 `NODE_OPTIONS=--max-old-space-size=8192 pnpm typecheck` 后 server、client、desktop 三个 typecheck 全部通过。
+- 保留说明：CI/本地需设置足够堆大小；这是旧工作区工具链资源问题，不是 Tauri 迁移运行时缺陷。
