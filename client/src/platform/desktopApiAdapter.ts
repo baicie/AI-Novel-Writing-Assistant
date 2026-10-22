@@ -124,8 +124,8 @@ function detailToNovel(
     order: chapter.sortOrder,
     officialVersion: chapter.officialVersion,
     protection: chapter.protection,
-    generationState: "drafted",
-    chapterStatus: "completed",
+    generationState: chapter.content.trim() ? "drafted" : "planned",
+    chapterStatus: chapter.content.trim() ? "completed" : "unplanned",
     createdAt: iso(chapter.updatedAt),
     updatedAt: iso(chapter.updatedAt),
   }));
@@ -271,7 +271,7 @@ async function updateChapter(config: AxiosRequestConfig, novelId: string, chapte
     order: saved.sortOrder,
     officialVersion: saved.officialVersion,
     protection: saved.protection,
-    chapterStatus: "completed",
+    chapterStatus: saved.content.trim() ? "completed" : "unplanned",
     createdAt: iso(saved.updatedAt),
     updatedAt: iso(saved.updatedAt),
   });

@@ -125,9 +125,7 @@ pub async fn create_novel_with_setup(
             request.style_tone.as_deref().unwrap_or(""),
             request.default_chapter_length,
             request.estimated_chapter_count,
-            request
-                .post_generation_style_review_enabled
-                .unwrap_or(false),
+            request.post_generation_style_review_enabled.unwrap_or(true),
         )
         .await
 }
