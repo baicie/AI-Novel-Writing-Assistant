@@ -20,3 +20,15 @@
 ## 验收顺序
 
 `cargo fmt --check` → `cargo check --workspace` → 目标 crate 测试 → Tauri 编译/打包 → 前端 typecheck/build → 手工 GUI 验收（若环境允许）。
+
+## 执行结果（2026-10-23）
+
+| 阶段 | 状态 | 结果 |
+| --- | --- | --- |
+| P0 Tauri 壳 | VERIFIED | `.app` 启动、SQLite 初始化、WebView Command 握手 |
+| P1 书稿 SQLite | VERIFIED | 小说/卷/章节/修订核心 CRUD，>1MB 正文重启读回 |
+| P2 LLM 网关 | VERIFIED（Mock） | SSE、超时、有限重试、预算、取消；真实付费调用未执行 |
+| P3 前端接入 | PARTIAL | 核心书稿路径接入；其余旧 API 明确未迁移 |
+| P4 旧库导入 | VERIFIED（隔离库） | 备份、只读、ID 映射、内容/关系校验 |
+| P5 Workflow | VERIFIED（最小链） | 状态机、事件、CAS、Gate、checkpoint、恢复 |
+| P6 检索/构建 | PARTIAL | FTS5/向量/导出/CI；DMG、Windows/Linux、真实 GUI 未完成 |
