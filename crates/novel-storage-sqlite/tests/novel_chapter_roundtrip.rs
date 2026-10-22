@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use novel_application::{
-    DeleteChapterRecord, NewChapter, NewNovel, NewVolume, NovelRepository, PromoteOutcome,
-    SaveChapterRecord, UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord,
+    CreateNovelInput, DeleteChapterRecord, NewChapter, NewNovel, NewVolume, NovelRepository,
+    PromoteOutcome, SaveChapterRecord, UpdateChapterMetaRecord, UpdateNovelFields,
+    UpdateVolumeRecord,
 };
+use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use novel_storage_sqlite::SqliteKernel;
 use tempfile::TempDir;
 
@@ -227,4 +229,38 @@ async fn chapter_delete_requires_the_current_version_and_removes_revisions() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn setup_creation_persists_style_review_switch() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&db_path(&dir)).await.unwrap();
+    let detail = kernel
+        .create_novel_with_setup(CreateNovelInput {
+            id: "n-setup".into(),
+            title: "设定建书".into(),
+            description: String::new(),
+            narrative_form: NarrativeForm::LongNovel,
+            writing_mode: WritingMode::Original,
+            project_mode: ProjectMode::AiLed,
+            creation_experience: CreationExperience::Simple,
+            target_audience: String::new(),
+            book_selling_point: String::new(),
+            competing_feel: String::new(),
+            first_30_chapter_promise: String::new(),
+            commercial_tags: vec![],
+            genre_id: None,
+            primary_story_mode_id: None,
+            secondary_story_mode_id: None,
+            world_id: None,
+            style_tone: String::new(),
+            default_chapter_length: None,
+            estimated_chapter_count: None,
+            post_generation_style_review_enabled: true,
+            now_ms: 1_760_000_000_200,
+        })
+        .await
+        .unwrap();
+    assert_eq!(detail.title, "设定建书");
+    assert!(detail.post_generation_style_review_enabled);
 }
