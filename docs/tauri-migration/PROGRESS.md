@@ -6,7 +6,7 @@
 - 截止时间：2026-10-23T10:00:00+08:00
 - 基线：`8a1beae6`
 - 用户未跟踪文件：`crates/novel-http/tests/integration_runs.rs`，没有修改或删除。
-- 最新本地提交：`60acde9e`（最新代码提交；文档提交紧随其后）
+- 最新本地提交：`6ff555a1`（最新代码提交；文档提交紧随其后）
 - 最终 app：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.16 MiB）
 - 最终 smoke：隔离数据目录启动成功；WebView 调用 bootstrap Command；SQLite 4 个迁移、1 条 prompt seed；主进程 RSS 约 72 MB。
 
@@ -31,7 +31,7 @@
 - 修订：`chapter_revision` 追加写入，`list_chapter_revisions` 可读取。
 - 手工编辑后 `protection=user_edited`；AI `promote_candidate` 在保护状态下返回 `Blocked`。
 - 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands。
-- 证据：`cargo test -p novel-storage-sqlite` 6 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除。
+- 证据：`cargo test -p novel-storage-sqlite` 7 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书。
 
 ### P2 LLM 网关
 

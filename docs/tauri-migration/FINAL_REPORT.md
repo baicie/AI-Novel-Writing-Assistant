@@ -74,11 +74,12 @@
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：201 tests |
+| `cargo test --workspace --exclude novel-http` | PASS：202 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
-| `cargo test -p novel-storage-sqlite` | PASS：4 + 2 tests |
+| `cargo test -p novel-storage-sqlite` | PASS：4 + 3 tests |
 | `cargo test -p novel-llm` | PASS：8 + 3 tests |
 | `cargo test -p novel-domain -p novel-workflow` | PASS：13 + 6 tests |
+| `cargo test -p novel-http --test integration_novels/integration_chapters/endpoint_tests/integration` | PASS：12 + 9 + 25 + 9 tests（已跟踪测试目标） |
 | `pnpm --filter @ai-novel/client typecheck` | PASS |
 | `pnpm --filter @ai-novel/client build` | PASS（有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
@@ -89,7 +90,7 @@
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
 
-真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 257 个通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 8. 构建产物及路径
 
