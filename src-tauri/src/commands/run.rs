@@ -23,6 +23,13 @@ pub struct OpenRunRequest {
 }
 
 #[tauri::command]
+pub async fn list_all_runs(state: State<'_, AppState>) -> Result<Vec<RunSummary>, AppError> {
+    let runs = state.runtime.director.list_all_runs().await?;
+    tracing::info!(count = runs.len(), "all runs served to webview");
+    Ok(runs)
+}
+
+#[tauri::command]
 pub async fn list_runs(
     state: State<'_, AppState>,
     novel_id: String,

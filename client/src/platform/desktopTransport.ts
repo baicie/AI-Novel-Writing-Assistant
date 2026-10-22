@@ -454,6 +454,10 @@ export function listRuns(novelId: string): Promise<RunSummary[]> {
   return invoke("list_runs", { novelId });
 }
 
+export function listAllRuns(): Promise<RunSummary[]> {
+  return invoke("list_all_runs");
+}
+
 export function approveRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {
   return invoke("approve_run", input);
 }

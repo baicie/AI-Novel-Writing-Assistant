@@ -28,6 +28,7 @@
     "allow-update-volume",
     "allow-delete-volume",
     "allow-list-runs",
+    "allow-list-all-runs",
     "allow-open-run",
     "allow-approve-run",
     "allow-cancel-run",

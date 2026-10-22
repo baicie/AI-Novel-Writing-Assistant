@@ -149,6 +149,7 @@ pub fn run() {
             commands::novel::update_volume,
             commands::novel::delete_volume,
             commands::run::list_runs,
+            commands::run::list_all_runs,
             commands::run::open_run,
             commands::run::approve_run,
             commands::run::cancel_run,

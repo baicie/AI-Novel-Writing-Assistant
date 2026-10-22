@@ -21,5 +21,5 @@
 | 导入导出 | Express | PARTIAL | Rust JSON/Markdown/TXT 导出 Command，整书下载适配器已接；分章/其他导出范围尚未映射 |
 | 图像/短剧/漫画/知识库 UI | Node/Prisma | NOT_STARTED | 明确返回 `NOT_MIGRATED`，不静默成功 |
 | 自动导演全链路 | Node/LangGraph | NOT_STARTED（桌面命令层） | Rust workflow 仅最小章节生产链；旧 UI 的导演状态/恢复未接入 |
-| macOS arm64 Release Bundle | Electron Builder | VERIFIED（本机，未签名） | `.app` 19.25 MiB；手动 `hdiutil` DMG 8.8 MiB 校验通过；签名/公证未完成 |
+| macOS arm64 Release Bundle | Electron Builder | VERIFIED（本机，未签名） | `.app` 19.29 MiB；手动 `hdiutil` DMG 8.8 MiB 校验通过；签名/公证未完成 |
 | Windows x64 / Linux x64 | Electron | NOT_STARTED | 需目标平台原生依赖与打包验证 |

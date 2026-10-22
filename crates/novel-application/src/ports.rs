@@ -414,6 +414,8 @@ pub trait WorkflowRepository: Send + Sync {
     async fn list_attempts(&self, run_id: &str) -> Result<Vec<AttemptView>, PortError>;
     /// 列出某小说的所有运行（按时间倒序）。
     async fn list_runs(&self, novel_id: &str) -> Result<Vec<RunSummary>, PortError>;
+    /// 列出本地内核中的全部运行，供只读任务中心展示。
+    async fn list_all_runs(&self) -> Result<Vec<RunSummary>, PortError>;
     /// 获取章节的完整详情。
     async fn get_chapter_full(
         &self,

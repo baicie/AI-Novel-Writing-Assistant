@@ -246,6 +246,70 @@ async function listNovelPage(config: AxiosRequestConfig): Promise<ApiResponse<No
   });
 }
 
+function taskStatusForRun(state: string): "queued" | "running" | "waiting_approval" | "succeeded" | "failed" | "cancelled" {
+  switch (state) {
+    case "queued":
+      return "queued";
+    case "running":
+      return "running";
+    case "waiting_approval":
+    case "paused_for_approval":
+      return "waiting_approval";
+    case "completed":
+    case "succeeded":
+      return "succeeded";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "failed";
+  }
+}
+
+async function listTaskRuns(config: AxiosRequestConfig): Promise<ApiResponse<unknown>> {
+  const query = queryOf(config);
+  const kind = query.get("kind");
+  const status = query.get("status");
+  const keyword = (query.get("keyword") ?? "").trim().toLocaleLowerCase();
+  if (kind && kind !== "novel_workflow") return ok({ items: [] });
+  const runs = await transport.listAllRuns();
+  const items = runs
+    .filter((run) => !status || taskStatusForRun(run.state) === status)
+    .filter((run) => !keyword || `${run.chapterTitle}\n${run.novelId}`.toLocaleLowerCase().includes(keyword))
+    .map((run) => ({
+      id: run.id,
+      kind: "novel_workflow",
+      title: run.chapterTitle || "未命名章节",
+      status: taskStatusForRun(run.state),
+      pendingManualRecovery: false,
+      progress: taskStatusForRun(run.state) === "succeeded" ? 100 : 0,
+      currentStage: run.state,
+      currentItemKey: run.chapterId || null,
+      currentItemLabel: run.chapterTitle || null,
+      executionScopeLabel: run.novelId,
+      blockingReason: null,
+      resumeAction: null,
+      lastHealthyStage: null,
+      attemptCount: 0,
+      maxAttempts: 1,
+      lastError: null,
+      createdAt: iso(run.createdAt),
+      updatedAt: iso(run.updatedAt),
+      heartbeatAt: iso(run.updatedAt),
+      ownerId: "desktop",
+      ownerLabel: "本地创作内核",
+      sourceRoute: `/novels/${run.novelId}/chapters/${run.chapterId}`,
+      checkpointType: null,
+      checkpointSummary: null,
+      noticeCode: null,
+      noticeSummary: null,
+      failureCode: null,
+      failureSummary: null,
+      recoveryHint: null,
+      tokenUsage: null,
+    }));
+  return ok({ items, nextCursor: null });
+}
+
 async function updateChapter(config: AxiosRequestConfig, novelId: string, chapterId: string): Promise<ApiResponse<Chapter>> {
   const payload = asRecord(config.data);
   const current = await transport.getChapter({ novelId, chapterId });
@@ -317,6 +381,7 @@ async function exportNovelFile(config: InternalAxiosRequestConfig, novelId: stri
 async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   const method = methodOf(config);
   const path = pathOf(config);
+  if (path === "/tasks" && method === "get") return listTaskRuns(config);
   if (path === "/novels" && method === "get") return listNovelPage(config);
   if (path === "/novels" && method === "post") {
     const payload = asRecord(config.data);

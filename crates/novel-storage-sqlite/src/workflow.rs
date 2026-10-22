@@ -690,6 +690,39 @@ impl WorkflowRepository for SqliteKernel {
         Ok(results)
     }
 
+    async fn list_all_runs(&self) -> Result<Vec<RunSummary>, PortError> {
+        let rows = sqlx::query(
+            "SELECT r.id, r.novel_id, r.contract_json, wc.status, r.created_at,
+                    COALESCE((SELECT title FROM chapter WHERE id = json_extract(r.contract_json, '$.targetChapterId')), '') as chapter_title,
+                    COALESCE((SELECT MAX(occurred_at) FROM workflow_event WHERE run_id = r.id), r.created_at) as updated_at
+             FROM workflow_run r
+             JOIN workflow_control wc ON r.id = wc.run_id
+             ORDER BY r.created_at DESC
+             LIMIT 500",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.into_iter()
+            .map(|row| {
+                let contract_json: String = row.try_get("contract_json").map_err(map_sql)?;
+                let contract: RunContract = serde_json::from_str(&contract_json)
+                    .map_err(|_| PortError::Integrity("运行合同无法解析。".into()))?;
+                Ok(RunSummary {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    chapter_id: contract.target_chapter_id,
+                    chapter_title: row.try_get("chapter_title").map_err(map_sql)?,
+                    state: row.try_get("status").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                    updated_at: row.try_get("updated_at").map_err(map_sql)?,
+                    provider: contract.provider,
+                    model: contract.model,
+                })
+            })
+            .collect()
+    }
+
     /// Phase 2.1: 获取章节的完整详情。
     async fn get_chapter_full(
         &self,
