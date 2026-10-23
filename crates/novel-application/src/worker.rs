@@ -881,12 +881,9 @@ impl Worker {
             Ok(outcome) => Ok(outcome),
             Err(error) => {
                 let control = self.runs.run_control(&claimed.run_id).await?;
-                if control.status == novel_domain::RunStatus::Paused
-                    && control
-                        .pause
-                        .as_ref()
-                        .is_some_and(|pause| pause.kind == novel_domain::PauseKind::Safety)
-                {
+                // Any persisted pause means the write already happened; do not
+                // surface a second conflict for the same transition.
+                if control.status == novel_domain::RunStatus::Paused {
                     Ok(TickOutcome::Advanced {
                         run_id: claimed.run_id.clone(),
                         status: "paused".into(),
