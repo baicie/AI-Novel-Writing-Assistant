@@ -114,6 +114,7 @@
 | Release 路由 smoke（知识库） | PASS：预置 1 个知识文档后，`/knowledge` 实际调用 `list_knowledge_documents` 并返回 count=1，无未捕获异常 |
 | Release 路由巡检（扩展页面） | PASS（仅渲染/不崩溃）：`/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 加载无未捕获异常；未迁移 API 仍返回 501 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
+| `cargo test -p novel-application --test p8_director_loop` | PASS：1 test；Mock Runtime/SQLite 纵向 story macro → gates → draft → approval → commit → reopen |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪的旧版 `crates/novel-http/tests/integration_runs.rs` 引用已不存在的 TestContext 方法和旧 Run API；未修改该文件 |
 
 已跟踪 Rust 测试合计 269 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。

@@ -6,7 +6,7 @@
 - 来源：Git 没有任何跟踪历史，属于用户工作树中的未提交文件；本次没有修改、移动、暂存或删除。
 - 内容：9 个旧版 Run 生命周期测试，使用旧 HTTP 契约（`run_type`、`approved`、`resumed`、`confirm-event`）和旧 `TestContext` 方法（`create_test_novel`、`query_run_by_id`、`query_all_runs`、`query_confirmed_event`、带 novel_id 的 `count_runs`）。
 - 阻塞：`cargo test --workspace --all-targets` 编译该测试目标时产生 22 个错误；当前新 Run API 已改为 commandId/contract/approval 语义，不能仅补辅助方法安全修复。
-- 处理：保留原文件不动；已用分 crate + 已跟踪 HTTP 测试目标验证，当前通过 205 + 57 个测试。下一动作需用户决定保留、重写或删除该实验测试。
+- 处理：保留原文件不动；已用分 crate + 已跟踪 HTTP 测试目标验证，当前通过 212 + 57 个测试。下一动作需用户决定保留、重写或删除该实验测试。
 ## B-002 真实模型调用未验证
 
 - 现象：默认使用 Mock/本地 HTTP SSE 测试；没有可用的付费凭据，也不允许自行发起真实付费请求。
@@ -15,13 +15,15 @@
 
 ## B-003 macOS GUI 交互未做自动化验收
 
-- 现象：已启动 Release `.app`，确认进程运行、SQLite 初始化；没有做屏幕/输入法/粘贴/撤销自动化测试。
-- 影响：WKWebView 的中文输入法、Plate 长文滚动和选择行为需要人工检查。
-- 下一动作：按 P3 清单做一次新建书→新建章→保存→重启读回的人工验收。
+- 状态：**BLOCKED**。
+- 现象：已启动 Release `.app`、验证 SQLite/WebView Command 和 Channel；当前会话没有可靠的 macOS GUI 输入自动化环境，没有做输入法/自动保存/切换章节/撤销重做/粘贴的真实操作。
+- 影响：WKWebView 中文输入法、Plate 自动保存、长文滚动和选择行为仍需人工检查。
+- 未用 Web smoke 代替 GUI 验收。
+- 下一动作：按 P3 清单做一次新建书→新建章→编辑→保存→切章→撤销/重做→粘贴→关闭重开读回的人工验收。
 
 ## B-004 大量旧 UI API 尚未 Tauri 化
 
-- 现象：自动导演、任务中心、知识库、图像、短剧等仍调用 `/api/*`。
+- 现象：自动导演、任务中心写操作、知识库管理写操作、图像、短剧等仍调用 `/api/*`；任务中心运行只读投影和知识库文档列表已接 Tauri。
 - 处理：集中适配器对未知路径返回 `NOT_MIGRATED` 501，不返回假成功。
 - 影响：这些页面在纯 Tauri 发布模式下不可用；当前切片只保证书稿内核与基础模型/RAG 路径。
 - 下一动作：按 `COMPATIBILITY.md` 逐模块迁移；不得以 Node sidecar 补齐。

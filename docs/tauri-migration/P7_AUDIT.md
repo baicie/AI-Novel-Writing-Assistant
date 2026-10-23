@@ -14,7 +14,7 @@
 | IPC-05 Command/handler/capability 对齐 | VERIFIED | 高 | `src-tauri/build.rs`；`src-tauri/src/lib.rs`；`src-tauri/capabilities/default.json` | 注册名/权限不一致会导致 403 或虚拟命令 | 脚本比对：52 commands / 52 handlers / 52 allow permissions，差集 0 | 1df6acb1 | 数量一致不等于业务权限最小化，见 IPC-04 |
 | IPC-06 CSP / 远端内容 | VERIFIED | 高 | `tauri.conf.json:15-16` | 生产仅 self/ipc/asset/data/blob，远程模型请求在 Rust；dev CSP 单独放行 Vite | 配置检查 + Release bundle audit | 1df6acb1 | 未做 CSP 旁路扫描 |
 | IPC-07 事件序号去重 | IMPLEMENTED | 中 | `client/src/platform/desktopTransport.ts:247-249,515-527` | `eventKey` 对非 token 事件按 kind+seq 去重；`replay(afterSeq=0)` 补拉 | 代码检查 + workflow replay 测试 | 1df6acb1 | `startGenerationAwaitCheckpoint` 不单独去重，但不提交正文 |
-| IPC-08 Channel 释放/重载 | NEEDS_MANUAL_VERIFICATION | 中 | `desktopTransport.ts:498-506,586-595` | 终态从 `liveChannels` 删除；页面销毁/重载未做专门 E2E | 真实 WebView Channel smoke 只验证一条消息 | 1df6acb1 | 需页面卸载/重载测试 |
+| IPC-08 Channel 释放/重载 | NEEDS_MANUAL_VERIFICATION | 中 | `desktopTransport.ts:498-506,586-595`；`run.rs:130-170` | 终态从 `liveChannels` 删除，Rust 订阅在终态/发送失败后退出；页面销毁/重载未做专门 E2E | 真实 WebView Channel smoke 只验证一条消息 | 1df6acb1 + 2ac0fbce | 需页面卸载/重载测试 |
 | IPC-09 真实 WebView Channel | VERIFIED | 高 | `scripts/smoke-tauri-channel.sh`；`main.tsx` smoke hook | Rust `smoke_channel_message` -> official `Channel` -> React callback | `scripts/smoke-tauri-channel.sh` 输出 `channel smoke ok kind=run_started seq=1` | 1df6acb1 | 测试命令只用于 smoke，不是业务 API |
 
 ## P7.2 LLM Gateway / SSE

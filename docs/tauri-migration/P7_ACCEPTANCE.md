@@ -2,7 +2,7 @@
 
 ## Gate 判定
 
-**P7 Gate：PASS（自动化与核心 IPC）；GUI/真实 Provider 验收 BLOCKED。**
+**P7 Gate：PASS（自动化与核心 IPC）；GUI/真实 Provider 验收 BLOCKED。最终终态订阅修复提交：`2ac0fbce`。**
 
 通过条件：
 
