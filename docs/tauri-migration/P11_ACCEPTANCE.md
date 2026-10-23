@@ -117,3 +117,15 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - 二次恢复 tick 幂等
 - Case B RemoteStarted PID 7091，退出状态 9；恢复 Paused；Repair 1 → 1；Candidate 1；Invocation 0；Commit/Revision 0
 - 生产 `.app` 20.25 MiB
+
+## P11.1-H2-A Lease Fencing
+
+**VERIFIED**
+
+- 两个 Worker 确定性竞争测试 PASS
+- 过期 owner 写入全部 Conflict
+- B 接管后 A 不能写 Candidate/Attempt/Invocation/Debt/Control/Revision
+- A late Repair 响应未重发、未生成 Candidate
+- B 保持 Paused
+- Repository 级逐操作 fencing 测试 PASS
+- H1 安全续跑、RemoteStarted 暂停、p9/p11/p10 回归 PASS

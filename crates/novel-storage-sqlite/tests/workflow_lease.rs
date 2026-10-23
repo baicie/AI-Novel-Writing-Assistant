@@ -72,6 +72,21 @@ async fn expired_lease_can_be_reclaimed_and_stale_worker_cannot_commit() {
         .unwrap();
     assert!(second.is_none(), "active lease must not be stolen");
 
+    // A's lease has expired even before B claims: fenced writes are rejected.
+    let expired = WorkflowRepository::start_attempt_fenced(
+        &kernel,
+        &first.fence,
+        novel_application::NewAttempt {
+            id: "attempt-expired".into(),
+            run_id: first.run_id.clone(),
+            step_id: "bounded_repair".into(),
+            control_version: first.control.version,
+            created_at: 1_011,
+        },
+        1_011,
+    )
+    .await;
+    assert!(matches!(expired, Err(PortError::Conflict(_))));
     let third = WorkflowRepository::claim_next(&kernel, "worker-b", 1_011, 10)
         .await
         .unwrap()
@@ -81,6 +96,7 @@ async fn expired_lease_can_be_reclaimed_and_stale_worker_cannot_commit() {
     let stale = WorkflowRepository::apply_control(
         &kernel,
         ControlWrite {
+            fence: None,
             run_id: first.run_id.clone(),
             expected_version: first.control.version,
             event: ControlEvent::StepSucceeded,
@@ -97,4 +113,272 @@ async fn expired_lease_can_be_reclaimed_and_stale_worker_cannot_commit() {
     )
     .await;
     assert!(matches!(stale, Err(PortError::Conflict(_))));
+}
+
+#[tokio::test]
+async fn stale_worker_is_fenced_from_every_workflow_write() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("fencing.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        novel_application::NewNovel {
+            id: "novel-lease".into(),
+            title: "租约测试".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "chapter-lease".into(),
+            novel_id: "novel-lease".into(),
+            title: "第一章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let contract = contract();
+    WorkflowRepository::open_run(
+        &kernel,
+        OpenRunRecord {
+            command_id: "open-fence".into(),
+            request_hash: "open-fence-hash".into(),
+            run_id: contract.run_id.clone(),
+            novel_id: contract.novel_id.clone(),
+            contract_json: serde_json::to_string(&contract).unwrap(),
+            plan_version: contract.plan_version.clone(),
+            seed_artifact_id: "seed-fence".into(),
+            seed_payload: "{}".into(),
+            seed_hash: "seed-hash".into(),
+            now_ms: 10,
+        },
+    )
+    .await
+    .unwrap();
+    let first = WorkflowRepository::claim_next(&kernel, "worker-a", 1_000, 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let second = WorkflowRepository::claim_next(&kernel, "worker-b", 1_011, 10)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(second.fence.control_version > first.fence.control_version);
+
+    let attempt = novel_application::NewAttempt {
+        id: "attempt-a".into(),
+        run_id: first.run_id.clone(),
+        step_id: "bounded_repair".into(),
+        control_version: first.control.version,
+        created_at: 1_012,
+    };
+    assert!(matches!(
+        WorkflowRepository::start_attempt_fenced(&kernel, &first.fence, attempt.clone(), 1_012)
+            .await,
+        Err(PortError::Conflict(_))
+    ));
+    assert!(matches!(
+        WorkflowRepository::mark_remote_started_fenced(
+            &kernel,
+            &first.fence,
+            &first.run_id,
+            "attempt-a",
+            "req-a",
+            1_012
+        )
+        .await,
+        Err(PortError::Conflict(_))
+    ));
+    assert!(matches!(
+        WorkflowRepository::save_candidate_fenced(
+            &kernel,
+            &first.fence,
+            novel_application::NewCandidate {
+                id: "candidate-a".into(),
+                chapter_id: "chapter-lease".into(),
+                run_id: first.run_id.clone(),
+                step_id: "bounded_repair".into(),
+                content: "stale".into(),
+                content_sha256: "hash".into(),
+                now_ms: 1_012,
+            },
+            1_012
+        )
+        .await,
+        Err(PortError::Conflict(_))
+    ));
+    assert!(matches!(
+        WorkflowRepository::record_invocation_fenced(
+            &kernel,
+            &first.fence,
+            novel_application::NewInvocation {
+                id: "inv-a".into(),
+                request_id: "req-a".into(),
+                run_id: first.run_id.clone(),
+                step_id: "bounded_repair".into(),
+                provider: "mock".into(),
+                model: "mock".into(),
+                input_summary: "x".into(),
+                started_at: 1_000,
+                finished_at: 1_012,
+                prompt_tokens: None,
+                completion_tokens: None,
+                status: "unknown".into(),
+            },
+            1_012
+        )
+        .await,
+        Err(PortError::Conflict(_))
+    ));
+    assert!(matches!(
+        WorkflowRepository::record_quality_debt_fenced(
+            &kernel,
+            &first.fence,
+            &[novel_application::NewQualityDebt {
+                id: "debt-a".into(),
+                novel_id: "novel-lease".into(),
+                chapter_id: "chapter-lease".into(),
+                run_id: first.run_id.clone(),
+                issue_id: "issue-a".into(),
+                issue_type: "timeline".into(),
+                severity: "high".into(),
+                description: "stale".into(),
+                evidence: "stale".into(),
+                suggestion: "none".into(),
+                source_ref: None,
+                review_version: 1,
+                now_ms: 1_012,
+            }],
+            1_012
+        )
+        .await,
+        Err(PortError::Conflict(_))
+    ));
+    assert!(matches!(
+        WorkflowRepository::apply_control(
+            &kernel,
+            ControlWrite {
+                fence: Some(first.fence.clone()),
+                run_id: first.run_id.clone(),
+                expected_version: first.control.version,
+                event: ControlEvent::StepSucceeded,
+                artifact: None,
+                event_kind: "step_succeeded".into(),
+                event_step_id: None,
+                event_payload: "{}".into(),
+                occurred_at: 1_012,
+                invocation: None,
+                attempt_id: None,
+                attempt_phase: None,
+                clear_lease: false,
+            }
+        )
+        .await,
+        Err(PortError::Conflict(_))
+    ));
+    let counts: (i64, i64, i64, i64) = (
+        sqlx::query_scalar("SELECT COUNT(*) FROM workflow_step_attempt WHERE run_id = ?")
+            .bind(&first.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&first.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM llm_invocation WHERE run_id = ?")
+            .bind(&first.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap(),
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_quality_debt WHERE run_id = ?")
+            .bind(&first.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap(),
+    );
+    assert_eq!(counts, (0, 0, 0, 0));
+
+    // The valid owner can still write after taking the lease.
+    WorkflowRepository::start_attempt_fenced(&kernel, &second.fence, attempt, 1_012)
+        .await
+        .unwrap();
+    WorkflowRepository::mark_remote_started_fenced(
+        &kernel,
+        &second.fence,
+        &second.run_id,
+        "attempt-a",
+        "req-b",
+        1_012,
+    )
+    .await
+    .unwrap();
+    WorkflowRepository::save_candidate_fenced(
+        &kernel,
+        &second.fence,
+        novel_application::NewCandidate {
+            id: "candidate-b".into(),
+            chapter_id: "chapter-lease".into(),
+            run_id: second.run_id.clone(),
+            step_id: "bounded_repair".into(),
+            content: "valid".into(),
+            content_sha256: "hash".into(),
+            now_ms: 1_012,
+        },
+        1_012,
+    )
+    .await
+    .unwrap();
+    let valid_attempt: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_step_attempt WHERE run_id = ? AND id = 'attempt-a'",
+    )
+    .bind(&second.run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(valid_attempt, 1);
+
+    // Chapter commit is fenced too: stale A cannot promote, current B can.
+    let stale_promote = NovelRepository::promote_candidate_fenced(
+        &kernel,
+        &first.fence,
+        &first.run_id,
+        "chapter-lease",
+        "candidate-b",
+        "revision-stale",
+        1_012,
+    )
+    .await;
+    assert!(matches!(stale_promote, Err(PortError::Conflict(_))));
+    let promoted = NovelRepository::promote_candidate_fenced(
+        &kernel,
+        &second.fence,
+        &second.run_id,
+        "chapter-lease",
+        "candidate-b",
+        "revision-valid",
+        1_012,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        promoted,
+        novel_application::PromoteOutcome::Promoted { version: 1 }
+    ));
+    let revisions: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = 'chapter-lease'",
+    )
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(revisions, 1);
 }

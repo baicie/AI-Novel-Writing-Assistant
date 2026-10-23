@@ -175,3 +175,9 @@ pnpm --filter @ai-novel/client test
 - RemoteStarted 未知结果保持暂停，不伪造成功。
 - 重复恢复幂等。
 - H1 代码提交 `1a504df9`。
+
+## P11.1-H2-A
+
+- 旧 Worker 在 Lease 丢失后不能写入 Candidate/Attempt/Invocation/Debt/Control/Revision。
+- Fencing 使用 Owner + Control Version + Lease + Status，事务内校验。
+- 两 Worker 真实 HTTP/SSE 竞争测试通过。

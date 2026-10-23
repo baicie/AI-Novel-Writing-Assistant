@@ -170,7 +170,11 @@ impl WorkflowRepository for SqliteKernel {
                 run_id,
                 novel_id: current.novel_id,
                 contract,
-                control: next,
+                control: next.clone(),
+                fence: novel_application::LeaseFence {
+                    owner: owner.to_string(),
+                    control_version: next.version,
+                },
             }));
         }
         Ok(None)
@@ -507,8 +511,174 @@ impl WorkflowRepository for SqliteKernel {
         Ok(count == 1)
     }
 
+    async fn start_attempt_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        attempt: NewAttempt,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, &attempt.run_id, now_ms).await?;
+        sqlx::query(
+            "INSERT INTO workflow_step_attempt(id, run_id, step_id, phase, control_version, created_at, updated_at)
+             VALUES (?, ?, ?, 'started', ?, ?, ?)",
+        )
+        .bind(&attempt.id).bind(&attempt.run_id).bind(&attempt.step_id)
+        .bind(attempt.control_version).bind(attempt.created_at).bind(attempt.created_at)
+        .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn mark_remote_started_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        run_id: &str,
+        attempt_id: &str,
+        request_id: &str,
+        now_ms: i64,
+    ) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, run_id, now_ms).await?;
+        let result = sqlx::query(
+            "UPDATE workflow_step_attempt
+             SET phase = 'remote_started', request_id = ?, updated_at = ?
+             WHERE id = ? AND phase = 'started' AND request_id IS NULL",
+        )
+        .bind(request_id)
+        .bind(now_ms)
+        .bind(attempt_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn save_candidate_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        candidate: NewCandidate,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, &candidate.run_id, now_ms).await?;
+        sqlx::query(
+            "INSERT INTO chapter_candidate(id, chapter_id, run_id, step_id, content, content_sha256, interrupted, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+        ).bind(&candidate.id).bind(&candidate.chapter_id).bind(&candidate.run_id)
+        .bind(&candidate.step_id).bind(&candidate.content).bind(&candidate.content_sha256)
+        .bind(candidate.now_ms).bind(candidate.now_ms)
+        .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        let seq = next_seq(&mut tx, &candidate.run_id).await?;
+        let payload = serde_json::json!({ "candidateId": candidate.id }).to_string();
+        insert_event(
+            &mut tx,
+            &candidate.run_id,
+            seq,
+            "checkpoint_saved",
+            Some(&candidate.step_id),
+            &payload,
+            candidate.now_ms,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn mark_attempt_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        run_id: &str,
+        attempt_id: &str,
+        phase: &str,
+        candidate_id: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, run_id, now_ms).await?;
+        sqlx::query("UPDATE workflow_step_attempt SET phase = ?, candidate_id = COALESCE(?, candidate_id), updated_at = ? WHERE id = ?")
+            .bind(phase).bind(candidate_id).bind(now_ms).bind(attempt_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn record_invocation_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        invocation: NewInvocation,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, &invocation.run_id, now_ms).await?;
+        insert_invocation(&mut tx, &invocation).await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn record_quality_debt_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        items: &[NewQualityDebt],
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(first) = items.first() {
+            verify_lease_fence(&mut tx, fence, &first.run_id, now_ms).await?;
+        }
+        for item in items {
+            sqlx::query(
+                "INSERT INTO chapter_quality_debt
+                    (id, novel_id, chapter_id, run_id, issue_id, issue_type, severity,
+                     description, evidence, suggestion, source_ref, review_version, status,
+                     resolution_evidence, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?)
+                 ON CONFLICT(run_id, issue_id) DO NOTHING",
+            )
+            .bind(&item.id)
+            .bind(&item.novel_id)
+            .bind(&item.chapter_id)
+            .bind(&item.run_id)
+            .bind(&item.issue_id)
+            .bind(&item.issue_type)
+            .bind(&item.severity)
+            .bind(&item.description)
+            .bind(&item.evidence)
+            .bind(&item.suggestion)
+            .bind(&item.source_ref)
+            .bind(item.review_version)
+            .bind(item.now_ms)
+            .bind(item.now_ms)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        }
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn resolve_quality_debt_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        run_id: &str,
+        evidence: &str,
+        now_ms: i64,
+    ) -> Result<u64, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, run_id, now_ms).await?;
+        let result = sqlx::query("UPDATE chapter_quality_debt SET status = 'resolved', resolution_evidence = ?, updated_at = ? WHERE run_id = ? AND status = 'open'")
+            .bind(evidence).bind(now_ms).bind(run_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(result.rows_affected())
+    }
+
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(fence) = &write.fence {
+            verify_lease_fence(&mut tx, fence, &write.run_id, write.occurred_at).await?;
+        }
         let current = load_control(&mut tx, &write.run_id)
             .await?
             .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
@@ -1533,4 +1703,40 @@ fn json_opt<T: DeserializeOwned>(value: Option<String>) -> Result<Option<T>, Por
             .map(Some)
             .map_err(|_| PortError::Integrity("运行控制记录无法读取。".into())),
     }
+}
+
+async fn verify_lease_fence(
+    tx: &mut Tx<'_>,
+    fence: &novel_application::LeaseFence,
+    run_id: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    let row = sqlx::query(
+        "SELECT lease_owner, lease_until, version, status FROM workflow_control WHERE run_id = ?",
+    )
+    .bind(run_id)
+    .fetch_optional(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    let Some(row) = row else {
+        return Err(PortError::Conflict(
+            "创作任务已不存在，执行权已失效。".into(),
+        ));
+    };
+    let owner: Option<String> = row.try_get("lease_owner").map_err(map_sql)?;
+    let until: Option<i64> = row.try_get("lease_until").map_err(map_sql)?;
+    let version: i64 = row.try_get("version").map_err(map_sql)?;
+    let status: String = row.try_get("status").map_err(map_sql)?;
+    let owner_ok =
+        owner.as_deref() == Some(fence.owner.as_str()) || (owner.is_none() && until.is_none());
+    if !owner_ok
+        || version != fence.control_version
+        || until.is_some_and(|value| value < now_ms)
+        || !matches!(status.as_str(), "running" | "queued")
+    {
+        return Err(PortError::Conflict(
+            "执行权已失效，旧 Worker 的写入已被拒绝。".into(),
+        ));
+    }
+    Ok(())
 }

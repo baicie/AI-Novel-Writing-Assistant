@@ -119,3 +119,8 @@
 - v3 Repair Candidate 已保存安全续跑已通过（P11.1-H1）。
 - RemoteStarted 未知仍安全暂停。
 - 尚未覆盖 Re-review 中途崩溃、Lease Fencing、真实 Provider timeout、持久化 Cancel 竞争。
+
+## B-019 P11.1-H2-A
+
+- Lease Fencing 写入完整性已通过两个 Worker 竞争与 Repository 级测试。
+- 仍未覆盖：真实进程重启后的 Lease 接管、Re-review 中途崩溃、Provider timeout、持久化 Cancel 与 Commit 竞争。

@@ -18,8 +18,8 @@ use crate::error::AppError;
 use crate::hash::sha256_hex;
 use crate::hub::EventHub;
 use crate::ports::{
-    ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, ModelSecrets, NewArtifact, NewAttempt,
-    NewCandidate, NewInvocation, NewQualityDebt, NovelRepository, PromoteOutcome,
+    ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, LeaseFence, ModelSecrets, NewArtifact,
+    NewAttempt, NewCandidate, NewInvocation, NewQualityDebt, NovelRepository, PromoteOutcome,
     WorkflowRepository,
 };
 
@@ -297,20 +297,30 @@ impl Worker {
         } else {
             let attempt_id = self.ids.new_id();
             self.runs
-                .start_attempt(NewAttempt {
-                    id: attempt_id.clone(),
-                    run_id: claimed.run_id.clone(),
-                    step_id: "draft".into(),
-                    control_version: claimed.control.version,
-                    created_at: self.clock.now_ms(),
-                })
+                .start_attempt_fenced(
+                    &claimed.fence,
+                    NewAttempt {
+                        id: attempt_id.clone(),
+                        run_id: claimed.run_id.clone(),
+                        step_id: "draft".into(),
+                        control_version: claimed.control.version,
+                        created_at: self.clock.now_ms(),
+                    },
+                    self.clock.now_ms(),
+                )
                 .await?;
             attempt_id
         };
         let request_id = self.ids.new_id();
         if !self
             .runs
-            .mark_remote_started(&attempt_id, &request_id, self.clock.now_ms())
+            .mark_remote_started_fenced(
+                &claimed.fence,
+                &claimed.run_id,
+                &attempt_id,
+                &request_id,
+                self.clock.now_ms(),
+            )
             .await?
         {
             return Ok(TickOutcome::LostLease {
@@ -367,7 +377,9 @@ impl Worker {
             Ok(response) => response,
             Err(error) => {
                 self.runs
-                    .mark_attempt(
+                    .mark_attempt_fenced(
+                        &claimed.fence,
+                        &claimed.run_id,
                         &attempt_id,
                         AttemptPhase::Interrupted.as_str(),
                         None,
@@ -401,18 +413,24 @@ impl Worker {
         };
         let candidate_id = self.ids.new_id();
         self.runs
-            .save_candidate(NewCandidate {
-                id: candidate_id.clone(),
-                chapter_id: chapter.id,
-                run_id: claimed.run_id.clone(),
-                step_id: "draft".into(),
-                content: response.text.clone(),
-                content_sha256: sha256_hex(response.text.as_bytes()),
-                now_ms: self.clock.now_ms(),
-            })
+            .save_candidate_fenced(
+                &claimed.fence,
+                NewCandidate {
+                    id: candidate_id.clone(),
+                    chapter_id: chapter.id,
+                    run_id: claimed.run_id.clone(),
+                    step_id: "draft".into(),
+                    content: response.text.clone(),
+                    content_sha256: sha256_hex(response.text.as_bytes()),
+                    now_ms: self.clock.now_ms(),
+                },
+                self.clock.now_ms(),
+            )
             .await?;
         self.runs
-            .mark_attempt(
+            .mark_attempt_fenced(
+                &claimed.fence,
+                &claimed.run_id,
                 &attempt_id,
                 AttemptPhase::CandidateSaved.as_str(),
                 Some(&candidate_id),
@@ -420,15 +438,19 @@ impl Worker {
             )
             .await?;
         self.runs
-            .record_invocation(invocation(
-                self,
-                claimed,
-                "draft",
-                &request_id,
-                &summary,
-                started,
-                &response.usage,
-            ))
+            .record_invocation_fenced(
+                &claimed.fence,
+                invocation(
+                    self,
+                    claimed,
+                    "draft",
+                    &request_id,
+                    &summary,
+                    started,
+                    &response.usage,
+                ),
+                self.clock.now_ms(),
+            )
             .await?;
         if self.faults.fail_after_candidate("draft").await {
             return Ok(TickOutcome::Interrupted {
@@ -517,18 +539,28 @@ impl Worker {
         let summary = summarize(&prompt);
         let attempt_id = self.ids.new_id();
         self.runs
-            .start_attempt(NewAttempt {
-                id: attempt_id.clone(),
-                run_id: claimed.run_id.clone(),
-                step_id: "bounded_repair".into(),
-                control_version: claimed.control.version,
-                created_at: self.clock.now_ms(),
-            })
+            .start_attempt_fenced(
+                &claimed.fence,
+                NewAttempt {
+                    id: attempt_id.clone(),
+                    run_id: claimed.run_id.clone(),
+                    step_id: "bounded_repair".into(),
+                    control_version: claimed.control.version,
+                    created_at: self.clock.now_ms(),
+                },
+                self.clock.now_ms(),
+            )
             .await?;
         let request_id = self.ids.new_id();
         if !self
             .runs
-            .mark_remote_started(&attempt_id, &request_id, self.clock.now_ms())
+            .mark_remote_started_fenced(
+                &claimed.fence,
+                &claimed.run_id,
+                &attempt_id,
+                &request_id,
+                self.clock.now_ms(),
+            )
             .await?
         {
             return Ok(TickOutcome::LostLease {
@@ -579,7 +611,9 @@ impl Worker {
             Ok(response) => response,
             Err(error) => {
                 self.runs
-                    .mark_attempt(
+                    .mark_attempt_fenced(
+                        &claimed.fence,
+                        &claimed.run_id,
                         &attempt_id,
                         AttemptPhase::Interrupted.as_str(),
                         None,
@@ -627,18 +661,24 @@ impl Worker {
         }
         let repaired_candidate_id = self.ids.new_id();
         self.runs
-            .save_candidate(NewCandidate {
-                id: repaired_candidate_id.clone(),
-                chapter_id: claimed.contract.target_chapter_id.clone(),
-                run_id: claimed.run_id.clone(),
-                step_id: "bounded_repair".into(),
-                content: repaired.clone(),
-                content_sha256: sha256_hex(repaired.as_bytes()),
-                now_ms: self.clock.now_ms(),
-            })
+            .save_candidate_fenced(
+                &claimed.fence,
+                NewCandidate {
+                    id: repaired_candidate_id.clone(),
+                    chapter_id: claimed.contract.target_chapter_id.clone(),
+                    run_id: claimed.run_id.clone(),
+                    step_id: "bounded_repair".into(),
+                    content: repaired.clone(),
+                    content_sha256: sha256_hex(repaired.as_bytes()),
+                    now_ms: self.clock.now_ms(),
+                },
+                self.clock.now_ms(),
+            )
             .await?;
         self.runs
-            .mark_attempt(
+            .mark_attempt_fenced(
+                &claimed.fence,
+                &claimed.run_id,
                 &attempt_id,
                 AttemptPhase::CandidateSaved.as_str(),
                 Some(&repaired_candidate_id),
@@ -646,15 +686,19 @@ impl Worker {
             )
             .await?;
         self.runs
-            .record_invocation(invocation(
-                self,
-                claimed,
-                "bounded_repair",
-                &request_id,
-                &summary,
-                started,
-                &response.usage,
-            ))
+            .record_invocation_fenced(
+                &claimed.fence,
+                invocation(
+                    self,
+                    claimed,
+                    "bounded_repair",
+                    &request_id,
+                    &summary,
+                    started,
+                    &response.usage,
+                ),
+                self.clock.now_ms(),
+            )
             .await?;
         self.faults.after_repair_candidate_persisted().await?;
         self.finish_repair_and_rereview(
@@ -698,6 +742,10 @@ impl Worker {
             run_id: claimed.run_id.clone(),
             novel_id: claimed.novel_id.clone(),
             contract: claimed.contract.clone(),
+            fence: LeaseFence {
+                owner: claimed.fence.owner.clone(),
+                control_version: control.version,
+            },
             control,
         };
         let review_spec = find_step(&production_plan(), "consistency_review")
@@ -726,6 +774,10 @@ impl Worker {
                 run_id: claimed.run_id.clone(),
                 novel_id: claimed.novel_id.clone(),
                 contract: claimed.contract.clone(),
+                fence: LeaseFence {
+                    owner: claimed.fence.owner.clone(),
+                    control_version: control.version,
+                },
                 control,
             };
             return self
@@ -900,7 +952,9 @@ impl Worker {
         let candidate = self.runs.latest_candidate(&claimed.run_id).await?;
         let outcome = if let Some(candidate) = candidate {
             self.novels
-                .promote_candidate(
+                .promote_candidate_fenced(
+                    &claimed.fence,
+                    &claimed.run_id,
                     &claimed.contract.target_chapter_id,
                     &candidate.id,
                     &self.ids.new_id(),
@@ -1092,6 +1146,7 @@ impl Worker {
             .apply_control(ControlWrite {
                 run_id: claimed.run_id.clone(),
                 expected_version: claimed.control.version,
+                fence: Some(claimed.fence.clone()),
                 event,
                 artifact,
                 event_kind: kind.to_string(),
@@ -1154,18 +1209,28 @@ async fn execute_structured(
     let attempt_id = worker.ids.new_id();
     worker
         .runs
-        .start_attempt(NewAttempt {
-            id: attempt_id.clone(),
-            run_id: claimed.run_id.clone(),
-            step_id: step_id.into(),
-            control_version: claimed.control.version,
-            created_at: worker.clock.now_ms(),
-        })
+        .start_attempt_fenced(
+            &claimed.fence,
+            NewAttempt {
+                id: attempt_id.clone(),
+                run_id: claimed.run_id.clone(),
+                step_id: step_id.into(),
+                control_version: claimed.control.version,
+                created_at: worker.clock.now_ms(),
+            },
+            worker.clock.now_ms(),
+        )
         .await?;
     let request_id = worker.ids.new_id();
     if !worker
         .runs
-        .mark_remote_started(&attempt_id, &request_id, worker.clock.now_ms())
+        .mark_remote_started_fenced(
+            &claimed.fence,
+            &claimed.run_id,
+            &attempt_id,
+            &request_id,
+            worker.clock.now_ms(),
+        )
         .await?
     {
         return Ok(TickOutcome::LostLease {
@@ -1218,7 +1283,9 @@ async fn execute_structured(
         Err(error) => {
             worker
                 .runs
-                .mark_attempt(
+                .mark_attempt_fenced(
+                    &claimed.fence,
+                    &claimed.run_id,
                     &attempt_id,
                     AttemptPhase::Interrupted.as_str(),
                     None,
@@ -1259,7 +1326,9 @@ async fn execute_structured(
         Err(error) => {
             worker
                 .runs
-                .mark_attempt(
+                .mark_attempt_fenced(
+                    &claimed.fence,
+                    &claimed.run_id,
                     &attempt_id,
                     AttemptPhase::Interrupted.as_str(),
                     None,
@@ -1286,18 +1355,36 @@ async fn execute_structured(
     };
     worker
         .runs
-        .record_invocation(invocation(
-            worker,
-            claimed,
-            step_id,
-            &request_id,
-            &summary,
-            started,
-            &response.usage,
-        ))
+        .record_invocation_fenced(
+            &claimed.fence,
+            invocation(
+                worker,
+                claimed,
+                step_id,
+                &request_id,
+                &summary,
+                started,
+                &response.usage,
+            ),
+            worker.clock.now_ms(),
+        )
         .await?;
+    if step_id == "consistency_review" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let next_version = artifacts
+            .iter()
+            .filter(|artifact| {
+                artifact.artifact_type == "consistency_review"
+                    && artifact.scope == chapter_scope(&claimed.contract.target_chapter_id)
+            })
+            .map(|artifact| artifact.version)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        record_review_debt(worker, claimed, &payload, next_version).await?;
+    }
     let status = if spec.gateable { "draft" } else { "confirmed" };
-    let outcome = worker
+    worker
         .finish_step(
             claimed,
             spec,
@@ -1307,17 +1394,14 @@ async fn execute_structured(
             None,
             Some(attempt_id),
         )
-        .await?;
-    if step_id == "consistency_review" {
-        record_review_debt(worker, claimed, &payload).await?;
-    }
-    Ok(outcome)
+        .await
 }
 
 async fn record_review_debt(
     worker: &Worker,
     claimed: &ClaimedRun,
     payload: &str,
+    review_version: i64,
 ) -> Result<(), AppError> {
     let value: serde_json::Value =
         serde_json::from_str(payload).map_err(|_| AppError::integrity("审校产物无法解析"))?;
@@ -1326,20 +1410,11 @@ async fn record_review_debt(
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-    let review_version = artifacts
-        .iter()
-        .filter(|artifact| {
-            artifact.artifact_type == "consistency_review"
-                && artifact.scope == chapter_scope(&claimed.contract.target_chapter_id)
-        })
-        .map(|artifact| artifact.version)
-        .max()
-        .unwrap_or(0);
     if issues.is_empty() {
         worker
             .runs
-            .resolve_quality_debt(
+            .resolve_quality_debt_fenced(
+                &claimed.fence,
                 &claimed.run_id,
                 &format!("审校版本 v{review_version} 通过，无遗留问题。"),
                 worker.clock.now_ms(),
@@ -1371,7 +1446,10 @@ async fn record_review_debt(
             })
         })
         .collect::<Vec<_>>();
-    worker.runs.record_quality_debt(&items).await?;
+    worker
+        .runs
+        .record_quality_debt_fenced(&claimed.fence, &items, worker.clock.now_ms())
+        .await?;
     Ok(())
 }
 

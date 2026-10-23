@@ -43,10 +43,10 @@ pub use hub::EventHub;
 pub use knowledge::assemble_context;
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
-    DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LookupRepository, ModelSecrets,
-    NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument, NewEmbedding, NewInvocation,
-    NewNovel, NewQualityDebt, NewVolume, NewWorld, NoFault, NoModelSecrets, NovelRepository,
-    OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveCandidateEditDraftRecord,
+    DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LeaseFence, LookupRepository,
+    ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument, NewEmbedding,
+    NewInvocation, NewNovel, NewQualityDebt, NewVolume, NewWorld, NoFault, NoModelSecrets,
+    NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveCandidateEditDraftRecord,
     SaveChapterDraftRecord, SaveChapterRecord, SearchHit, StoredEvent, SystemClock,
     TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds,
     WorkflowRepository, WorldRepository,

@@ -1226,6 +1226,84 @@ impl NovelRepository for SqliteKernel {
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }
+    async fn promote_candidate_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        run_id: &str,
+        chapter_id: &str,
+        candidate_id: &str,
+        revision_id: &str,
+        now_ms: i64,
+    ) -> Result<PromoteOutcome, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let row = sqlx::query("SELECT lease_owner, lease_until, version, status FROM workflow_control WHERE run_id = ?")
+            .bind(run_id).fetch_optional(tx.deref_mut()).await.map_err(map_sql)?;
+        let Some(row) = row else {
+            return Err(PortError::Conflict(
+                "创作任务已不存在，执行权已失效。".into(),
+            ));
+        };
+        let owner: Option<String> = row.try_get("lease_owner").map_err(map_sql)?;
+        let until: Option<i64> = row.try_get("lease_until").map_err(map_sql)?;
+        let version: i64 = row.try_get("version").map_err(map_sql)?;
+        let status: String = row.try_get("status").map_err(map_sql)?;
+        if owner.as_deref() != Some(fence.owner.as_str())
+            || version != fence.control_version
+            || until.is_some_and(|value| value < now_ms)
+            || !matches!(status.as_str(), "running" | "queued")
+        {
+            return Err(PortError::Conflict(
+                "执行权已失效，旧 Worker 的提交已被拒绝。".into(),
+            ));
+        }
+        let chapter = sqlx::query("SELECT novel_id, protection FROM chapter WHERE id = ?")
+            .bind(chapter_id)
+            .fetch_optional(tx.deref_mut())
+            .await
+            .map_err(map_sql)?
+            .ok_or_else(|| PortError::NotFound("没有找到这一章。".into()))?;
+        let protection = ChapterProtection::parse(
+            chapter
+                .try_get::<String, _>("protection")
+                .map_err(map_sql)?
+                .as_str(),
+        )
+        .map_err(|_| PortError::Integrity("章节保护状态无法识别。".into()))?;
+        if ensure_can_promote(protection).is_err() {
+            return Ok(PromoteOutcome::Blocked);
+        }
+        let candidate = sqlx::query(
+            "SELECT chapter_id, content, content_sha256 FROM chapter_candidate WHERE id = ?",
+        )
+        .bind(candidate_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到候选正文。".into()))?;
+        if candidate
+            .try_get::<String, _>("chapter_id")
+            .map_err(map_sql)?
+            != chapter_id
+        {
+            return Err(PortError::Integrity("候选正文不属于这一章。".into()));
+        }
+        let version: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM chapter_revision WHERE chapter_id = ?",
+        )
+        .bind(chapter_id)
+        .fetch_one(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        sqlx::query("INSERT INTO chapter_revision(id, chapter_id, version, origin, content, content_sha256, created_at) VALUES (?, ?, ?, 'promoted', ?, ?, ?)")
+            .bind(revision_id).bind(chapter_id).bind(version)
+            .bind(candidate.try_get::<String, _>("content").map_err(map_sql)?)
+            .bind(candidate.try_get::<String, _>("content_sha256").map_err(map_sql)?)
+            .bind(now_ms).execute(tx.deref_mut()).await.map_err(map_sql)?;
+        sqlx::query("UPDATE chapter SET official_revision_id = ?, updated_at = ? WHERE id = ? AND protection = 'none'")
+            .bind(revision_id).bind(now_ms).bind(chapter_id).execute(tx.deref_mut()).await.map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(PromoteOutcome::Promoted { version })
+    }
 }
 
 fn novel_platform_now() -> i64 {

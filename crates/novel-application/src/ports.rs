@@ -124,11 +124,18 @@ pub struct CommandOutcome {
 }
 
 #[derive(Debug, Clone)]
+pub struct LeaseFence {
+    pub owner: String,
+    pub control_version: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct ClaimedRun {
     pub run_id: String,
     pub novel_id: String,
     pub contract: RunContract,
     pub control: RunControl,
+    pub fence: LeaseFence,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +198,7 @@ pub struct ControlCommit {
 pub struct ControlWrite {
     pub run_id: String,
     pub expected_version: i64,
+    pub fence: Option<LeaseFence>,
     pub event: ControlEvent,
     pub artifact: Option<NewArtifact>,
     pub event_kind: String,
@@ -426,6 +434,15 @@ pub trait NovelRepository: Send + Sync {
         revision_id: &str,
         now_ms: i64,
     ) -> Result<PromoteOutcome, PortError>;
+    async fn promote_candidate_fenced(
+        &self,
+        fence: &LeaseFence,
+        run_id: &str,
+        chapter_id: &str,
+        candidate_id: &str,
+        revision_id: &str,
+        now_ms: i64,
+    ) -> Result<PromoteOutcome, PortError>;
 }
 
 #[derive(Debug, Clone)]
@@ -524,6 +541,12 @@ pub trait WorkflowRepository: Send + Sync {
     /// 读取某个 Run 的模型调用汇总。
     async fn run_usage(&self, run_id: &str) -> Result<RunUsageView, PortError>;
     async fn record_quality_debt(&self, items: &[NewQualityDebt]) -> Result<(), PortError>;
+    async fn record_quality_debt_fenced(
+        &self,
+        fence: &LeaseFence,
+        items: &[NewQualityDebt],
+        now_ms: i64,
+    ) -> Result<(), PortError>;
     async fn list_quality_debt(
         &self,
         novel_id: &str,
@@ -531,6 +554,13 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<Vec<QualityDebtView>, PortError>;
     async fn resolve_quality_debt(
         &self,
+        run_id: &str,
+        evidence: &str,
+        now_ms: i64,
+    ) -> Result<u64, PortError>;
+    async fn resolve_quality_debt_fenced(
+        &self,
+        fence: &LeaseFence,
         run_id: &str,
         evidence: &str,
         now_ms: i64,
@@ -575,16 +605,51 @@ pub trait WorkflowRepository: Send + Sync {
     ) -> Result<ChapterFullDetail, PortError>;
     async fn insert_external_artifact(&self, artifact: NewArtifact) -> Result<(), PortError>;
     async fn start_attempt(&self, attempt: NewAttempt) -> Result<(), PortError>;
+    async fn start_attempt_fenced(
+        &self,
+        fence: &LeaseFence,
+        attempt: NewAttempt,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
     async fn mark_remote_started(
         &self,
         attempt_id: &str,
         request_id: &str,
         now_ms: i64,
     ) -> Result<bool, PortError>;
+    async fn mark_remote_started_fenced(
+        &self,
+        fence: &LeaseFence,
+        run_id: &str,
+        attempt_id: &str,
+        request_id: &str,
+        now_ms: i64,
+    ) -> Result<bool, PortError>;
     async fn save_candidate(&self, candidate: NewCandidate) -> Result<(), PortError>;
+    async fn save_candidate_fenced(
+        &self,
+        fence: &LeaseFence,
+        candidate: NewCandidate,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
     async fn record_invocation(&self, invocation: NewInvocation) -> Result<(), PortError>;
+    async fn record_invocation_fenced(
+        &self,
+        fence: &LeaseFence,
+        invocation: NewInvocation,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
     async fn mark_attempt(
         &self,
+        attempt_id: &str,
+        phase: &str,
+        candidate_id: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn mark_attempt_fenced(
+        &self,
+        fence: &LeaseFence,
+        run_id: &str,
         attempt_id: &str,
         phase: &str,
         candidate_id: Option<&str>,
