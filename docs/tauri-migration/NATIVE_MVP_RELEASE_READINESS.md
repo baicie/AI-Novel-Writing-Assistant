@@ -57,9 +57,9 @@ CARGO_TARGET_DIR=<repo>/target cargo test --workspace --all-targets
 ```text
 pnpm --filter @ai-novel/desktop-e2e test:director
 2 passing × 3 rounds
-Round 1: 16s, pass
-Round 2: 14s, pass
-Round 3: 24s, pass
+Round 1: 43s, pass
+Round 2: 28s, pass
+Round 3: 43s, pass
 No flaky failure.
 ```
 
