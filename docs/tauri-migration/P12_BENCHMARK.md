@@ -85,3 +85,38 @@ residual_open_debt=2
 - 残留问题：不 Commit，质量债保持 open。
 
 这是确定性 Mock 质量基线，不替代真实长篇生成质量评估。
+
+
+## 10 章 Mock 连续生成 Benchmark（本轮新增）
+
+`crates/novel-application/tests/p12_long_generation.rs`：
+
+- 同一本小说、10 个章节；
+- 每章独立 Run；
+- 真实 Runtime / Worker / Gate / Candidate / Commit；
+- ScriptedLlm 提供确定性章节正文与 clean Review；
+- 不做真实付费模型调用。
+
+输出：
+
+```text
+P12 long-generation benchmark:
+chapters=10
+commits=10
+recent_context=true
+repair_budget=0
+```
+
+断言：
+
+- 10 章全部生成正式 Revision；
+- 每章 Commit 1 次；
+- 后续章节 Context 包含前章正文；
+- Repair 预算 0 时不触发修复；
+- 无残留错误 Commit。
+
+仍不是完整质量 Benchmark：
+
+- 未统计人物一致率/伏笔回收率/时间线冲突率；
+- Mock 正文不评估文学质量；
+- 尚未跑 50/100 章。
