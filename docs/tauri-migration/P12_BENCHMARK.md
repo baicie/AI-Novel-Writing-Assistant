@@ -37,13 +37,13 @@
 **PARTIAL**：确定性 Context Policy benchmark 通过；长篇小说连续生成与质量基线未实现。
 
 
-## 10 章 Context Continuity Benchmark（本轮新增）
+## 100 章 Context Continuity Benchmark（本轮新增）
 
 `crates/novel-application/tests/p12_long_context.rs`：
 
-- 10 章小说；前 8 章有正式 Revision；
-- 目标第 9 章；
-- 未来第 10 章、未确认 Candidate 均存在；
+- 100 章小说；前 90 章有正式 Revision；
+- 目标第 91 章；
+- 未来第 100 章、未确认 Candidate 均存在；
 - 真实 SQLite Context Assembly。
 
 结果：
@@ -51,16 +51,16 @@
 ```text
 P12 long-context benchmark:
 recent_recall=3/3
-earlier_omitted_by_policy=5
+earlier_omitted_by_policy=87
 candidate_leak=0
 future_leak=0
-chars=915
+chars=930
 trace=director-context-v1
 ```
 
 说明：
 
 - 当前 Context Policy 仅取最近 3 章正式正文；
-- 更早章节没有摘要迁移，因此被策略省略；
-- 这证明未来章节与 Candidate 不泄漏，但也暴露“长篇早期事实”缺口；
-- 仍需 recent summary / arc summary / 事实检索来覆盖 10/50/100 章。
+- 87 章早期事实被省略，证明长篇早期事实缺口；
+- 未来章节与 Candidate 不泄漏；
+- 仍需 recent summary / arc summary / 事实检索来覆盖长篇连续性。

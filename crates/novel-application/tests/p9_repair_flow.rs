@@ -219,6 +219,38 @@ async fn residual_issues_after_repair_stop_at_safety_without_commit() {
         .await
         .unwrap();
     assert!(debt.iter().any(|item| item.status == "open"));
+    // The same two issues occurred in both reviews. Occurrences remain separate,
+    // while stable debt identities converge to two rows.
+    let occurrences: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM review_issue_occurrence WHERE chapter_id = ?")
+            .bind(&chapter_id)
+            .fetch_one(kernel.as_ref().pool())
+            .await
+            .unwrap();
+    assert_eq!(occurrences, 4, "both reviews must retain their occurrences");
+    assert_eq!(debt.len(), 2, "the same business issues must converge");
+    assert!(debt.iter().all(|item| item.decision_version == 0));
+    let accepted = WorkflowRepository::accept_quality_debt(
+        kernel.as_ref(),
+        &debt[0].run_id,
+        &debt[0].id,
+        0,
+        "作者接受并保留",
+        2_000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(accepted.status, "accepted");
+    assert_eq!(accepted.decision_version, 1);
+    let history = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|item| item.id == accepted.id && item.status == "accepted")
+    );
+    assert!(history.iter().any(|item| item.status == "open"));
 }
 
 #[tokio::test]

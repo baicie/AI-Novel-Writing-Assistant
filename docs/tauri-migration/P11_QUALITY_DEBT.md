@@ -95,3 +95,18 @@ PASS（occurrence 写入与审校流程）
 - 同一业务问题跨两次审校的端到端断言（目前由稳定 key 与 occurrence 表设计保证，未加专门 fixture）。
 - 质量债详情 UI 仅显示摘要、状态和接受按钮，未展示完整证据/解决历史。
 - resolved 与具体 Review Artifact 外键仍未显式关联（使用 review_version 文本证据）。
+
+
+## 跨审校端到端证据（本轮补齐）
+
+`p9_repair_flow::residual_issues_after_repair_stop_at_safety_without_commit`：
+
+- 两次 Review 都返回相同两类问题；
+- Occurrence：4（两次 × 两个问题）；
+- Quality Debt：2（稳定 key 归并）；
+- 所有 debt 初始 open、decision_version=0；
+- 接受其中一条 → accepted、decision_version=1；
+- 另一条保持 open；
+- 历史没有被覆盖。
+
+这补上了 P11.3 的跨审校关联与 accepted 生命周期端到端证据。

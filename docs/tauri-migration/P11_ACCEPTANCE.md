@@ -176,8 +176,9 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 
 ## P11.3
 
-- Review Occurrence、稳定 key、accepted CAS、Native 接受按钮：**IMPLEMENTED**
-- 跨两轮审校端到端 fixture、完整历史 UI：**PARTIAL**
+- Review Occurrence、稳定 key、accepted CAS、Native 接受按钮：**VERIFIED（核心）**
+- 跨两轮审校端到端 fixture：**VERIFIED**
+- 完整历史详情 UI：**PARTIAL**
 
 ## P12.1 / P12.2
 
