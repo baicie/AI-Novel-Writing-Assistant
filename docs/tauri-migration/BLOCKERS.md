@@ -80,3 +80,10 @@
 - P9.2 Review/Repair：单次有界修复 + 质量债已实现；修复超时/SSE/取消/崩溃 E2E、residual pause 后 tick 错误传播仍需处理。
 - P9.3 Decisions：Reject/Regenerate/Confirm After Edit 后端已实现，Reject/Regenerate Native E2E 通过；Confirm After Edit 编辑 UI、双窗口/断线/审批取消竞态未完成。
 - 不得将 P9 当前 Mock 证据宣称为完整旧版自动导演或真实付费 Provider 验收。
+
+## B-012 P9 最终剩余
+
+- P9.1 旧 Context Broker/RAG/独立用户补充设定/真实 tokenizer 未迁移。
+- P9.2 repair timeout、SSE 中断、取消后迟到、进程崩溃恢复未专门 E2E；residual pause 后 tick 可能返回一次 Conflict。
+- P9.3 Confirm After Edit 编辑 UI、Regenerate 的过期 Gate/双窗口/断线竞态 E2E 未完成。
+- 非 Mock 的真实 Provider、真实写作质量与完整旧版功能未验收。

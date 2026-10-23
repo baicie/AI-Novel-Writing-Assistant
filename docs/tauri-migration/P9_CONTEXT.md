@@ -60,7 +60,19 @@
 - Native Director 默认请求 v2；旧 Run 的 v1 仍按旧 Prompt 执行。
 - P9.1 测试真实 Mock Provider + SQLite，验证世界、角色、前三章进入第四章 draft prompt。
 
-## 6. 未完成
+## 6. 测试结果
+
+```text
+cargo test -p novel-application --test p9_context
+3 passed
+
+cargo test -p novel-application --test p9_context_flow
+1 passed
+```
+
+完整 workspace：231 passed；干净 Worktree all-targets PASS。
+
+## 7. 未完成
 
 - 旧版 Context Broker 的复杂多块 policy 与知识库/RAG。
 - 真实模型 tokenizer 精确计数。

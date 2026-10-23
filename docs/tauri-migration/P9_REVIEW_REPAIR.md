@@ -69,6 +69,8 @@ Draft Candidate
 - 原候选和修复候选同时保留
 - 两次 consistency_review artifact 可追踪
 - `max_automatic_retries=0` 由 P8 test 保持 fail-closed
+- 真实 SQLite/Mock Provider，无真实付费模型调用
+- workspace 231 tests 全通过
 
 ## 5. 未完成 / 风险
 

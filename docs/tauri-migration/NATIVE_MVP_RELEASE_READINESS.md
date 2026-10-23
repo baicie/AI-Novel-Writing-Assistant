@@ -134,3 +134,11 @@ pnpm --filter @ai-novel/client test
 4. 真实 Provider 小预算联调与真实 usage/限流验证。
 5. 签名、公证、DMG/Tauri bundler、升级与回滚。
 6. 逐模块迁移旧 Workspace/角色/质量债/Propmt 语义。
+
+
+## P9 自动导演业务
+
+- P9.1 真实 Context：IMPLEMENTED / 部分 VERIFIED（世界、角色、前序正式章节、预算、trace、draft v2）。
+- P9.2 Review/Repair：IMPLEMENTED / PARTIAL（质量债、单次有界修复、re-review、residual safety；超时/崩溃/取消 E2E 未完成）。
+- P9.3 Decisions：backend IMPLEMENTED，Native Reject/Regenerate E2E PASS，Confirm After Edit 编辑 UI 未完成。
+- 最终质量：231 Rust tests、55 HTTP、186 frontend、3 Director WDIO、Editor SIGKILL、clean all-targets、生产隔离 audit 全部通过。

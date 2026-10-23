@@ -1,6 +1,6 @@
 # P9 Acceptance
 
-基线：`b6e13d92` 之后继续；最终 HEAD 以 Git 为准。
+基线：P9.1 `b6e13d92`；P9.2/P9.3 代码提交 `388058ab`。
 
 ## P9.1 Context
 
@@ -58,17 +58,26 @@
 - Confirm After Edit 编辑 UI
 - 过期 Gate/双窗口/断线/审批取消竞态 E2E
 
-## 全阶段质量
+## 全阶段质量（最终）
 
-待最终阶段运行：
+在 HEAD `388058ab` 上：
 
-- workspace Rust tests
-- clean worktree all-targets
-- frontend test/typecheck/build
-- fmt/clippy
-- Native Director E2E
-- Editor SIGKILL E2E
-- Tauri release audit
+- Rust workspace：**231 passed**
+- 干净 Worktree `cargo test --workspace --all-targets`：**PASS**
+- 已跟踪 novel-http targets：**55 passed**
+- 前端 tests：**186 passed**
+- frontend typecheck：**PASS**
+- frontend build：**PASS**
+- fmt/clippy：**PASS（既有 warning）**
+- Native Director WDIO：**3 passing**（含 Reject/Regenerate）
+- Cancel：**1 passing**
+- Safety：**1 passing**
+- Editor autosave/refresh：**2 passing**
+- Editor 跨进程重启：**1 passing**
+- Editor SIGKILL：crash harness 预期非零，新进程恢复 **1 passing**
+- 生产 `.app`：**20.00 MiB**
+- DMG：**9.1 MiB**
+- 生产隔离审计：**PASS**（无 WDIO/E2E Key/WebDriver marker）
 
 ## 状态声明
 

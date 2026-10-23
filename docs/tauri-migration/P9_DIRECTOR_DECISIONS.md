@@ -50,7 +50,9 @@ Native Director 按钮使用该投影，而不是 React 自行猜测状态。
 
 ## 4. 测试
 
-`crates/novel-application/tests/p9_decisions.rs`：
+Native WDIO：`test:director` **3 passing**，第三项真实点击 Reject、Regenerate，并验证旧 artifact 为 stale。
+
+Rust：`crates/novel-application/tests/p9_decisions.rs`：
 
 - 第一 Gate 的 legalActions 包含四个决策
 - Reject 后旧 artifact 保留为 stale，新生成 artifact 出现
