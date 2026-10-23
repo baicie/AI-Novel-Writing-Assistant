@@ -25,8 +25,8 @@
 
 - 现象：自动导演 UI、任务中心写操作、知识库管理写操作、图像、短剧等仍调用 `/api/*`；任务中心运行只读投影和知识库文档列表已接 Tauri；Rust 后端已新增结构化导演 Step 和 typed `openRun/approve/cancel/replay/subscribe` transport。
 - 处理：集中适配器对未知路径返回 `NOT_MIGRATED` 501，不返回假成功。
-- 影响：P8.4 的 DirectorNovelPage/DirectorPanel/DirectorGate 页面尚未接入 Tauri；当前只能验证后端/传输能力，不能宣称页面审批闭环。
-- 下一动作：按 `P8_BUSINESS_CONTRACTS.md` 逐模块迁移；不得以 Node sidecar 补齐。
+- 影响：P8.4 已交付 Tauri Director MVP，但完整旧 Workspace、角色审阅、拒绝/重生成和真实 GUI 操作验收仍未完成；不能宣称完整页面闭环。
+- 下一动作：按 `P8_NATIVE_UI_CONTRACT.md` 逐模块迁移；不得以 Node sidecar 补齐。
 
 ## B-005 macOS DMG 打包
 
@@ -47,5 +47,13 @@
 
 - 状态：**PARTIAL**。
 - 已迁移：Story Macro、Character Cast、Volume Strategy、Chapter List 的结构化最小合同；Context artifact 组装；Consistency Review 结构化 issues；Gate/Commit。
-- 未迁移：旧版逐字 Prompt/完整 Schema、拒绝/重新生成、人工重规划与受影响下游局部失效、World/State/History/Knowledge Context、Bounded Repair、质量债闭环、真实 Provider 验证。
+- 未迁移：旧版逐字 Prompt/完整 Schema、拒绝/重新生成、人工重规划与受影响下游局部失效、World/State/History/Knowledge Context、完整 Bounded Repair、质量债闭环、真实 Provider 验证。
+- Bounded Repair 已 fail-closed：审校有问题时暂停，不生成假修复产物或提交正文。
 - 处理：后续按 Step 增补合同测试，不得用 `{ok:true}` 或固定 `issues:0` 冒充。
+
+## B-008 P8.4 真实 UI 操作验收未完成
+
+- 状态：**PARTIAL / BLOCKED**。
+- 已完成：Tauri Director 路由、启动表单、状态/事件/产物/候选展示、approve/cancel/resume 按钮、运行历史；Release WebView 路由与启动表单 smoke 通过。
+- 未完成：通过真实按钮启动 Run、审批、取消、恢复、完成后重开历史的自动化或人工操作验收；真实模型配置/Provider 未验证。
+- 处理：保留 `TauriDirectorPage` 和契约测试；人工 GUI/真实 Provider 验收前不标记 P8.4 为 VERIFIED。

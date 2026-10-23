@@ -7,14 +7,14 @@
 | Step | 旧版入口 | 输入 | 旧 Prompt / Schema | Rust 当前 | 前端 | 验证 |
 | --- | --- | --- | --- | --- | --- | --- |
 | story_macro | `server/src/modules/director/steps/planning/storyMacro.ts`；`server/src/services/novel/storyMacro/StoryMacroPlanService.ts`；`server/src/app/director/productionComposition.ts` | Novel Seed、`storyInput`、项目上下文、锁定字段 | `server/src/prompting/prompts/novel/storyMacro.prompts.ts`，`novel.story_macro.decomposition` v1；`StoryMacroPlan` / `StoryExpansion` / `StoryDecomposition` | `story_macro` 结构化 Step，`story-macro-v1`，校验 expansion/decomposition/constraints/issues 并持久化 artifact | 旧 DirectorNext 页面仍 NOT_MIGRATED | `p8_director_loop`、4 个 schema validation 单测 |
-| character_cast | `server/src/services/novel/characterPrep/characterCastGeneration.ts`；`server/src/app/director/productionComposition.ts` | Story Macro、角色槽位、项目人物约束 | `server/src/prompting/prompts/novel/characterPreparation.prompts.ts`，`novel.character.castAuto`；`characterCastAutoResponseSchema`（README 中成员 3–6、关系 2–12） | `character_cast` 结构化 Step，`character-cast-v1`，至少 3 人/2 关系；Gate 产物 draft，确认后 confirmed | 旧页面未接入；无拒绝/重新生成动作 | `p8_director_loop`、schema 单测 |
-| volume_strategy | `server/src/services/novel/volume/volumeGenerationSchemas.ts`；`server/src/app/director/productionComposition.ts` | Story Macro、Character Cast、预计章节数、卷数范围 | `server/src/prompting/prompts/novel/volume/strategy.prompts.ts`，`novel.volume.strategy`；VolumeStrategy 结构 | `volume_strategy` 结构化 Step，`volume-strategy-v1`，volumeOrder 唯一、非空卷 | 旧页面未接入 | `p8_director_loop`、重复卷序号单测 |
-| chapter_list | `server/src/app/director/productionComposition.ts`；`server/src/prompting/prompts/novel/volume/chapterList.prompts.ts` | Volume Strategy、Character Cast、目标章节范围 | `novel.volume.chapter_list` v9/v10；`VolumeChapterPlan` | `chapter_list` 结构化 Step，`chapter-list-v1`，chapterOrder 唯一、卷必须存在、人物引用必须存在 | 旧页面未接入 | `p8_director_loop`、空/重复/引用单测 |
-| context | `server/src/prompting/prompts/novel/context/*`；旧 Context Broker/章节上下文策略 | 当前章节计划、Story Macro、Cast、世界/角色状态、已确认历史、用户知识库、Token Budget | 旧版多组 Context Block / Policy；Rust 尚未完整移植 | `context` 从上游 artifacts 组装 `storyMacro/characterCast/volumeStrategy/chapterPlan/targetChapterId/tokenBudget`；未接世界/角色状态/历史/知识库 | 旧页面未接入 | `p8_director_loop` 的 context artifact |
+| character_cast | `server/src/services/novel/characterPrep/characterCastGeneration.ts`；`server/src/app/director/productionComposition.ts` | Story Macro、角色槽位、项目人物约束 | `server/src/prompting/prompts/novel/characterPreparation.prompts.ts`，`novel.character.castAuto`；`characterCastAutoResponseSchema`（README 中成员 3–6、关系 2–12） | `character_cast` 结构化 Step，`character-cast-v1`，至少 3 人/2 关系；Gate 产物 draft，确认后 confirmed | Tauri MVP Gate 可确认；无拒绝/重新生成 | `p8_director_loop`、schema 单测 |
+| volume_strategy | `server/src/services/novel/volume/volumeGenerationSchemas.ts`；`server/src/app/director/productionComposition.ts` | Story Macro、Character Cast、预计章节数、卷数范围 | `server/src/prompting/prompts/novel/volume/strategy.prompts.ts`，`novel.volume.strategy`；VolumeStrategy 结构 | `volume_strategy` 结构化 Step，`volume-strategy-v1`，volumeOrder 唯一、非空卷 | Tauri MVP 显示 Gate/产物 | `p8_director_loop`、重复卷序号单测 |
+| chapter_list | `server/src/app/director/productionComposition.ts`；`server/src/prompting/prompts/novel/volume/chapterList.prompts.ts` | Volume Strategy、Character Cast、目标章节范围 | `novel.volume.chapter_list` v9/v10；`VolumeChapterPlan` | `chapter_list` 结构化 Step，`chapter-list-v1`，chapterOrder 唯一、卷必须存在、人物引用必须存在 | Tauri MVP 显示 Gate/产物 | `p8_director_loop`、空/重复/引用单测 |
+| context | `server/src/prompting/prompts/novel/context/*`；旧 Context Broker/章节上下文策略 | 当前章节计划、Story Macro、Cast、世界/角色状态、已确认历史、用户知识库、Token Budget | 旧版多组 Context Block / Policy；Rust 尚未完整移植 | `context` 从上游 artifacts 组装 `storyMacro/characterCast/volumeStrategy/chapterPlan/targetChapterId/tokenBudget`；未接世界/角色状态/历史/知识库 | Tauri MVP 显示 context artifact | `p8_director_loop` 的 context artifact |
 | consistency_review | `server/src/prompting/prompts/novel/review.prompts.ts`，`novel.review.chapter` v2；旧审校/质量链 | 候选正文、章节计划、人物、故事约束 | 旧版 Issue 结构；Rust `consistency-review-v1` 为兼容子集 | 结构化 `issues[]`（type/severity/evidence/suggestion），空数组合法，模型/解析失败 pause，不把失败当 clean | 旧页面未接入 | `p8_director_loop`（空问题）、malformed/非空单测 |
-| bounded_repair | 旧版章节修复/质量债链路 | consistency issues、原始候选、修复预算 | 旧版 repair/acceptance 合同（未完整迁移） | `bounded_repair` 仍为占位 plumbing；未实现真实修复循环 | 无 | 未验证 |
-| approval | `DirectorGate` / 旧 API approval | gate artifact、controlVersion、commandId | 旧 `waiting_gate`；Rust `waiting_approval` | `approve` 用 commandId + CAS 将 draft gate artifact 置 confirmed；无独立 reject 命令 | 旧 Gate UI 未接 Tauri | `p8_director_loop`、recovery gate test |
-| commit | 旧章节提交/正文持久化 | chapter_approval、candidate、revision | 旧 chapter promote 语义 | `commit` promote candidate，保护 user_edited；CAS/事务 | 未接 Tauri UI | `p8_director_loop` 重开正文/revision |
+| bounded_repair | 旧版章节修复/质量债链路 | consistency issues、原始候选、修复预算 | 旧版 repair/acceptance 合同（未完整迁移） | `bounded_repair` fail-closed：有问题直接 pause，不生成假修复产物；真实修复循环未实现 | Tauri MVP 显示暂停原因，不显示自动修复按钮 | 新增审校问题 fail-closed 测试 |
+| approval | `DirectorGate` / 旧 API approval | gate artifact、controlVersion、commandId | 旧 `waiting_gate`；Rust `waiting_approval` | `approve` 用 commandId + CAS 将 draft gate artifact 置 confirmed；可选 expectedVersion；无独立 reject 命令 | Tauri MVP 确认/取消/恢复按钮；拒绝/重新生成未显示 | `p8_director_loop`、recovery gate test |
+| commit | 旧章节提交/正文持久化 | chapter_approval、candidate、revision | 旧 chapter promote 语义 | `commit` promote candidate，保护 user_edited；CAS/事务 | Tauri MVP 完成后提供正文入口 | `p8_director_loop` 重开正文/revision |
 
 ## 逐 Step 合同
 
@@ -28,7 +28,7 @@
 - 审批：非 gateable；用户修改保护尚未在此 Step 接入。
 - 失败/重试：模型错误 pause；非法 JSON/schema mismatch pause，不静默成功；未实现有限自动修复。
 - Rust 状态：**IMPLEMENTED（结构化；旧 Prompt 语义 PARTIAL）**。
-- 前端：**NOT_STARTED**（旧 DirectorNext 仍走旧 API）。
+- 前端：**PARTIAL**（Tauri MVP 显示运行/产物，无专用 Macro 编辑器）。
 
 ### Character Cast
 
@@ -40,7 +40,7 @@
 - 审批：Gate `character_cast`；确认当前可用；拒绝/重新生成按钮和后端 reject 命令未实现。
 - 失败：schema mismatch pause；上游缺失 blocked。
 - Rust 状态：**IMPLEMENTED（生成/确认）；PARTIAL（拒绝、重新生成、人物事实落库）**。
-- 前端：**NOT_STARTED**。
+- 前端：**PARTIAL**（Tauri MVP Gate 可确认，无拒绝/重新生成）。
 
 ### Volume Strategy / Chapter Plan
 
