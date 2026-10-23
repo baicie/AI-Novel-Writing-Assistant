@@ -453,8 +453,9 @@ impl Worker {
             }
         };
         let candidate_id = self.ids.new_id();
+        let now = self.clock.now_ms();
         self.runs
-            .save_candidate_fenced(
+            .save_candidate_checkpoint(
                 &claimed.fence,
                 NewCandidate {
                     id: candidate_id.clone(),
@@ -463,24 +464,9 @@ impl Worker {
                     step_id: "draft".into(),
                     content: response.text.clone(),
                     content_sha256: sha256_hex(response.text.as_bytes()),
-                    now_ms: self.clock.now_ms(),
+                    now_ms: now,
                 },
-                self.clock.now_ms(),
-            )
-            .await?;
-        self.runs
-            .mark_attempt_fenced(
-                &claimed.fence,
-                &claimed.run_id,
                 &attempt_id,
-                AttemptPhase::CandidateSaved.as_str(),
-                Some(&candidate_id),
-                self.clock.now_ms(),
-            )
-            .await?;
-        self.runs
-            .record_invocation_fenced(
-                &claimed.fence,
                 invocation(
                     self,
                     claimed,
@@ -490,7 +476,7 @@ impl Worker {
                     started,
                     &response.usage,
                 ),
-                self.clock.now_ms(),
+                now,
             )
             .await?;
         if self.faults.fail_after_candidate("draft").await {
@@ -701,8 +687,9 @@ impl Worker {
                 .await;
         }
         let repaired_candidate_id = self.ids.new_id();
+        let now = self.clock.now_ms();
         self.runs
-            .save_candidate_fenced(
+            .save_candidate_checkpoint(
                 &claimed.fence,
                 NewCandidate {
                     id: repaired_candidate_id.clone(),
@@ -711,24 +698,9 @@ impl Worker {
                     step_id: "bounded_repair".into(),
                     content: repaired.clone(),
                     content_sha256: sha256_hex(repaired.as_bytes()),
-                    now_ms: self.clock.now_ms(),
+                    now_ms: now,
                 },
-                self.clock.now_ms(),
-            )
-            .await?;
-        self.runs
-            .mark_attempt_fenced(
-                &claimed.fence,
-                &claimed.run_id,
                 &attempt_id,
-                AttemptPhase::CandidateSaved.as_str(),
-                Some(&repaired_candidate_id),
-                self.clock.now_ms(),
-            )
-            .await?;
-        self.runs
-            .record_invocation_fenced(
-                &claimed.fence,
                 invocation(
                     self,
                     claimed,
@@ -738,7 +710,7 @@ impl Worker {
                     started,
                     &response.usage,
                 ),
-                self.clock.now_ms(),
+                now,
             )
             .await?;
         self.faults.after_repair_candidate_persisted().await?;

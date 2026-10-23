@@ -435,3 +435,141 @@ async fn auto_renewal_keeps_long_model_request_owned() {
         control.status
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn persistent_cancel_wins_over_late_repair_result() {
+    let (endpoint, repair_started, release_repair, repairs) = blocked_repair_server().await;
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("cancel-race.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let clock = Arc::new(novel_application::SystemClock);
+    let a = runtime(kernel.clone(), clock, "worker-a", 60_000).await;
+    let novel = a.director.create_novel("取消竞争书", "").await.unwrap();
+    let chapter = a
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let mut prompts = std::collections::BTreeMap::new();
+    prompts.insert("chapter_draft".into(), "chapter-draft-v2".into());
+    let opened = a
+        .director
+        .open_run(OpenRunInput {
+            command_id: "cancel-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock".into(),
+            prompt_versions: prompts,
+            token_budget: Some(512),
+            context_token_budget: Some(24_000),
+            max_automatic_retries: 0,
+            repair_budget: Some(1),
+            endpoint,
+            allow_localhost_http: true,
+        })
+        .await
+        .unwrap();
+    let mut at_review = false;
+    for _ in 0..30 {
+        let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+            .await
+            .unwrap();
+        let control = WorkflowRepository::run_control(kernel.as_ref(), &opened.run_id)
+            .await
+            .unwrap();
+        if control.status == novel_domain::RunStatus::Running
+            && artifacts
+                .iter()
+                .any(|artifact| artifact.artifact_type == "consistency_review")
+        {
+            at_review = true;
+            break;
+        }
+        match a.worker.tick().await.unwrap() {
+            TickOutcome::Advanced {
+                status,
+                run_id: current,
+            } if status == "waiting_approval" => {
+                let detail = a
+                    .director
+                    .get_run_detail(&novel.id, &current)
+                    .await
+                    .unwrap();
+                a.director
+                    .approve(
+                        &format!("cancel-approve-{}", detail.control_version),
+                        &current,
+                    )
+                    .await
+                    .unwrap();
+            }
+            TickOutcome::Advanced { status, .. } if status == "paused" => break,
+            TickOutcome::Idle => break,
+            _ => {}
+        }
+    }
+    assert!(at_review);
+    let worker = a.worker.clone();
+    let late = tokio::spawn(async move { worker.tick().await });
+    tokio::time::timeout(Duration::from_secs(5), repair_started.notified())
+        .await
+        .expect("repair starts");
+    let first_cancel = a
+        .director
+        .cancel("cancel-once", &opened.run_id)
+        .await
+        .unwrap();
+    let second_cancel = a
+        .director
+        .cancel("cancel-once", &opened.run_id)
+        .await
+        .unwrap();
+    assert_eq!(first_cancel.status, second_cancel.status);
+    assert!(!first_cancel.replayed);
+    assert!(second_cancel.replayed);
+    release_repair.notify_waiters();
+    let late_result = late.await.unwrap();
+    assert!(late_result.is_err());
+    let control = WorkflowRepository::run_control(kernel.as_ref(), &opened.run_id)
+        .await
+        .unwrap();
+    assert_eq!(control.status, novel_domain::RunStatus::Cancelled);
+    assert_eq!(repairs.load(Ordering::SeqCst), 1);
+    let candidates: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&opened.run_id)
+            .fetch_one(kernel.as_ref().pool())
+            .await
+            .unwrap();
+    assert_eq!(candidates, 1);
+    let repair_notes: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'repair_notes'",
+    )
+    .bind(&opened.run_id)
+    .fetch_one(kernel.as_ref().pool())
+    .await
+    .unwrap();
+    assert_eq!(repair_notes, 0);
+    let commits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_commit'",
+    )
+    .bind(&opened.run_id)
+    .fetch_one(kernel.as_ref().pool())
+    .await
+    .unwrap();
+    assert_eq!(commits, 0);
+    let revisions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = ?")
+            .bind(&chapter.id)
+            .fetch_one(kernel.as_ref().pool())
+            .await
+            .unwrap();
+    assert_eq!(revisions, 0);
+    println!(
+        "P11 cancel: persisted cancel won, late repair rejected, repair_requests=1 events=1 candidates=1 commits=0 revisions=0"
+    );
+}

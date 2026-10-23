@@ -617,6 +617,61 @@ impl WorkflowRepository for SqliteKernel {
         Ok(())
     }
 
+    async fn save_candidate_checkpoint(
+        &self,
+        fence: &novel_application::LeaseFence,
+        candidate: NewCandidate,
+        attempt_id: &str,
+        invocation: NewInvocation,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        if invocation.run_id != candidate.run_id || invocation.step_id != candidate.step_id {
+            return Err(PortError::Integrity(
+                "候选与调用记录不属于同一 Run/Step。".into(),
+            ));
+        }
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        verify_lease_fence(&mut tx, fence, &candidate.run_id, now_ms).await?;
+        sqlx::query(
+            "INSERT INTO chapter_candidate(id, chapter_id, run_id, step_id, content, content_sha256, interrupted, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+        )
+        .bind(&candidate.id).bind(&candidate.chapter_id).bind(&candidate.run_id)
+        .bind(&candidate.step_id).bind(&candidate.content).bind(&candidate.content_sha256)
+        .bind(candidate.now_ms).bind(candidate.now_ms)
+        .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        let updated = sqlx::query(
+            "UPDATE workflow_step_attempt
+             SET phase = 'candidate_saved', candidate_id = ?, updated_at = ?
+             WHERE id = ? AND run_id = ? AND phase IN ('started','remote_started')",
+        )
+        .bind(&candidate.id)
+        .bind(now_ms)
+        .bind(attempt_id)
+        .bind(&candidate.run_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        if updated.rows_affected() != 1 {
+            return Err(PortError::Conflict("修复尝试已不在可保存状态。".into()));
+        }
+        insert_invocation(&mut tx, &invocation).await?;
+        let seq = next_seq(&mut tx, &candidate.run_id).await?;
+        let payload = serde_json::json!({ "candidateId": candidate.id }).to_string();
+        insert_event(
+            &mut tx,
+            &candidate.run_id,
+            seq,
+            "checkpoint_saved",
+            Some(&candidate.step_id),
+            &payload,
+            candidate.now_ms,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
     async fn record_quality_debt_fenced(
         &self,
         fence: &novel_application::LeaseFence,

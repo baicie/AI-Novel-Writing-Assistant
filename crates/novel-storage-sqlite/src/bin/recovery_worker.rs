@@ -40,16 +40,24 @@ async fn main() {
     let novel_id = std::env::var("P11_NOVEL").expect("P11_NOVEL");
     let owner = std::env::var("P11_OWNER").expect("P11_OWNER");
     let marker = std::env::var_os("P11_MARKER").map(std::path::PathBuf::from);
+    let checkpoint = std::env::var("P11_CHECKPOINT").unwrap_or_default();
     let auto_approve = std::env::var("P11_AUTO_APPROVE").ok().as_deref() == Some("1");
     let kernel = Arc::new(
         SqliteKernel::open(std::path::Path::new(&db))
             .await
             .expect("open db"),
     );
-    let fault: Arc<dyn FaultInjector> = match marker {
-        Some(marker) => Arc::new(CheckpointFault { marker }),
-        None => Arc::new(novel_application::NoFault),
+    let fault: Arc<dyn FaultInjector> = if checkpoint == "after_review" {
+        Arc::new(novel_application::NoFault)
+    } else {
+        match marker.as_ref() {
+            Some(marker) => Arc::new(CheckpointFault {
+                marker: marker.clone(),
+            }),
+            None => Arc::new(novel_application::NoFault),
+        }
     };
+    let checkpoint_kernel = kernel.clone();
     let runtime = Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
         runs: kernel.clone(),
@@ -93,6 +101,23 @@ async fn main() {
                     "paused" | "succeeded" | "cancelled" | "failed"
                 ) {
                     break;
+                }
+                if checkpoint == "after_review" {
+                    let reviews: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM workflow_artifact WHERE novel_id = ? AND type = 'consistency_review'",
+                    )
+                    .bind(&novel_id)
+                    .fetch_one(checkpoint_kernel.pool())
+                    .await
+                    .unwrap_or(0);
+                    if reviews >= 2 {
+                        if let Some(marker) = &marker {
+                            tokio::fs::write(marker, format!("{}", std::process::id()))
+                                .await
+                                .expect("marker");
+                        }
+                        std::future::pending::<()>().await;
+                    }
                 }
             }
             TickOutcome::Idle => {

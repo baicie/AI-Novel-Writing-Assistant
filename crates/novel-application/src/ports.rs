@@ -639,6 +639,15 @@ pub trait WorkflowRepository: Send + Sync {
         invocation: NewInvocation,
         now_ms: i64,
     ) -> Result<(), PortError>;
+    /// Persist Candidate + Attempt CandidateSaved + Invocation in one transaction.
+    async fn save_candidate_checkpoint(
+        &self,
+        fence: &LeaseFence,
+        candidate: NewCandidate,
+        attempt_id: &str,
+        invocation: NewInvocation,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
     async fn mark_attempt(
         &self,
         attempt_id: &str,

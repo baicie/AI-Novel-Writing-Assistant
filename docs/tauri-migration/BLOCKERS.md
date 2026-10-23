@@ -129,3 +129,8 @@
 
 - 自动续约、长请求、重复 Claim 已通过。
 - 仍未完成：持久化 Cancel 竞争、Re-review 中途崩溃恢复、Candidate/Attempt/Invocation 单事务。
+
+## B-021 P11.4-B/C
+
+- 持久化 Cancel 竞争、Re-review 完成后 SIGKILL、Candidate/Attempt/Invocation 原子落库已通过。
+- 仍未覆盖：Cancel 与 Commit 同一毫秒的数据库级竞争、Re-review Provider 返回后未落地时的中途崩溃自动复用、真实付费 Provider timeout。

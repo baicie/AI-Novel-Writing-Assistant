@@ -478,3 +478,96 @@ async fn remote_started_repair_is_not_replayed_and_stays_unknown() {
         debt
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn completed_rereview_sigkill_does_not_replay_review_or_commit() {
+    let (endpoint, reviews, repairs) = start_server(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("rereview-crash.sqlite");
+    let (novel_id, run_id) = seed(&db, &endpoint).await;
+    let marker = dir.path().join("review.marker");
+    let binary = std::env::var("CARGO_BIN_EXE_recovery_worker").expect("harness binary env");
+    let mut child = Command::new(&binary)
+        .env("P11_DB", &db)
+        .env("P11_ENDPOINT", &endpoint)
+        .env("P11_NOVEL", &novel_id)
+        .env("P11_OWNER", "worker-a")
+        .env("P11_MARKER", &marker)
+        .env("P11_AUTO_APPROVE", "1")
+        .env("P11_CHECKPOINT", "after_review")
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    assert!(
+        wait_for(&marker, Duration::from_secs(30)),
+        "review checkpoint not reached (pid {pid})"
+    );
+    let kernel = SqliteKernel::open(&db).await.unwrap();
+    let reviews_before = reviews.load(Ordering::SeqCst);
+    let repairs_before = repairs.load(Ordering::SeqCst);
+    assert_eq!(reviews_before, 2);
+    assert_eq!(repairs_before, 1);
+    child.kill().unwrap();
+    let status = child.wait().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(9));
+    }
+    let mut recovery = Command::new(&binary)
+        .env("P11_DB", &db)
+        .env("P11_ENDPOINT", &endpoint)
+        .env("P11_NOVEL", &novel_id)
+        .env("P11_OWNER", "worker-a")
+        .env("P11_AUTO_APPROVE", "0")
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let exit = recovery.wait().unwrap();
+    assert!(exit.success());
+    assert_eq!(
+        reviews.load(Ordering::SeqCst),
+        reviews_before,
+        "completed review was replayed"
+    );
+    assert_eq!(repairs.load(Ordering::SeqCst), repairs_before);
+    let control = kernel.run_control(&run_id).await.unwrap();
+    assert_eq!(control.status, novel_domain::RunStatus::WaitingApproval);
+    let candidates: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(candidates, 2);
+    let approvals: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_approval'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(approvals, 1);
+    let commits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_commit'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(commits, 0);
+    let revisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = (SELECT chapter_id FROM workflow_run WHERE id = ?)").bind(&run_id).fetch_one(kernel.pool()).await.unwrap();
+    assert_eq!(revisions, 0);
+    println!(
+        "P11 review-crash pid={pid} sigkill={status:?} reviews={} repairs={} candidates={} approvals={} commits={} revisions={}",
+        reviews.load(Ordering::SeqCst),
+        repairs.load(Ordering::SeqCst),
+        candidates,
+        approvals,
+        commits,
+        revisions
+    );
+}

@@ -139,3 +139,20 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - 续约不改变 Control Version，不影响 fence。
 - 同 owner 重复 Claim 产生新执行权，旧 fence 失效。
 - 续约任务在 Tick 结束取消。
+
+## P11.4-B 持久化 Cancel / Re-review 崩溃
+
+**VERIFIED**
+
+- 持久化 Cancel 与迟到 Repair 竞争安全。
+- Cancel 命令幂等。
+- Re-review Artifact 完成后 SIGKILL 不重复 Review。
+- 无 Commit/Revision。
+
+## P11.4-C 原子落库
+
+**VERIFIED**
+
+- Candidate + Attempt CandidateSaved + Invocation 单事务。
+- Attempt 不可保存时全回滚。
+- H1 安全续跑使用完整事实。

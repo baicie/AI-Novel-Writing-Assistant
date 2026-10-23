@@ -403,3 +403,108 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
     .unwrap();
     assert_eq!(revisions, 1);
 }
+
+#[tokio::test]
+async fn candidate_checkpoint_rolls_back_when_attempt_is_not_saveable() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("atomic.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        novel_application::NewNovel {
+            id: "novel-lease".into(),
+            title: "租约测试".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "chapter-lease".into(),
+            novel_id: "novel-lease".into(),
+            title: "第一章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let contract = contract();
+    WorkflowRepository::open_run(
+        &kernel,
+        OpenRunRecord {
+            command_id: "open-atomic".into(),
+            request_hash: "open-atomic-hash".into(),
+            run_id: contract.run_id.clone(),
+            novel_id: contract.novel_id.clone(),
+            contract_json: serde_json::to_string(&contract).unwrap(),
+            plan_version: contract.plan_version.clone(),
+            seed_artifact_id: "seed-atomic".into(),
+            seed_payload: "{}".into(),
+            seed_hash: "seed-hash".into(),
+            now_ms: 10,
+        },
+    )
+    .await
+    .unwrap();
+    let owner = WorkflowRepository::claim_next(&kernel, "worker-a", 1_000, 100)
+        .await
+        .unwrap()
+        .unwrap();
+    let result = WorkflowRepository::save_candidate_checkpoint(
+        &kernel,
+        &owner.fence,
+        novel_application::NewCandidate {
+            id: "candidate-atomic".into(),
+            chapter_id: "chapter-lease".into(),
+            run_id: owner.run_id.clone(),
+            step_id: "bounded_repair".into(),
+            content: "atomic".into(),
+            content_sha256: "hash".into(),
+            now_ms: 1_001,
+        },
+        "missing-attempt",
+        novel_application::NewInvocation {
+            id: "inv-atomic".into(),
+            request_id: "req-atomic".into(),
+            run_id: owner.run_id.clone(),
+            step_id: "bounded_repair".into(),
+            provider: "mock".into(),
+            model: "mock".into(),
+            input_summary: "x".into(),
+            started_at: 1_000,
+            finished_at: 1_001,
+            prompt_tokens: None,
+            completion_tokens: None,
+            status: "unknown".into(),
+        },
+        1_001,
+    )
+    .await;
+    assert!(matches!(result, Err(PortError::Conflict(_))));
+    let candidates: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&owner.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    let invocations: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM llm_invocation WHERE run_id = ?")
+            .bind(&owner.run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    let events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_event WHERE run_id = ? AND kind = 'checkpoint_saved'",
+    )
+    .bind(&owner.run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!((candidates, invocations, events), (0, 0, 0));
+}

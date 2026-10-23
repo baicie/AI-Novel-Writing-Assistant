@@ -198,3 +198,78 @@ cargo test -p novel-application --test p11_lease_fence
 cargo test -p novel-storage-sqlite --test workflow_lease
 2 passed
 ```
+
+
+## P11.4-B 持久化 Cancel / Re-review 崩溃
+
+### Cancel 竞争
+
+`persistent_cancel_wins_over_late_repair_result`：
+
+- A 已发出 Repair 请求，Server 阻塞。
+- 执行持久化 `cancel`命令。
+- 重复同一 command id 返回 replayed，不产生第二次副作用。
+- 释放 A 的迟到完整 Repair 响应。
+- A 的 fenced 写入被拒绝。
+- Run：Cancelled。
+- Repair 请求：1。
+- Repair Candidate：0（只有原 Draft）。
+- Repair Artifact / Approval / Commit / Revision：0。
+- 不出现“已取消后又提交正文”。
+
+### Re-review 完成后 SIGKILL
+
+`completed_rereview_sigkill_does_not_replay_review_or_commit`：
+
+```text
+P11 review-crash pid=17562 sigkill=unix_wait_status(9)
+reviews=2 repairs=1 candidates=2 approvals=1 commits=0 revisions=0
+```
+
+- Re-review Artifact 已持久化后 SIGKILL。
+- 新进程不重发 Re-review。
+- 不重复 Candidate。
+- Approval 只创建一次。
+- 无人工确认前不 Commit。
+- 正式 Revision 为 0。
+
+## P11.4-C Candidate/Attempt/Invocation 原子落库
+
+新增 `save_candidate_checkpoint`：
+
+同一 SQLite 事务内完成：
+
+1. 插入 Chapter Candidate；
+2. Attempt `candidate_saved` + candidate_id；
+3. 插入 LLM Invocation；
+4. 写 checkpoint_saved 事件。
+
+任一条件失败全部回滚：
+
+- Attempt 不存在/不在可保存状态；
+- Candidate 与 Invocation 的 Run/Step 不一致；
+- Lease 失效。
+
+测试：
+
+```text
+candidate_checkpoint_rolls_back_when_attempt_is_not_saveable
+PASS
+```
+
+断言冲突后：
+
+- Candidate = 0
+- Invocation = 0
+- checkpoint_saved Event = 0
+
+Worker 的 Draft 与 Repair 保存路径均已使用该原子方法。H1 安全续跑仍要求 Candidate + Attempt + Invocation 完整，不接受部分成功。
+
+## P11.4-B/C 测试
+
+```text
+p11_lease_fence：3 passed
+workflow_lease：3 passed
+p11_recovery_process：3 passed
+workspace：243 passed
+```
