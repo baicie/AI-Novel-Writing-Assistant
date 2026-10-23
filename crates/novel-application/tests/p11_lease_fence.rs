@@ -122,7 +122,7 @@ impl ModelSecrets for TestSecrets {
 
 async fn runtime(
     kernel: Arc<SqliteKernel>,
-    clock: Arc<FakeClock>,
+    clock: Arc<dyn novel_application::Clock>,
     owner: &str,
     lease_ms: i64,
 ) -> Runtime {
@@ -153,8 +153,10 @@ async fn stale_worker_cannot_write_after_lease_takeover() {
             .unwrap(),
     );
     let clock = Arc::new(FakeClock::new(1_000));
-    let a = runtime(kernel.clone(), clock.clone(), "worker-a", 50).await;
-    let b = runtime(kernel.clone(), clock.clone(), "worker-b", 50).await;
+    let mut a = runtime(kernel.clone(), clock.clone(), "worker-a", 50).await;
+    let mut b = runtime(kernel.clone(), clock.clone(), "worker-b", 50).await;
+    a.worker.disable_lease_renewal();
+    b.worker.disable_lease_renewal();
     let novel = a.director.create_novel("租约竞争书", "").await.unwrap();
     let chapter = a
         .director
@@ -315,5 +317,121 @@ async fn stale_worker_cannot_write_after_lease_takeover() {
     assert!(debt > 0);
     println!(
         "P11 lease timeline: A blocked repair=1, clock 1000->1100, B paused, A late write rejected, candidates=1 repair_notes=0 attempts={attempts_after} debt={debt}"
+    );
+}
+
+async fn delayed_story_server(delay_ms: u64) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                let mut data = Vec::new();
+                let mut buf = [0u8; 32 * 1024];
+                loop {
+                    let n = socket.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    data.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&data);
+                    if let Some(header_end) = text.find("\r\n\r\n") {
+                        let len = text[..header_end]
+                            .lines()
+                            .find_map(|line| {
+                                line.strip_prefix("Content-Length: ")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if data.len() >= header_end + 4 + len {
+                            break;
+                        }
+                    }
+                }
+                let body = String::from_utf8_lossy(&data).to_string();
+                if body.contains("STEP:story_macro") {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+                let output = if body.contains("STEP:story_macro") {
+                    story()
+                } else {
+                    "{}".into()
+                };
+                let event =
+                    serde_json::json!({"choices":[{"delta":{"content":output}}]}).to_string();
+                let body = format!("data: {event}\n\ndata: [DONE]\n\n");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://{address}/v1/chat/completions")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_renewal_keeps_long_model_request_owned() {
+    let endpoint = delayed_story_server(400).await;
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("renew.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let clock = Arc::new(novel_application::SystemClock);
+    let a = runtime(kernel.clone(), clock.clone(), "worker-a", 100).await;
+    let b = runtime(kernel.clone(), clock.clone(), "worker-b", 100).await;
+    let novel = a.director.create_novel("续约测试书", "").await.unwrap();
+    let chapter = a
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let mut prompts = std::collections::BTreeMap::new();
+    prompts.insert("chapter_draft".into(), "chapter-draft-v2".into());
+    let opened = a
+        .director
+        .open_run(OpenRunInput {
+            command_id: "renew-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock".into(),
+            prompt_versions: prompts,
+            token_budget: Some(512),
+            context_token_budget: Some(24_000),
+            max_automatic_retries: 0,
+            repair_budget: Some(0),
+            endpoint,
+            allow_localhost_http: true,
+        })
+        .await
+        .unwrap();
+    let worker = a.worker.clone();
+    let long = tokio::spawn(async move { worker.tick().await });
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let takeover = b.worker.tick().await.unwrap();
+    assert!(
+        matches!(takeover, TickOutcome::Idle),
+        "renewed lease must not be stolen: {takeover:?}"
+    );
+    let outcome = long.await.unwrap().unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { ref status, .. } if status != "paused"),
+        "long request should complete: {outcome:?}"
+    );
+    let control = WorkflowRepository::run_control(kernel.as_ref(), &opened.run_id)
+        .await
+        .unwrap();
+    assert_ne!(control.status, novel_domain::RunStatus::Paused);
+    println!(
+        "P11 renewal: long request kept lease for >3x lease window; B idle; A status={:?}",
+        control.status
     );
 }

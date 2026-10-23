@@ -129,3 +129,13 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - B 保持 Paused
 - Repository 级逐操作 fencing 测试 PASS
 - H1 安全续跑、RemoteStarted 暂停、p9/p11/p10 回归 PASS
+
+## P11.4-A Lease 自动续约
+
+**VERIFIED**
+
+- Long model request 期间自动续约。
+- 3x lease 窗口后 B 仍不能 Claim。
+- 续约不改变 Control Version，不影响 fence。
+- 同 owner 重复 Claim 产生新执行权，旧 fence 失效。
+- 续约任务在 Tick 结束取消。

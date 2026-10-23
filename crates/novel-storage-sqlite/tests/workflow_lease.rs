@@ -167,11 +167,32 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
         .await
         .unwrap()
         .unwrap();
-    let second = WorkflowRepository::claim_next(&kernel, "worker-b", 1_011, 10)
+    // A repeated claim by the same owner is a new execution right; the old fence
+    // must not remain valid even though the owner string is unchanged.
+    let duplicate = WorkflowRepository::claim_next(&kernel, "worker-a", 1_005, 10)
+        .await
+        .unwrap()
+        .expect("same owner can re-claim");
+    assert!(duplicate.fence.control_version > first.fence.control_version);
+    let old_fence_write = WorkflowRepository::start_attempt_fenced(
+        &kernel,
+        &first.fence,
+        novel_application::NewAttempt {
+            id: "attempt-old-claim".into(),
+            run_id: first.run_id.clone(),
+            step_id: "bounded_repair".into(),
+            control_version: first.control.version,
+            created_at: 1_005,
+        },
+        1_005,
+    )
+    .await;
+    assert!(matches!(old_fence_write, Err(PortError::Conflict(_))));
+    let second = WorkflowRepository::claim_next(&kernel, "worker-b", 1_020, 10)
         .await
         .unwrap()
         .unwrap();
-    assert!(second.fence.control_version > first.fence.control_version);
+    assert!(second.fence.control_version > duplicate.fence.control_version);
 
     let attempt = novel_application::NewAttempt {
         id: "attempt-a".into(),

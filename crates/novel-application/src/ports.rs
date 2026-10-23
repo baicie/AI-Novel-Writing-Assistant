@@ -668,6 +668,15 @@ pub trait WorkflowRepository: Send + Sync {
         request_id: &str,
     ) -> Result<bool, PortError>;
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError>;
+    /// Extend a live lease without changing Control Version. Returns false when the
+    /// caller no longer owns the current execution right.
+    async fn renew_lease(
+        &self,
+        fence: &LeaseFence,
+        run_id: &str,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<bool, PortError>;
     async fn approve(
         &self,
         command_id: &str,

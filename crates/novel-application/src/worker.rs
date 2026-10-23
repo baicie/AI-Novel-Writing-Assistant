@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use novel_domain::{
     ChapterProtection, ControlEvent, PauseKind, RunPause, StopSignalKind, ensure_can_promote,
@@ -54,6 +55,7 @@ pub struct Worker {
     running: Arc<AtomicBool>,
     owner: String,
     lease_ms: i64,
+    renewal_enabled: bool,
 }
 
 impl Clone for Worker {
@@ -72,6 +74,7 @@ impl Clone for Worker {
             running: self.running.clone(),
             owner: self.owner.clone(),
             lease_ms: self.lease_ms,
+            renewal_enabled: self.renewal_enabled,
         }
     }
 }
@@ -105,7 +108,13 @@ impl Worker {
             running: Arc::new(AtomicBool::new(true)),
             owner,
             lease_ms,
+            renewal_enabled: true,
         }
+    }
+
+    /// Test-only hook for deterministic lease-expiry scenarios.
+    pub fn disable_lease_renewal(&mut self) {
+        self.renewal_enabled = false;
     }
 
     pub fn stop(&self) {
@@ -137,7 +146,39 @@ impl Worker {
         else {
             return Ok(TickOutcome::Idle);
         };
-        self.advance(claimed).await
+        let renew_cancel = CancellationToken::new();
+        let renew_handle = if self.lease_ms > 0 && self.renewal_enabled {
+            let runs = self.runs.clone();
+            let clock = self.clock.clone();
+            let fence = claimed.fence.clone();
+            let run_id = claimed.run_id.clone();
+            let lease_ms = self.lease_ms;
+            let token = renew_cancel.clone();
+            Some(tokio::spawn(async move {
+                let interval = Duration::from_millis((lease_ms / 3).max(10) as u64);
+                loop {
+                    tokio::select! {
+                        _ = token.cancelled() => break,
+                        _ = tokio::time::sleep(interval) => {}
+                    }
+                    let now = clock.now_ms();
+                    if !matches!(
+                        runs.renew_lease(&fence, &run_id, now, lease_ms).await,
+                        Ok(true)
+                    ) {
+                        break;
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+        let result = self.advance(claimed).await;
+        renew_cancel.cancel();
+        if let Some(handle) = renew_handle {
+            let _ = handle.await;
+        }
+        result
     }
 
     async fn advance(&self, claimed: ClaimedRun) -> Result<TickOutcome, AppError> {

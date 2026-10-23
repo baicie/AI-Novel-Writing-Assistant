@@ -674,6 +674,50 @@ impl WorkflowRepository for SqliteKernel {
         Ok(result.rows_affected())
     }
 
+    async fn renew_lease(
+        &self,
+        fence: &novel_application::LeaseFence,
+        run_id: &str,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let row = sqlx::query(
+            "SELECT lease_owner, lease_until, version, status FROM workflow_control WHERE run_id = ?",
+        )
+        .bind(run_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        let Some(row) = row else {
+            tx.rollback().await.map_err(map_sql)?;
+            return Ok(false);
+        };
+        let owner: Option<String> = row.try_get("lease_owner").map_err(map_sql)?;
+        let version: i64 = row.try_get("version").map_err(map_sql)?;
+        let status: String = row.try_get("status").map_err(map_sql)?;
+        if owner.as_deref() != Some(fence.owner.as_str())
+            || version != fence.control_version
+            || !matches!(status.as_str(), "running" | "queued")
+        {
+            tx.rollback().await.map_err(map_sql)?;
+            return Ok(false);
+        }
+        let result = sqlx::query(
+            "UPDATE workflow_control SET lease_until = ?
+             WHERE run_id = ? AND lease_owner = ? AND version = ? AND lease_until IS NOT NULL",
+        )
+        .bind(now_ms + lease_ms)
+        .bind(run_id)
+        .bind(&fence.owner)
+        .bind(fence.control_version)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(result.rows_affected() == 1)
+    }
+
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         if let Some(fence) = &write.fence {

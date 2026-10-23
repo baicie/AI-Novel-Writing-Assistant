@@ -152,3 +152,49 @@ PASS
 ```
 
 生产包：20.29 MiB，DMG 9.2 MiB；recovery_worker / WDIO / E2E key absent。
+
+
+## P11.4-A Lease 自动续约
+
+### 机制
+
+Worker 每次 Claim 后启动一个 renewal task：
+
+- 仅在 `lease_ms > 0` 且允许续约时启动。
+- 每 `lease_ms / 3`（最少 10ms）调用 `renew_lease`。
+- 只延长 `lease_until`，不改变 Control Version。
+- 校验 Owner + Control Version + Run Status。
+- Tick 结束（无论成功/失败/暂停）立即取消 renewal task。
+- 续约失败不吞掉：当前 Tick 的后续 fenced 写入仍会失败或返回错误。
+
+`renew_lease` 接受 run_id，避免同一 owner 多 Run 时续错 Lease。
+
+### 长时间请求
+
+真实 SystemClock + 真实 HTTP/SSE Server 延迟 400ms：
+
+```text
+lease=100ms
+A 执行 Story Macro 400ms
+B 在 250ms 尝试 Claim → Idle
+A 完成
+P11 renewal: long request kept lease for >3x lease window; B idle; A status=Running
+```
+
+### 重复 Claim
+
+同一 owner 重复 Claim 会递增 Control Version，产生新的执行权：
+
+- 旧 fence 的 start_attempt 被拒绝。
+- 新 fence 可以继续写入。
+- 不依赖 owner 字符串作为执行权。
+
+### 测试
+
+```text
+cargo test -p novel-application --test p11_lease_fence
+2 passed
+
+cargo test -p novel-storage-sqlite --test workflow_lease
+2 passed
+```
