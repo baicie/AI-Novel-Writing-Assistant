@@ -174,3 +174,4 @@ pnpm --filter @ai-novel/client test
 - Repair Candidate + Invocation + Attempt 完整时，新进程可安全续跑；Repair 请求不重发。
 - RemoteStarted 未知结果保持暂停，不伪造成功。
 - 重复恢复幂等。
+- H1 代码提交 `1a504df9`。

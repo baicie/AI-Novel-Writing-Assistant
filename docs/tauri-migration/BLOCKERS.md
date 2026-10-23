@@ -116,6 +116,6 @@
 
 ## B-018 P11.1-H1
 
-- v3 Repair Candidate 已保存安全续跑已通过。
+- v3 Repair Candidate 已保存安全续跑已通过（P11.1-H1）。
 - RemoteStarted 未知仍安全暂停。
 - 尚未覆盖 Re-review 中途崩溃、Lease Fencing、真实 Provider timeout、持久化 Cancel 竞争。
