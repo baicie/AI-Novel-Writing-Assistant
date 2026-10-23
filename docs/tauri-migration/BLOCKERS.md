@@ -98,7 +98,7 @@
 ## B-014 P11 未完成
 
 - P11.1 Repair 跨进程 SIGKILL、Lease 过期、真实 timeout、重复 Cancel 未完成；Gate 保持 PARTIAL。
-- P11.2 Candidate Edit SQLite Journal 未实施，未确认编辑仍只在 sessionStorage；Gate NOT_STARTED。
+- P11.2 Candidate Edit SQLite Journal 已实现并通过 SIGKILL 恢复；两窗口/Gate 变化/失败注入仍未完成，Gate PARTIAL。
 - P11.3 Review Issue Occurrence / accepted Command+UI / 稳定跨轮关联未实施；Gate PARTIAL。
 - 不得把真实 HTTP EOF/Cancel 测试宣称为完整跨进程恢复。
 

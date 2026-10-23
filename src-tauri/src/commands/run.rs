@@ -278,3 +278,71 @@ pub async fn confirm_candidate_after_edit_run(
         )
         .await
 }
+
+#[tauri::command]
+pub async fn get_candidate_edit_draft(
+    state: State<'_, AppState>,
+    run_id: String,
+    gate_id: String,
+    client_id: String,
+) -> Result<Option<novel_application::CandidateEditDraftView>, AppError> {
+    state
+        .runtime
+        .director
+        .get_candidate_edit_draft(&run_id, &gate_id, &client_id)
+        .await
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCandidateEditDraftRequest {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub gate_id: String,
+    pub client_id: String,
+    pub base_candidate_id: String,
+    pub base_content_sha256: String,
+    pub content: String,
+    pub control_version: i64,
+    pub expected_revision: i64,
+}
+
+#[tauri::command]
+pub async fn save_candidate_edit_draft(
+    state: State<'_, AppState>,
+    request: SaveCandidateEditDraftRequest,
+) -> Result<novel_application::CandidateEditDraftView, AppError> {
+    state
+        .runtime
+        .director
+        .save_candidate_edit_draft(
+            &request.novel_id,
+            &request.chapter_id,
+            &request.run_id,
+            &request.gate_id,
+            &request.client_id,
+            &request.base_candidate_id,
+            &request.base_content_sha256,
+            &request.content,
+            request.control_version,
+            request.expected_revision,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn clear_candidate_edit_draft(
+    state: State<'_, AppState>,
+    run_id: String,
+    gate_id: String,
+    client_id: String,
+    content: String,
+    local_revision: i64,
+) -> Result<bool, AppError> {
+    state
+        .runtime
+        .director
+        .clear_candidate_edit_draft(&run_id, &gate_id, &client_id, &content, local_revision)
+        .await
+}

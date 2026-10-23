@@ -285,6 +285,22 @@ pub struct RunDetailView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CandidateEditDraftView {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub gate_id: String,
+    pub client_id: String,
+    pub base_candidate_id: String,
+    pub base_content_sha256: String,
+    pub content: String,
+    pub local_revision: i64,
+    pub control_version: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QualityDebtView {
     pub id: String,
     pub novel_id: String,

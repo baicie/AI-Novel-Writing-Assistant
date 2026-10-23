@@ -8,11 +8,11 @@ use novel_domain::{
 use novel_workflow::AttemptView;
 
 use crate::dto::{
-    ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,
-    CharacterSnapshot, CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery,
-    ListNovelsResult, NovelDetail, NovelSummary, QualityDebtView, RecoverableTaskSummary,
-    RunArtifactView, RunContract, RunSummary, RunUsageView, TaskOverviewSummary, UpdateNovelFields,
-    VolumeSnapshot,
+    CandidateEditDraftView, ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot,
+    ChapterSnapshot, CharacterSnapshot, CreateNovelInput, KnowledgeDocumentSummary,
+    ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, QualityDebtView,
+    RecoverableTaskSummary, RunArtifactView, RunContract, RunSummary, RunUsageView,
+    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -382,6 +382,24 @@ pub trait NovelRepository: Send + Sync {
         submitted_content: &str,
         local_revision: i64,
     ) -> Result<bool, PortError>;
+    async fn save_candidate_edit_draft(
+        &self,
+        record: SaveCandidateEditDraftRecord,
+    ) -> Result<CandidateEditDraftView, PortError>;
+    async fn get_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+    ) -> Result<Option<CandidateEditDraftView>, PortError>;
+    async fn clear_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+        content: &str,
+        local_revision: i64,
+    ) -> Result<bool, PortError>;
     async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError>;
     async fn update_chapter_meta(
         &self,
@@ -403,6 +421,21 @@ pub trait NovelRepository: Send + Sync {
         revision_id: &str,
         now_ms: i64,
     ) -> Result<PromoteOutcome, PortError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct SaveCandidateEditDraftRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub gate_id: String,
+    pub client_id: String,
+    pub base_candidate_id: String,
+    pub base_content_sha256: String,
+    pub content: String,
+    pub control_version: i64,
+    pub expected_revision: i64,
+    pub now_ms: i64,
 }
 
 #[derive(Debug, Clone)]

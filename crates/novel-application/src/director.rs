@@ -10,17 +10,17 @@ use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
 use crate::dto::{
-    ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
-    CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult, NovelDetail,
-    NovelSummary, RunCandidateView, RunContract, RunDetailView, RunGateView, RunUsageView,
-    UpdateNovelFields, VolumeSnapshot, event_from_stored,
+    CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
+    CharacterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult,
+    NovelDetail, NovelSummary, RunCandidateView, RunContract, RunDetailView, RunGateView,
+    RunUsageView, UpdateNovelFields, VolumeSnapshot, event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
 use crate::ports::{
     Clock, CommandOutcome, DeleteChapterRecord, Ids, NewChapter, NewNovel, NewVolume,
-    NovelRepository, OpenRunRecord, SaveChapterDraftRecord, SaveChapterRecord,
-    UpdateChapterMetaRecord, UpdateVolumeRecord, WorkflowRepository,
+    NovelRepository, OpenRunRecord, SaveCandidateEditDraftRecord, SaveChapterDraftRecord,
+    SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord, WorkflowRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -888,6 +888,67 @@ impl DirectorService {
         Ok(self
             .novels
             .list_chapter_drafts(novel_id, chapter_id)
+            .await?)
+    }
+
+    pub async fn save_candidate_edit_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+        base_candidate_id: &str,
+        base_content_sha256: &str,
+        content: &str,
+        control_version: i64,
+        expected_revision: i64,
+    ) -> Result<CandidateEditDraftView, AppError> {
+        if client_id.trim().is_empty() || gate_id.trim().is_empty() {
+            return Err(AppError::validation("候选编辑草稿缺少窗口或 Gate 标识。"));
+        }
+        self.novels.get_chapter(novel_id, chapter_id).await?;
+        Ok(self
+            .novels
+            .save_candidate_edit_draft(SaveCandidateEditDraftRecord {
+                novel_id: novel_id.into(),
+                chapter_id: chapter_id.into(),
+                run_id: run_id.into(),
+                gate_id: gate_id.into(),
+                client_id: client_id.into(),
+                base_candidate_id: base_candidate_id.into(),
+                base_content_sha256: base_content_sha256.into(),
+                content: content.into(),
+                control_version,
+                expected_revision,
+                now_ms: self.clock.now_ms(),
+            })
+            .await?)
+    }
+
+    pub async fn get_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+    ) -> Result<Option<CandidateEditDraftView>, AppError> {
+        Ok(self
+            .novels
+            .get_candidate_edit_draft(run_id, gate_id, client_id)
+            .await?)
+    }
+
+    pub async fn clear_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+        content: &str,
+        local_revision: i64,
+    ) -> Result<bool, AppError> {
+        Ok(self
+            .novels
+            .clear_candidate_edit_draft(run_id, gate_id, client_id, content, local_revision)
             .await?)
     }
 

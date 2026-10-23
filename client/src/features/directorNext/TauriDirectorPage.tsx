@@ -6,8 +6,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   approveRun,
   cancelRun,
+  clearCandidateEditDraft,
   confirmCandidateAfterEdit,
+  getCandidateEditDraft,
   regenerateRun,
+  saveCandidateEditDraft,
   rejectRun,
   getActiveRun,
   getModelSetup,
@@ -83,6 +86,15 @@ export default function TauriDirectorPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingCandidate, setEditingCandidate] = useState(false);
   const [candidateEdit, setCandidateEdit] = useState("");
+  const [candidateDraftStatus, setCandidateDraftStatus] = useState<"idle" | "saving" | "saved" | "error" | "restored">("idle");
+  const candidateClientId = useRef<string>("");
+  const candidateDraftRevision = useRef(0);
+  if (!candidateClientId.current) {
+    try {
+      candidateClientId.current = localStorage.getItem("ai-novel:candidate-edit-client:v1")
+        ?? (() => { const id = crypto.randomUUID?.() ?? `candidate-${Date.now()}`; localStorage.setItem("ai-novel:candidate-edit-client:v1", id); return id; })();
+    } catch { candidateClientId.current = `candidate-${Date.now()}`; }
+  }
   const mounted = useRef(true);
 
   useEffect(() => () => { mounted.current = false; }, []);
@@ -98,16 +110,42 @@ export default function TauriDirectorPage() {
   const chapters = chaptersQuery.data ?? [];
   const latestCandidate = detail?.latestCandidate ?? null;
   const chapterApprovalGate = detail?.gate?.artifactTypes.includes("chapter_approval") ?? false;
-  const candidateEditKey = runId && latestCandidate ? `director:candidate-edit:${runId}:${latestCandidate.id}` : "";
   useEffect(() => {
-    if (!editingCandidate || !latestCandidate) return;
-    const stored = candidateEditKey ? sessionStorage.getItem(candidateEditKey) : null;
-    setCandidateEdit(stored ?? latestCandidate.content);
-  }, [candidateEditKey, editingCandidate, latestCandidate?.id]);
+    if (!editingCandidate || !latestCandidate || !runId || !detail?.gate?.id) return;
+    let cancelled = false;
+    void getCandidateEditDraft({ runId, gateId: detail.gate.id, clientId: candidateClientId.current })
+      .then((stored) => {
+        if (cancelled) return;
+        if (stored) {
+          candidateDraftRevision.current = stored.localRevision;
+          setCandidateEdit(stored.content);
+          setCandidateDraftStatus("restored");
+        } else {
+          candidateDraftRevision.current = 0;
+          setCandidateEdit(latestCandidate.content);
+          setCandidateDraftStatus("idle");
+        }
+      })
+      .catch(() => { if (!cancelled) setCandidateDraftStatus("error"); });
+    return () => { cancelled = true; };
+  }, [detail?.gate?.id, editingCandidate, latestCandidate?.id, runId]);
   useEffect(() => {
-    if (!editingCandidate || !candidateEditKey) return;
-    sessionStorage.setItem(candidateEditKey, candidateEdit);
-  }, [candidateEdit, candidateEditKey, editingCandidate]);
+    if (!editingCandidate || !latestCandidate || !runId || !detail?.gate?.id || !novelId) return;
+    if (candidateEdit === latestCandidate.content) return;
+    const timer = setTimeout(() => {
+      setCandidateDraftStatus("saving");
+      void saveCandidateEditDraft({
+        novelId, chapterId: detail.chapterId, runId, gateId: detail.gate!.id,
+        clientId: candidateClientId.current, baseCandidateId: latestCandidate.id,
+        baseContentSha256: latestCandidate.contentSha256, content: candidateEdit,
+        controlVersion: detail.controlVersion, expectedRevision: candidateDraftRevision.current,
+      }).then((saved) => {
+        candidateDraftRevision.current = saved.localRevision;
+        setCandidateDraftStatus("saved");
+      }).catch(() => setCandidateDraftStatus("error"));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [candidateEdit, detail?.chapterId, detail?.controlVersion, detail?.gate?.id, editingCandidate, latestCandidate, novelId, runId]);
   const candidateDiffLines = useMemo(
     () => latestCandidate ? candidateDiff(latestCandidate.content, candidateEdit) : [],
     [latestCandidate, candidateEdit],
@@ -219,8 +257,14 @@ export default function TauriDirectorPage() {
       });
     },
     onSuccess: async () => {
+      if (runId && detail?.gate?.id) {
+        void clearCandidateEditDraft({
+          runId, gateId: detail.gate.id, clientId: candidateClientId.current,
+          content: candidateEdit, localRevision: candidateDraftRevision.current,
+        }).catch(() => undefined);
+      }
       setEditingCandidate(false);
-      if (candidateEditKey) sessionStorage.removeItem(candidateEditKey);
+      setCandidateDraftStatus("idle");
       await queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] });
     },
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "确认修改后候选失败，请刷新后重试。"),
@@ -329,7 +373,7 @@ export default function TauriDirectorPage() {
             {editingCandidate && latestCandidate ? <section data-testid="director-candidate-editor" className="space-y-3 rounded-md bg-muted/20 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold">编辑候选正文</h2>
-                <span className="text-xs text-muted-foreground">只修改候选，不会直接覆盖正式章节</span>
+                <span data-testid="director-candidate-draft-status" className="text-xs text-muted-foreground">{candidateDraftStatus === "saved" ? "候选编辑已本地保存" : candidateDraftStatus === "restored" ? "已恢复未确认的候选编辑" : candidateDraftStatus === "error" ? "候选编辑保存失败，请重试" : candidateDraftStatus === "saving" ? "正在保存候选编辑…" : "只修改候选，不会直接覆盖正式章节"}</span>
               </div>
               <textarea
                 data-testid="director-candidate-edit-input"
@@ -342,7 +386,7 @@ export default function TauriDirectorPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button data-testid="director-confirm-candidate-edit" disabled={confirmEdit.isPending || !candidateEdit.trim() || candidateEdit === latestCandidate.content} onClick={() => confirmEdit.mutate()}>{confirmEdit.isPending ? "确认中…" : "确认修改后候选"}</Button>
-                <Button data-testid="director-cancel-candidate-edit" variant="outline" onClick={() => { setCandidateEdit(latestCandidate.content); setEditingCandidate(false); if (candidateEditKey) sessionStorage.removeItem(candidateEditKey); }}>恢复原候选</Button>
+                <Button data-testid="director-cancel-candidate-edit" variant="outline" onClick={() => { setCandidateEdit(latestCandidate.content); setEditingCandidate(false); }}>恢复原候选</Button>
               </div>
             </section> : null}
             <section className="rounded-md bg-muted/20 p-4">

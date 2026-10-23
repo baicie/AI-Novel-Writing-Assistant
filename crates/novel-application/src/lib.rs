@@ -29,12 +29,13 @@ pub use context::{
 };
 pub use director::{DirectorService, OpenRunInput};
 pub use dto::{
-    ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,
-    CharacterSnapshot, CreateNovelInput, GenerationEvent, KnowledgeDocumentSummary,
-    ListNovelsQuery, ListNovelsResult, ListRunsResult, NovelDetail, NovelSummary, QualityDebtView,
-    RecoverableTaskListResponse, RecoverableTaskSummary, RunArtifactView, RunCandidateView,
-    RunContract, RunDetailView, RunGateView, RunSummary, RunUsageView, TaskOverviewSummary,
-    UpdateNovelFields, VolumeSnapshot, command_view, event_from_stored,
+    CandidateEditDraftView, ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot,
+    ChapterSnapshot, CharacterSnapshot, CreateNovelInput, GenerationEvent,
+    KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult, ListRunsResult, NovelDetail,
+    NovelSummary, QualityDebtView, RecoverableTaskListResponse, RecoverableTaskSummary,
+    RunArtifactView, RunCandidateView, RunContract, RunDetailView, RunGateView, RunSummary,
+    RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot, command_view,
+    event_from_stored,
 };
 pub use error::{AppError, AppErrorCode, PortError};
 pub use hash::{json_hash, sha256_hex};
@@ -45,9 +46,10 @@ pub use ports::{
     DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LookupRepository, ModelSecrets,
     NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument, NewEmbedding, NewInvocation,
     NewNovel, NewQualityDebt, NewVolume, NewWorld, NoFault, NoModelSecrets, NovelRepository,
-    OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveChapterDraftRecord, SaveChapterRecord,
-    SearchHit, StoredEvent, SystemClock, TaskCenterRepository, UpdateChapterMetaRecord,
-    UpdateVolumeRecord, UpdateWorldFields, UuidIds, WorkflowRepository, WorldRepository,
+    OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveCandidateEditDraftRecord,
+    SaveChapterDraftRecord, SaveChapterRecord, SearchHit, StoredEvent, SystemClock,
+    TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds,
+    WorkflowRepository, WorldRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

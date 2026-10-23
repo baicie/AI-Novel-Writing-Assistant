@@ -2,11 +2,11 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
-    CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel,
-    NewVolume, NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome,
-    SaveChapterDraftRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateNovelFields,
-    UpdateVolumeRecord, VolumeSnapshot,
+    CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
+    CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult,
+    NewChapter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary, PortError,
+    PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord,
+    UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
@@ -791,6 +791,88 @@ impl NovelRepository for SqliteKernel {
         Ok(result.rows_affected() > 0)
     }
 
+    async fn save_candidate_edit_draft(
+        &self,
+        record: SaveCandidateEditDraftRecord,
+    ) -> Result<CandidateEditDraftView, PortError> {
+        let row = if record.expected_revision == 0 {
+            sqlx::query(
+                "INSERT INTO candidate_edit_draft
+                    (novel_id, chapter_id, run_id, gate_id, client_id, base_candidate_id,
+                     base_content_sha256, content, local_revision, control_version, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                 ON CONFLICT(run_id, gate_id, client_id) DO NOTHING
+                 RETURNING novel_id, chapter_id, run_id, gate_id, client_id, base_candidate_id,
+                           base_content_sha256, content, local_revision, control_version, updated_at",
+            )
+            .bind(&record.novel_id).bind(&record.chapter_id).bind(&record.run_id)
+            .bind(&record.gate_id).bind(&record.client_id).bind(&record.base_candidate_id)
+            .bind(&record.base_content_sha256).bind(&record.content)
+            .bind(record.control_version).bind(record.now_ms)
+            .fetch_optional(&self.pool).await.map_err(map_sql)?
+        } else {
+            sqlx::query(
+                "UPDATE candidate_edit_draft
+                 SET content = ?, local_revision = local_revision + 1, control_version = ?, updated_at = ?
+                 WHERE run_id = ? AND gate_id = ? AND client_id = ? AND local_revision = ?
+                   AND base_candidate_id = ? AND base_content_sha256 = ?
+                 RETURNING novel_id, chapter_id, run_id, gate_id, client_id, base_candidate_id,
+                           base_content_sha256, content, local_revision, control_version, updated_at",
+            )
+            .bind(&record.content).bind(record.control_version).bind(record.now_ms)
+            .bind(&record.run_id).bind(&record.gate_id).bind(&record.client_id)
+            .bind(record.expected_revision).bind(&record.base_candidate_id)
+            .bind(&record.base_content_sha256)
+            .fetch_optional(&self.pool).await.map_err(map_sql)?
+        };
+        row.ok_or_else(|| PortError::Conflict("候选编辑草稿已被更新，较旧的保存已拒绝。".into()))
+            .and_then(|row| candidate_edit_from_row(&row))
+    }
+
+    async fn get_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+    ) -> Result<Option<CandidateEditDraftView>, PortError> {
+        let row = sqlx::query(
+            "SELECT novel_id, chapter_id, run_id, gate_id, client_id, base_candidate_id,
+                    base_content_sha256, content, local_revision, control_version, updated_at
+             FROM candidate_edit_draft WHERE run_id = ? AND gate_id = ? AND client_id = ?",
+        )
+        .bind(run_id)
+        .bind(gate_id)
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        row.as_ref().map(candidate_edit_from_row).transpose()
+    }
+
+    async fn clear_candidate_edit_draft(
+        &self,
+        run_id: &str,
+        gate_id: &str,
+        client_id: &str,
+        content: &str,
+        local_revision: i64,
+    ) -> Result<bool, PortError> {
+        let result = sqlx::query(
+            "DELETE FROM candidate_edit_draft
+             WHERE run_id = ? AND gate_id = ? AND client_id = ?
+               AND content = ? AND local_revision <= ?",
+        )
+        .bind(run_id)
+        .bind(gate_id)
+        .bind(client_id)
+        .bind(content)
+        .bind(local_revision)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         let current = sqlx::query(
@@ -1153,6 +1235,24 @@ fn map_volume_sql(error: sqlx::Error) -> PortError {
     } else {
         map_sql(error)
     }
+}
+
+fn candidate_edit_from_row(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Result<CandidateEditDraftView, PortError> {
+    Ok(CandidateEditDraftView {
+        novel_id: row.try_get("novel_id").map_err(map_sql)?,
+        chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+        run_id: row.try_get("run_id").map_err(map_sql)?,
+        gate_id: row.try_get("gate_id").map_err(map_sql)?,
+        client_id: row.try_get("client_id").map_err(map_sql)?,
+        base_candidate_id: row.try_get("base_candidate_id").map_err(map_sql)?,
+        base_content_sha256: row.try_get("base_content_sha256").map_err(map_sql)?,
+        content: row.try_get("content").map_err(map_sql)?,
+        local_revision: row.try_get("local_revision").map_err(map_sql)?,
+        control_version: row.try_get("control_version").map_err(map_sql)?,
+        updated_at: row.try_get("updated_at").map_err(map_sql)?,
+    })
 }
 
 fn draft_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ChapterDraftView, PortError> {

@@ -305,3 +305,65 @@ async fn sqlite_uses_wal_and_normal_synchronous() {
         "NORMAL synchronous is required for the tested durability level"
     );
 }
+
+#[tokio::test]
+async fn candidate_edit_journal_is_isolated_and_revision_cas() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("candidate.sqlite"))
+        .await
+        .unwrap();
+    let make =
+        |content: &str, expected_revision: i64| novel_application::SaveCandidateEditDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            run_id: "r".into(),
+            gate_id: "g".into(),
+            client_id: "w1".into(),
+            base_candidate_id: "cand".into(),
+            base_content_sha256: "base".into(),
+            content: content.into(),
+            control_version: 7,
+            expected_revision,
+            now_ms: 10,
+        };
+    let first = NovelRepository::save_candidate_edit_draft(&kernel, make("作者编辑 A", 0))
+        .await
+        .unwrap();
+    assert_eq!(first.local_revision, 1);
+    assert_eq!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w1")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "作者编辑 A"
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w2")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let stale = NovelRepository::save_candidate_edit_draft(&kernel, make("迟到旧编辑", 0)).await;
+    assert!(stale.is_err());
+    let second = NovelRepository::save_candidate_edit_draft(&kernel, make("作者编辑 B", 1))
+        .await
+        .unwrap();
+    assert_eq!(second.local_revision, 2);
+    assert!(
+        !NovelRepository::clear_candidate_edit_draft(&kernel, "r", "g", "w1", "作者编辑 A", 2)
+            .await
+            .unwrap()
+    );
+    assert!(
+        NovelRepository::clear_candidate_edit_draft(&kernel, "r", "g", "w1", "作者编辑 B", 2)
+            .await
+            .unwrap()
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w1")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

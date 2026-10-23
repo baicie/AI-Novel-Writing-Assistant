@@ -154,7 +154,7 @@ pnpm --filter @ai-novel/client test
 ## P11 可靠性
 
 - P11.1 Repair 真实 HTTP SSE EOF、取消迟到 token、成功修复已验证；跨进程/Lease/timeout 未完成，PARTIAL。
-- P11.2 Candidate Edit Journal 未实施，未确认候选编辑仍用 sessionStorage，NOT_STARTED。
+- P11.2 Candidate Edit SQLite Journal 已实现；Native SIGKILL 恢复 + Confirm Edit Commit 通过；两窗口/Gate 冲突仍 PARTIAL。
 - P11.3 Quality Debt lifecycle 仅审计，accepted/occurrence 未实施，PARTIAL。
 
 ## P11.1-H0

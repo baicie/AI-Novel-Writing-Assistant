@@ -2489,6 +2489,7 @@ dependencies = [
  "novel-application",
  "novel-context",
  "novel-domain",
+ "novel-llm",
  "novel-prompt",
  "novel-workflow",
  "serde",

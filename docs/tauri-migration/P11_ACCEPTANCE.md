@@ -7,7 +7,7 @@
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | P11.1 Repair fault/recovery | **PARTIAL** | 真实 HTTP SSE EOF/Cancel/成功 + **Repair Candidate SIGKILL 新进程恢复 PASS**；Lease/timeout/re-review crash 未完成 |
-| P11.2 Candidate edit journal | **NOT_STARTED** | 仅审计；sessionStorage 仍未升级为 SQLite Journal |
+| P11.2 Candidate edit journal | **PARTIAL** | SQLite Journal + CAS + Native UI + SIGKILL 恢复通过；两窗口/Gate 冲突/失败注入未完成 |
 | P11.3 Quality Debt lifecycle | **PARTIAL** | 现有质量债/重复 ID 保护；occurrence/accepted Command/UI 未完成 |
 
 ## P11.1 测试
@@ -42,13 +42,24 @@ cargo test -p novel-application --test p11_repair_faults
 
 不把其他故障点宣称为 VERIFIED。
 
-## P11.2 / P11.3
+## P11.2
 
-未实施 SQLite candidate journal、accepted quality debt Command/UI，因此 Gate 不通过。
+**PARTIAL / core VERIFIED**
+
+- `candidate_edit_draft` additive migration
+- local revision CAS
+- Tauri Commands
+- Native UI 自动保存/恢复
+- WDIO SIGKILL 后新进程恢复并 Commit 通过
+- 未完成：两窗口、Gate 变化冲突、失败注入、编辑中 Cancel
+
+## P11.3
+
+未实施 Review Issue Occurrence、accepted Command/UI，Gate 不通过。
 
 ## 回归
 
-- Rust workspace：236 passed
+- Rust workspace：237 passed
 - 干净 Worktree all-targets（HEAD 065f7fa1）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed

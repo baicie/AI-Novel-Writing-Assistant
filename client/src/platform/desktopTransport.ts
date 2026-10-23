@@ -554,6 +554,30 @@ export function confirmAfterEditRun(input: { runId: string; commandId: string; e
   return invoke("confirm_after_edit_run", input);
 }
 
+export interface CandidateEditDraftView {
+  novelId: string; chapterId: string; runId: string; gateId: string; clientId: string;
+  baseCandidateId: string; baseContentSha256: string; content: string;
+  localRevision: number; controlVersion: number; updatedAt: number;
+}
+
+export function getCandidateEditDraft(input: { runId: string; gateId: string; clientId: string }): Promise<CandidateEditDraftView | null> {
+  return invoke("get_candidate_edit_draft", input);
+}
+
+export function saveCandidateEditDraft(input: {
+  novelId: string; chapterId: string; runId: string; gateId: string; clientId: string;
+  baseCandidateId: string; baseContentSha256: string; content: string;
+  controlVersion: number; expectedRevision: number;
+}): Promise<CandidateEditDraftView> {
+  return invoke("save_candidate_edit_draft", { request: input });
+}
+
+export function clearCandidateEditDraft(input: {
+  runId: string; gateId: string; clientId: string; content: string; localRevision: number;
+}): Promise<boolean> {
+  return invoke("clear_candidate_edit_draft", input);
+}
+
 export function confirmCandidateAfterEdit(input: {
   runId: string;
   commandId: string;
