@@ -217,7 +217,7 @@ export default function TauriDirectorPage() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {detail?.status === "waiting_approval" && gate ? <Button disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
-                {detail?.status === "paused" && detail.latestCandidate ? <Button variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
+                {detail?.status === "paused" && detail.latestCandidate && detail.pauseKind !== "safety" ? <Button variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
                 {detail && !["succeeded", "failed", "cancelled"].includes(detail.status) ? <Button variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
                 {completed ? <Button variant="ghost" onClick={() => { setSelectedRunId(""); setChapterId(""); }}>再创建一次</Button> : null}

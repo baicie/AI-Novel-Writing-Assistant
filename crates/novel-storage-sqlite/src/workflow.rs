@@ -521,6 +521,16 @@ impl WorkflowRepository for SqliteKernel {
         if current.control.status != novel_domain::RunStatus::Paused {
             return Err(PortError::Conflict("现在还不能继续这次创作。".into()));
         }
+        if current
+            .control
+            .pause
+            .as_ref()
+            .is_some_and(|pause| pause.kind == novel_domain::PauseKind::Safety)
+        {
+            return Err(PortError::Conflict(
+                "这次暂停需要人工审查，当前不能通过普通恢复绕过安全检查。".into(),
+            ));
+        }
         let intent = ResumeIntent::parse(intent)
             .ok_or_else(|| PortError::Integrity("恢复方式无法识别。".into()))?;
         let attempt = latest_attempt(&mut tx, run_id)

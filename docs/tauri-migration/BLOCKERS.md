@@ -57,3 +57,11 @@
 - 已完成：Tauri Director 路由、启动表单、状态/事件/产物/候选展示、approve/cancel/resume 按钮、运行历史；Release WebView 路由与启动表单 smoke 通过。
 - 未完成：通过真实按钮启动 Run、审批、取消、恢复、完成后重开历史的自动化或人工操作验收；真实模型配置/Provider 未验证。
 - 处理：保留 `TauriDirectorPage` 和契约测试；人工 GUI/真实 Provider 验收前不标记 P8.4 为 VERIFIED。
+
+## B-009 Native Director 真实按钮点击自动化
+
+- 状态：**BLOCKED**。
+- 环境限制：当前只有 Release WebView 启动、路由、表单/Channel smoke，没有可靠的 Tauri WebView 鼠标/键盘点击自动化驱动。
+- 已完成：页面、启动表单、typed transport、read model、审批/取消/恢复代码路径、Provider HTTP/SSE 测试。
+- 未完成：通过实际点击启动、确认两个 Gate、取消、恢复、关闭重开的自动化或人工验收。
+- 处理：不得用 DOM 存在或函数单测冒充点击测试；交付人工 GUI 验收清单。

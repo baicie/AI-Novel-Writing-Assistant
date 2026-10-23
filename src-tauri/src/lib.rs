@@ -5,6 +5,11 @@ use std::sync::Arc;
 
 use novel_application::{Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds};
 use novel_llm::OpenAiCompatibleProvider;
+
+/// The Release composition root uses the real OpenAI-compatible HTTP/SSE provider.
+pub fn llm_provider() -> Arc<dyn novel_llm::LlmProvider> {
+    Arc::new(OpenAiCompatibleProvider::new())
+}
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
 use state::AppState;
@@ -34,7 +39,7 @@ pub fn run() {
                 Arc::new(commands::model::OsModelSecrets {
                     store: secrets.clone(),
                 });
-            let llm: Arc<dyn novel_llm::LlmProvider> = Arc::new(OpenAiCompatibleProvider::new());
+            let llm: Arc<dyn novel_llm::LlmProvider> = llm_provider();
             let (kernel, runtime) = tauri::async_runtime::block_on(async {
                 let kernel = Arc::new(
                     SqliteKernel::open(&db_path)

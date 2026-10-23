@@ -2,7 +2,7 @@
 
 ## 总体状态
 
-**P8：PARTIAL。P8.1 后端纵向切片 IMPLEMENTED，P8.2/P8.3 最小结构化合同 IMPLEMENTED，P8.4 Tauri Director MVP PARTIAL，P8.5 异常覆盖 PARTIAL。**
+**P8：PARTIAL。P8.1 后端纵向切片 IMPLEMENTED，P8.2/P8.3 最小结构化合同 IMPLEMENTED，P8.4 Tauri Director MVP PARTIAL，P8.5 异常覆盖 PARTIAL；P8.4.1 Runtime Provider 装配已补测。**
 
 不得把本地 Mock/结构化 E2E 说成真实 Provider 或真实 GUI 已验收。
 
@@ -25,10 +25,16 @@
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 218 tests PASS
+# 220 tests PASS
 
 cargo test -p novel-application --test p8_director_loop
 # 3 PASS
+
+cargo test -p novel-application --test runtime_provider_http
+# 1 PASS（真实 OpenAiCompatibleProvider + local HTTP/SSE）
+
+cargo test -p novel-desktop --test runtime_provider
+# 1 PASS（Tauri composition root provider）
 
 cargo test -p novel-application --lib structured_validation_tests
 # 4 PASS

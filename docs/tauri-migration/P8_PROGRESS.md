@@ -29,12 +29,14 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已交付 Tauri Direc
 - `client/src/features/directorNext/DirectorRoute.tsx`/`DirectorHistoryRoute.tsx`：桌面路由分流，Web 继续旧页面。
 - `client/src/platform/desktopTransport.ts`：typed RunDetail/GetActive/GetDetail/带 cleanup 的 subscribe。
 - `scripts/smoke-tauri-director.sh`：Release WebView 路由/启动表单 smoke。
+- `src-tauri/tests/runtime_provider.rs`：Tauri composition root 的 `llm_provider()` 真实 HTTP/SSE 测试。
+- `crates/novel-application/tests/runtime_provider_http.rs`：真实 OpenAI-compatible Provider + Runtime + SQLite 的 Story Macro HTTP 结构化测试。
 
 ## 验证
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 218 passed
+# 220 passed
 
 cargo test -p novel-application --test p8_director_loop
 # 3 passed

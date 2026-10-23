@@ -19,6 +19,10 @@
 
 `get_run_detail` 的状态只来自 `workflow_control.status`，不是 React 拼接或硬编码。
 
+Provider 装配：`src-tauri/src/lib.rs` 的 Release composition root 暴露 `llm_provider()`，使用 `OpenAiCompatibleProvider`；`src-tauri/tests/runtime_provider.rs` 已通过本地 HTTP/SSE 验证该装配，不是 `UnconfiguredProvider`。
+
+安全暂停：`bounded_repair` 尚未实现时 fail-closed；`PauseKind::Safety` 禁止普通 `resume`，UI 同时隐藏该恢复按钮。
+
 ## 2. 尚未实现 / Unsupported
 
 - `resolve_gate.regenerate`

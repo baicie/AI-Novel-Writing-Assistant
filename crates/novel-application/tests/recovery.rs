@@ -505,6 +505,25 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
         }
         other => panic!("expected Advanced(cancelled), got {other:?}"),
     }
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "chapter_commit")
+    );
+    let chapter = NovelRepository::get_chapter(kernel.as_ref(), &novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert!(
+        chapter.content.is_empty(),
+        "cancelled run must not promote a candidate"
+    );
+    assert!(matches!(
+        runtime.worker.tick().await.unwrap(),
+        TickOutcome::Idle
+    ));
 }
 
 #[tokio::test]
