@@ -11,8 +11,8 @@ use crate::dto::{
     CandidateEditDraftView, ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot,
     ChapterSnapshot, CharacterSnapshot, CreateNovelInput, KnowledgeDocumentSummary,
     ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, QualityDebtView,
-    RecoverableTaskSummary, RunArtifactView, RunContract, RunSummary, RunUsageView,
-    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
+    RecoverableTaskSummary, ReviewOccurrenceView, RunArtifactView, RunContract, RunSummary,
+    RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -584,6 +584,11 @@ pub trait WorkflowRepository: Send + Sync {
         novel_id: &str,
         chapter_id: &str,
     ) -> Result<Vec<QualityDebtView>, PortError>;
+    async fn list_review_occurrences(
+        &self,
+        run_id: &str,
+        stable_issue_key: &str,
+    ) -> Result<Vec<ReviewOccurrenceView>, PortError>;
     async fn resolve_quality_debt(
         &self,
         run_id: &str,

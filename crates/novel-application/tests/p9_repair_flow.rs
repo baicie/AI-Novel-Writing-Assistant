@@ -230,6 +230,20 @@ async fn residual_issues_after_repair_stop_at_safety_without_commit() {
     assert_eq!(occurrences, 4, "both reviews must retain their occurrences");
     assert_eq!(debt.len(), 2, "the same business issues must converge");
     assert!(debt.iter().all(|item| item.decision_version == 0));
+    let occurrences_for_debt = WorkflowRepository::list_review_occurrences(
+        kernel.as_ref(),
+        &debt[0].run_id,
+        &debt[0].issue_id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        occurrences_for_debt.len(),
+        2,
+        "two reviews must preserve both occurrences"
+    );
+    assert_eq!(occurrences_for_debt[0].review_version, 1);
+    assert_eq!(occurrences_for_debt[1].review_version, 2);
     let accepted = WorkflowRepository::accept_quality_debt(
         kernel.as_ref(),
         &debt[0].run_id,

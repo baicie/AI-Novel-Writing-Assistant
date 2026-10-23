@@ -33,9 +33,9 @@ pub use dto::{
     ChapterSnapshot, CharacterSnapshot, CreateNovelInput, GenerationEvent,
     KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult, ListRunsResult, NovelDetail,
     NovelSummary, QualityDebtView, RecoverableTaskListResponse, RecoverableTaskSummary,
-    RunArtifactView, RunCandidateView, RunContract, RunDetailView, RunGateView, RunSummary,
-    RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot, command_view,
-    event_from_stored,
+    ReviewOccurrenceView, RunArtifactView, RunCandidateView, RunContract, RunDetailView,
+    RunGateView, RunSummary, RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
+    command_view, event_from_stored,
 };
 pub use error::{AppError, AppErrorCode, PortError};
 pub use hash::{json_hash, sha256_hex};

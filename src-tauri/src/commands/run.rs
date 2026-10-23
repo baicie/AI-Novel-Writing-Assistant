@@ -374,3 +374,16 @@ pub async fn accept_quality_debt(
         .accept_quality_debt(&run_id, &debt_id, expected_version, &reason)
         .await
 }
+
+#[tauri::command]
+pub async fn list_review_occurrences(
+    state: State<'_, AppState>,
+    run_id: String,
+    stable_issue_key: String,
+) -> Result<Vec<novel_application::ReviewOccurrenceView>, AppError> {
+    state
+        .runtime
+        .director
+        .list_review_occurrences(&run_id, &stable_issue_key)
+        .await
+}

@@ -186,4 +186,4 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - Local RAG / Chinese tokenizer / Context Policy baseline：**PARTIAL**
 - 中文孤立 CJK token 已修复；未来章节/Candidate 排除 benchmark 通过。
 - Long-form 10/50/100 章质量 benchmark：**NOT_STARTED**
-- 生产 `.app` 20.42 MiB。
+- 生产 `.app` 20.44 MiB。

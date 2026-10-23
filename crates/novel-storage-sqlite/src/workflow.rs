@@ -346,6 +346,43 @@ impl WorkflowRepository for SqliteKernel {
         Ok(())
     }
 
+    async fn list_review_occurrences(
+        &self,
+        run_id: &str,
+        stable_issue_key: &str,
+    ) -> Result<Vec<novel_application::ReviewOccurrenceView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, run_id, model_issue_id, stable_issue_key, issue_type, severity,
+                    description, evidence, suggestion, source_ref, review_version, created_at
+             FROM review_issue_occurrence
+             WHERE run_id = ? AND stable_issue_key = ?
+             ORDER BY review_version, created_at, id",
+        )
+        .bind(run_id)
+        .bind(stable_issue_key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(novel_application::ReviewOccurrenceView {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    run_id: row.try_get("run_id").map_err(map_sql)?,
+                    model_issue_id: row.try_get("model_issue_id").map_err(map_sql)?,
+                    stable_issue_key: row.try_get("stable_issue_key").map_err(map_sql)?,
+                    issue_type: row.try_get("issue_type").map_err(map_sql)?,
+                    severity: row.try_get("severity").map_err(map_sql)?,
+                    description: row.try_get("description").map_err(map_sql)?,
+                    evidence: row.try_get("evidence").map_err(map_sql)?,
+                    suggestion: row.try_get("suggestion").map_err(map_sql)?,
+                    source_ref: row.try_get("source_ref").map_err(map_sql)?,
+                    review_version: row.try_get("review_version").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
     async fn record_quality_debt(&self, items: &[NewQualityDebt]) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         for item in items {

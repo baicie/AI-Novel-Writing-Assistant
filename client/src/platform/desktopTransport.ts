@@ -572,6 +572,16 @@ export function saveCandidateEditDraft(input: {
   return invoke("save_candidate_edit_draft", { request: input });
 }
 
+export interface ReviewOccurrenceView {
+  id: string; runId: string; modelIssueId?: string | null; stableIssueKey: string;
+  issueType: string; severity: string; description: string; evidence: string;
+  suggestion: string; sourceRef?: string | null; reviewVersion: number; createdAt: number;
+}
+
+export function listReviewOccurrences(input: { runId: string; stableIssueKey: string }): Promise<ReviewOccurrenceView[]> {
+  return invoke("list_review_occurrences", input);
+}
+
 export function acceptQualityDebt(input: { runId: string; debtId: string; expectedVersion: number; reason: string }): Promise<Record<string, unknown>> {
   return invoke("accept_quality_debt", input);
 }

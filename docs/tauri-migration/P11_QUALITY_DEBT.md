@@ -111,3 +111,15 @@ PASS（occurrence 写入与审校流程）
 - 历史没有被覆盖。
 
 这补上了 P11.3 的跨审校关联与 accepted 生命周期端到端证据。
+
+
+## 跨审校历史 UI（本轮补齐）
+
+- `list_review_occurrences(run_id, stable_issue_key)` Tauri Command。
+- 质量债详情内“查看审校历史”：
+  - 显示每轮审校版本、严重度、证据；
+  - 按 review_version 排序；
+  - 不修改债务状态。
+- 测试断言同一债务存在 v1/v2 两条 occurrence。
+
+P11.3 生命周期与历史展示现已闭环；完整时间轴视觉仍可下一轮优化。

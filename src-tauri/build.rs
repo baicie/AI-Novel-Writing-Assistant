@@ -39,6 +39,7 @@ fn main() {
         "clear_candidate_edit_draft",
         "list_candidate_edit_drafts",
         "accept_quality_debt",
+        "list_review_occurrences",
         "cancel_run",
         "cancel_generation",
         "smoke_channel_message",

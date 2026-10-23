@@ -11,6 +11,7 @@ import {
   confirmCandidateAfterEdit,
   getCandidateEditDraft,
   listCandidateEditDrafts,
+  listReviewOccurrences,
   regenerateRun,
   saveCandidateEditDraft,
   rejectRun,
@@ -26,6 +27,7 @@ import {
   subscribeRunWithCleanup,
   type CandidateEditDraftView,
   type GenerationEvent,
+  type ReviewOccurrenceView,
   type RunDetailView,
 } from "@/platform/desktopTransport";
 
@@ -91,6 +93,7 @@ export default function TauriDirectorPage() {
   const [candidateEdit, setCandidateEdit] = useState("");
   const [candidateDraftStatus, setCandidateDraftStatus] = useState<"idle" | "saving" | "saved" | "error" | "restored">("idle");
   const [candidateDraftChoices, setCandidateDraftChoices] = useState<CandidateEditDraftView[]>([]);
+  const [debtHistory, setDebtHistory] = useState<Record<string, ReviewOccurrenceView[]>>({});
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -291,6 +294,14 @@ export default function TauriDirectorPage() {
     },
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "确认修改后候选失败，请刷新后重试。"),
   });
+  const loadDebtHistory = (item: Record<string, unknown>) => {
+    const stableKey = String(item.issueId);
+    if (debtHistory[stableKey]) return;
+    void listReviewOccurrences({ runId, stableIssueKey: stableKey })
+      .then(rows => setDebtHistory(previous => ({ ...previous, [stableKey]: rows })))
+      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "读取审校历史失败。"));
+  };
+
   const acceptDebt = useMutation({
     mutationFn: ({ id, version }: { id: string; version: number }) =>
       acceptQualityDebt({ runId, debtId: id, expectedVersion: version, reason: "作者确认保留该质量问题，暂不自动修复。" }),
@@ -395,6 +406,10 @@ export default function TauriDirectorPage() {
                     <p className="mt-1">建议：{String(item.suggestion)}</p>
                     {item.resolutionEvidence ? <p className="mt-1">处理记录：{String(item.resolutionEvidence)}</p> : null}
                     {item.acceptedReason ? <p className="mt-1">接受原因：{String(item.acceptedReason)}</p> : null}
+                    <Button data-testid="director-load-debt-history" variant="outline" onClick={() => loadDebtHistory(item)}>查看审校历史</Button>
+                    <ul className="mt-2 space-y-1">
+                      {(debtHistory[String(item.issueId)] ?? []).map(occurrence => <li key={occurrence.id}>v{occurrence.reviewVersion} · {occurrence.severity} · {occurrence.evidence}</li>)}
+                    </ul>
                   </details>
                 </li>)}
               </ul>

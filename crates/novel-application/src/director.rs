@@ -938,6 +938,17 @@ impl DirectorService {
             .await?)
     }
 
+    pub async fn list_review_occurrences(
+        &self,
+        run_id: &str,
+        stable_issue_key: &str,
+    ) -> Result<Vec<crate::dto::ReviewOccurrenceView>, AppError> {
+        Ok(self
+            .runs
+            .list_review_occurrences(run_id, stable_issue_key)
+            .await?)
+    }
+
     pub async fn accept_quality_debt(
         &self,
         run_id: &str,

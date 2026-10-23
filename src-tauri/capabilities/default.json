@@ -46,6 +46,7 @@
     "allow-clear-candidate-edit-draft",
 "allow-list-candidate-edit-drafts",
 "allow-accept-quality-debt",
+"allow-list-review-occurrences",
     "allow-cancel-run",
     "allow-cancel-generation",
     "allow-smoke-channel-message",
