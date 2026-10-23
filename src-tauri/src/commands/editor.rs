@@ -128,6 +128,7 @@ pub struct SaveChapterDraftRequest {
     pub content: String,
     pub base_official_version: i64,
     pub base_updated_at: String,
+    pub expected_revision: i64,
 }
 
 #[tauri::command]
@@ -172,6 +173,7 @@ pub async fn save_chapter_draft(
             &request.content,
             request.base_official_version,
             &request.base_updated_at,
+            request.expected_revision,
         )
         .await
 }

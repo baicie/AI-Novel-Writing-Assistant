@@ -4,13 +4,13 @@
 
 | 项目 | 结果 |
 | --- | --- |
-| Rust draft storage | 1 PASS |
+| Rust draft storage | 2 PASS |
 | Native UI autosave + refresh | PASS |
 | Native UI official save + switch chapter | PASS |
 | Native UI SIGKILL recovery | PASS（crash harness 主动退出 1，新进程恢复 PASS） |
 | Frontend draft race tests | 6 PASS |
 | Full frontend tests | 186 PASS |
-| Rust workspace | 222 PASS |
+| Rust workspace | 223 PASS |
 | Clean worktree all-targets | PASS（HEAD `d7ad9d2c`） |
 
 ## 人工验收

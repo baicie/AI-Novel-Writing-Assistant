@@ -44,6 +44,7 @@ async fn local_drafts_are_isolated_and_cleared_only_for_matching_content() {
             content: "窗口 A 的未保存正文".into(),
             base_official_version: 0,
             base_updated_at: "t0".into(),
+            expected_revision: 0,
             now_ms: 10,
         },
     )
@@ -68,6 +69,7 @@ async fn local_drafts_are_isolated_and_cleared_only_for_matching_content() {
             content: "窗口 B 的未保存正文".into(),
             base_official_version: 0,
             base_updated_at: "t0".into(),
+            expected_revision: 0,
             now_ms: 11,
         },
     )
@@ -112,6 +114,7 @@ async fn local_drafts_are_isolated_and_cleared_only_for_matching_content() {
             content: "窗口 A 更新后的正文".into(),
             base_official_version: 0,
             base_updated_at: "t0".into(),
+            expected_revision: 1,
             now_ms: 12,
         },
     )
@@ -185,5 +188,99 @@ async fn local_drafts_are_isolated_and_cleared_only_for_matching_content() {
     assert_eq!(
         revisions, 1,
         "only the explicit official save creates an official revision"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_and_stale_draft_writes_cannot_overwrite_newer_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("race.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n".into(),
+            title: "书".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        NewChapter {
+            id: "c".into(),
+            novel_id: "n".into(),
+            title: "章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+
+    let make = |content: &str, now_ms: i64| SaveChapterDraftRecord {
+        novel_id: "n".into(),
+        chapter_id: "c".into(),
+        client_id: "same-window".into(),
+        content: content.into(),
+        base_official_version: 0,
+        base_updated_at: "t0".into(),
+        expected_revision: 0,
+        now_ms,
+    };
+    let (left, right) = tokio::join!(
+        NovelRepository::save_chapter_draft(&kernel, make("并发 A", 10)),
+        NovelRepository::save_chapter_draft(&kernel, make("并发 B", 11)),
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    let first = NovelRepository::get_chapter_draft(&kernel, "n", "c", "same-window")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.local_revision, 1);
+
+    let second = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            client_id: "same-window".into(),
+            content: "较新的正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: first.local_revision,
+            now_ms: 12,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.local_revision, 2);
+
+    let stale = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            client_id: "same-window".into(),
+            content: "迟到的旧正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: first.local_revision,
+            now_ms: 13,
+        },
+    )
+    .await;
+    assert!(stale.is_err(), "stale local revision must be rejected");
+    assert_eq!(
+        NovelRepository::get_chapter_draft(&kernel, "n", "c", "same-window")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "较新的正文"
     );
 }

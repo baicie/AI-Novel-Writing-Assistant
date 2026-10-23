@@ -40,6 +40,7 @@ export function useChapterDraft(input: {
   const clientId = useRef(getClientId());
   const durableRevision = useRef(0);
   const saveSequence = useRef(0);
+  const saveQueue = useRef<Promise<boolean>>(Promise.resolve(false));
   const mounted = useRef(true);
   const [durableLoaded, setDurableLoaded] = useState(!desktop || !input.chapter);
   const [localDraftStatus, setLocalDraftStatus] = useState<LocalDraftStatus>(desktop ? "idle" : "unavailable");
@@ -102,7 +103,7 @@ export function useChapterDraft(input: {
         recoveredFromAnotherClient = Boolean(stored);
       }
       if (!stored) return;
-      durableRevision.current = stored.localRevision;
+      durableRevision.current = recoveredFromAnotherClient ? 0 : stored.localRevision;
       if (stored.content !== incoming.content) {
         publish({ content: stored.content, savedContent: incoming.content, savedUpdatedAt: stored.baseUpdatedAt || incoming.updatedAt });
         setRestored(true);
@@ -126,26 +127,35 @@ export function useChapterDraft(input: {
     if (next !== current.current) publish(next);
   }, [incoming.content, incoming.updatedAt, input.busy, publish]);
 
-  const persistDraft = useCallback(async (content: string) => {
-    if (!desktop || !chapterId || !chapterUpdatedAt) return false;
+  const persistDraft = useCallback((content: string) => {
+    if (!desktop || !chapterId || !chapterUpdatedAt) return Promise.resolve(false);
     const sequence = ++saveSequence.current;
     setLocalDraftStatus("saving");
-    try {
-      const saved = await saveChapterDraft({
-        novelId: input.novelId,
-        chapterId,
-        clientId: clientId.current,
-        content,
-        baseOfficialVersion: chapterOfficialVersion,
-        baseUpdatedAt: chapterUpdatedAt,
-      });
-      durableRevision.current = saved.localRevision;
-      if (mounted.current && sequence === saveSequence.current) setLocalDraftStatus("saved");
-      return true;
-    } catch {
-      if (mounted.current && sequence === saveSequence.current) setLocalDraftStatus("error");
-      return false;
-    }
+    const operation = saveQueue.current.then(async () => {
+      try {
+        const saved = await saveChapterDraft({
+          novelId: input.novelId,
+          chapterId,
+          clientId: clientId.current,
+          content,
+          baseOfficialVersion: chapterOfficialVersion,
+          baseUpdatedAt: chapterUpdatedAt,
+          expectedRevision: durableRevision.current,
+        });
+        durableRevision.current = saved.localRevision;
+        if (mounted.current && sequence === saveSequence.current && current.current.content === content) {
+          setLocalDraftStatus("saved");
+        }
+        return true;
+      } catch {
+        if (mounted.current && sequence === saveSequence.current && current.current.content === content) {
+          setLocalDraftStatus("error");
+        }
+        return false;
+      }
+    });
+    saveQueue.current = operation.catch(() => false);
+    return operation;
   }, [chapterId, chapterOfficialVersion, chapterUpdatedAt, desktop, input.novelId]);
 
   // Local-draft autosave only; it never creates an official revision.

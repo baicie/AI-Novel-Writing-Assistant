@@ -680,6 +680,7 @@ impl DirectorService {
         content: &str,
         base_official_version: i64,
         base_updated_at: &str,
+        expected_revision: i64,
     ) -> Result<ChapterDraftView, AppError> {
         self.novels.get_chapter(novel_id, chapter_id).await?;
         if client_id.trim().is_empty() {
@@ -694,6 +695,7 @@ impl DirectorService {
                 content: content.to_string(),
                 base_official_version,
                 base_updated_at: base_updated_at.to_string(),
+                expected_revision,
                 now_ms: self.clock.now_ms(),
             })
             .await?)

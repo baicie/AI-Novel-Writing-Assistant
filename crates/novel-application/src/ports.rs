@@ -54,6 +54,7 @@ pub struct SaveChapterDraftRecord {
     pub content: String,
     pub base_official_version: i64,
     pub base_updated_at: String,
+    pub expected_revision: i64,
     pub now_ms: i64,
 }
 

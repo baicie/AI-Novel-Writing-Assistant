@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use novel_application::PortError;
 use novel_prompt::builtin_prompts;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::{Row, Sqlite};
 
 pub type Tx<'a> = sqlx::Transaction<'a, Sqlite>;
@@ -19,6 +21,9 @@ impl SqliteKernel {
             .filename(path)
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
+            // WAL + NORMAL is the durable-across-process-crash mode used by the
+            // local draft journal. It is not a promise against sudden power loss.
+            .synchronous(SqliteSynchronous::Normal)
             .foreign_keys(true)
             .busy_timeout(Duration::from_millis(5000));
         let pool = SqlitePoolOptions::new()

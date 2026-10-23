@@ -36,7 +36,7 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已通过 macOS WDIO 
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 222 passed
+# 223 passed
 
 cargo test -p novel-application --test p8_director_loop
 # 3 passed
@@ -69,5 +69,5 @@ cargo test -p novel-application --test recovery
 - 新增 SQLite `chapter_local_draft` 与 Tauri draft Commands。
 - 600ms 本地草稿 autosave；官方保存仍显式 CAS。
 - WDIO：autosave+refresh、official save+switch、SIGKILL 新进程恢复。
-- 前端草稿竞态 186 tests；Rust workspace 222 tests。
+- 前端草稿竞态 186 tests；Rust workspace 223 tests。
 - 中文输入法/真实双窗口仍有人工验收项。

@@ -14,7 +14,7 @@
 | `content` | 未正式提交的作者正文 |
 | `base_official_version` | 草稿基于的 official version |
 | `base_updated_at` | 草稿基于的章节更新时间 |
-| `local_revision` | 本地草稿单调序号 |
+| `local_revision` | 本地草稿单调序号；写入用 expected revision CAS |
 | `updated_at` | 本地草稿更新时间 |
 
 规则：
@@ -47,12 +47,38 @@
 | 两个窗口编辑同一章 | PARTIAL | `client_id` 隔离和 storage 测试；无真实双窗口 E2E |
 | 中文 composition 期间保存 | BLOCKED | 系统输入法 composition 不可可靠自动驱动；列入人工验收 |
 
+## 2.1 已确认并修复的 P0
+
+原实现 `ON CONFLICT DO UPDATE` 不检查 revision：两个异步写入乱序时，较旧请求可以覆盖较新草稿。
+
+修复：
+
+- `SaveChapterDraftRecord.expected_revision`
+- SQLite 插入/更新使用原子 `RETURNING` + revision 条件
+- 冲突返回 409，不写入旧内容
+- 前端 `saveQueue` 串行化请求
+- 成功状态只在 DB 成功且内容仍是最新时显示
+- 清理仍要求 content/revision 匹配
+
+测试：
+
+```text
+cargo test -p novel-storage-sqlite --test chapter_draft
+2 passed
+```
+
+包含真实 SQLite 并发 `tokio::join!` 与迟到旧写入拒绝。
+
 ## 3. Autosave
 
 - 本地草稿：600ms debounce，仅写 `chapter_local_draft`。
 - 页面隐藏/`pagehide`/`beforeunload` 尽力 flush。
 - 正式章节保存：仅显式保存/Ctrl+Cmd+S；不会因每次键入创建 Revision。
-- 同一草稿写入使用 `local_revision` 单调递增。
+- 同一草稿写入使用 `local_revision` + `expected_revision` 原子条件：
+  - 新草稿必须 `expected_revision=0`
+  - 后续写入必须匹配当前 revision
+  - 较旧异步写入返回 Conflict，不可能覆盖较新正文
+- 前端保存队列串行化，只有数据库事务成功且内容仍是最新时才显示“本地草稿已安全保存”。
 - 明确保证级别：
   - 已成功显示“本地草稿已安全保存”的正文可跨进程恢复。
   - SIGKILL 前最后 600ms 内尚未落库的输入仍可能丢失；这是明确的输入窗口，不是完整 WAL。
@@ -80,7 +106,7 @@ Rust：
 
 ```text
 cargo test -p novel-storage-sqlite --test chapter_draft
-1 passed
+2 passed
 ```
 
 覆盖：
@@ -109,3 +135,16 @@ test:editor-crash-restart
 - AI Commit 与用户保存并发的 UI 冲突提示仍不完整。
 - 两个真实窗口的 UI 级冲突流程未自动化。
 - 草稿无限保留，目前没有容量清理策略。
+
+
+## 7. SQLite 持久化保证
+
+- `journal_mode=WAL`
+- `synchronous=NORMAL`（显式配置）
+- `foreign_keys=ON`
+- `busy_timeout=5000ms`
+- 草稿写入使用单 statement `INSERT ... RETURNING` / `UPDATE ... RETURNING` 原子完成
+- 正式正文保存与 Revision/Artifact 在同一事务
+- 断点/进程 SIGKILL 恢复已验证
+- 不承诺断电级持久性；`synchronous=NORMAL` 下突然断电仍可能丢失最近 WAL 记录
+- 草稿清理是独立 DELETE，只匹配 content/revision

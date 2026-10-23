@@ -686,28 +686,46 @@ impl NovelRepository for SqliteKernel {
         &self,
         record: SaveChapterDraftRecord,
     ) -> Result<ChapterDraftView, PortError> {
-        let row = sqlx::query(
-            "INSERT INTO chapter_local_draft
-                (novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-             ON CONFLICT(novel_id, chapter_id, client_id) DO UPDATE SET
-                content = excluded.content,
-                base_official_version = excluded.base_official_version,
-                base_updated_at = excluded.base_updated_at,
-                local_revision = chapter_local_draft.local_revision + 1,
-                updated_at = excluded.updated_at
-             RETURNING novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at",
-        )
-        .bind(&record.novel_id)
-        .bind(&record.chapter_id)
-        .bind(&record.client_id)
-        .bind(&record.content)
-        .bind(record.base_official_version)
-        .bind(&record.base_updated_at)
-        .bind(record.now_ms)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sql)?;
+        let row = if record.expected_revision == 0 {
+            sqlx::query(
+                "INSERT INTO chapter_local_draft
+                    (novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                 ON CONFLICT(novel_id, chapter_id, client_id) DO NOTHING
+                 RETURNING novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at",
+            )
+            .bind(&record.novel_id)
+            .bind(&record.chapter_id)
+            .bind(&record.client_id)
+            .bind(&record.content)
+            .bind(record.base_official_version)
+            .bind(&record.base_updated_at)
+            .bind(record.now_ms)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)?
+        } else {
+            sqlx::query(
+                "UPDATE chapter_local_draft
+                 SET content = ?, base_official_version = ?, base_updated_at = ?,
+                     local_revision = local_revision + 1, updated_at = ?
+                 WHERE novel_id = ? AND chapter_id = ? AND client_id = ? AND local_revision = ?
+                 RETURNING novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at",
+            )
+            .bind(&record.content)
+            .bind(record.base_official_version)
+            .bind(&record.base_updated_at)
+            .bind(record.now_ms)
+            .bind(&record.novel_id)
+            .bind(&record.chapter_id)
+            .bind(&record.client_id)
+            .bind(record.expected_revision)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)?
+        };
+        let row = row
+            .ok_or_else(|| PortError::Conflict("本地草稿已经被更新，较旧的保存已拒绝。".into()))?;
         draft_from_row(&row)
     }
 

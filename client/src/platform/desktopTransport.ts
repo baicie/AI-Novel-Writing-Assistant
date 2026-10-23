@@ -785,6 +785,7 @@ export function saveChapterDraft(input: {
   content: string;
   baseOfficialVersion: number;
   baseUpdatedAt: string;
+  expectedRevision: number;
 }): Promise<ChapterDraftView> {
   return invoke("save_chapter_draft", { request: input });
 }
