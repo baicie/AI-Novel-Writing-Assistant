@@ -240,6 +240,15 @@ impl Worker {
             "story_macro" | "character_cast" | "volume_strategy" | "chapter_list"
             | "consistency_review" => execute_structured(self, claimed, &spec, step_id).await,
             "context" => execute_context(self, claimed, &spec).await,
+            "bounded_repair" => {
+                self.pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    "一致性审校发现了问题，但自动修复能力尚未接入。已停止在人工审查点，不会生成修复产物或提交正文。",
+                    Some(step_id.into()),
+                )
+                .await
+            }
             _ => {
                 // The approval artifact is created by the gate transition; other
                 // non-business plumbing steps remain explicit placeholders until

@@ -21,6 +21,8 @@ fn main() {
         "update_volume",
         "delete_volume",
         "list_runs",
+        "get_active_run",
+        "get_run_detail",
         "list_all_runs",
         "open_run",
         "approve_run",

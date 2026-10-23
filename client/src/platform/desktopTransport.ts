@@ -130,6 +130,55 @@ export interface CommandOutcome {
   replayed: boolean;
 }
 
+export interface RunArtifactView {
+  id: string;
+  runId?: string | null;
+  artifactType: string;
+  scope: string;
+  version: number;
+  status: string;
+  protectedUserContent: boolean;
+  payloadJson: string;
+  createdAt: number;
+}
+
+export interface RunGateView {
+  id: string;
+  artifactTypes: string[];
+}
+
+export interface RunCandidateView {
+  id: string;
+  content: string;
+}
+
+export interface RunUsageView {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+export interface RunDetailView {
+  id: string;
+  novelId: string;
+  chapterId: string;
+  chapterTitle: string;
+  status: string;
+  controlVersion: number;
+  cursorStepId?: string | null;
+  pauseKind?: string | null;
+  pauseReason?: string | null;
+  failureReason?: string | null;
+  gate?: RunGateView | null;
+  latestCandidate?: RunCandidateView | null;
+  artifacts: RunArtifactView[];
+  usage: RunUsageView;
+  provider: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface StartGeneration {
   commandId: string;
   novelId: string;
@@ -467,8 +516,15 @@ export function listRuns(novelId: string): Promise<RunSummary[]> {
 export function listAllRuns(): Promise<RunSummary[]> {
   return invoke("list_all_runs");
 }
+export function getActiveRun(novelId: string): Promise<RunSummary | null> {
+  return invoke("get_active_run", { novelId });
+}
 
-export function approveRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {
+export function getRunDetail(novelId: string, runId: string): Promise<RunDetailView> {
+  return invoke("get_run_detail", { novelId, runId });
+}
+
+export function approveRun(input: { runId: string; commandId: string; expectedVersion?: number }): Promise<CommandOutcome> {
   return invoke("approve_run", input);
 }
 
@@ -491,19 +547,39 @@ export function replayRunEvents(input: {
   return invoke("replay_run", input);
 }
 
-export function subscribeRun(
+export interface RunSubscription {
+  ready: Promise<void>;
+  close: () => void;
+}
+
+export function subscribeRunWithCleanup(
   input: { runId: string },
   onEvent: (event: GenerationEvent) => void,
-): Promise<void> {
+): RunSubscription {
   const channel = new Channel<GenerationEvent>();
+  let closed = false;
   channel.onmessage = (event) => {
+    if (closed) return;
     onEvent(event);
     if (event.kind === "run_completed" || event.kind === "run_failed" || event.kind === "run_cancelled") {
       liveChannels.delete(channel);
     }
   };
   liveChannels.add(channel);
-  return invoke("subscribe_run", { runId: input.runId, channel });
+  return {
+    ready: invoke("subscribe_run", { runId: input.runId, channel }),
+    close: () => {
+      closed = true;
+      liveChannels.delete(channel);
+    },
+  };
+}
+
+export function subscribeRun(
+  input: { runId: string },
+  onEvent: (event: GenerationEvent) => void,
+): Promise<void> {
+  return subscribeRunWithCleanup(input, onEvent).ready;
 }
 
 export async function startGeneration(

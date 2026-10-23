@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use novel_application::{AppError, CommandOutcome, GenerationEvent, OpenRunInput, RunSummary};
+use novel_application::{
+    AppError, CommandOutcome, GenerationEvent, OpenRunInput, RunDetailView, RunSummary,
+};
 use serde::Deserialize;
 use tauri::State;
 use tauri::ipc::Channel;
@@ -35,6 +37,27 @@ pub async fn list_runs(
     novel_id: String,
 ) -> Result<Vec<RunSummary>, AppError> {
     state.runtime.director.list_runs(&novel_id).await
+}
+
+#[tauri::command]
+pub async fn get_active_run(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Option<RunSummary>, AppError> {
+    state.runtime.director.active_run(&novel_id).await
+}
+
+#[tauri::command]
+pub async fn get_run_detail(
+    state: State<'_, AppState>,
+    novel_id: String,
+    run_id: String,
+) -> Result<RunDetailView, AppError> {
+    state
+        .runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
 }
 
 #[tauri::command]
@@ -83,8 +106,18 @@ pub async fn approve_run(
     state: State<'_, AppState>,
     command_id: String,
     run_id: String,
+    expected_version: Option<i64>,
 ) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.approve(&command_id, &run_id).await
+    match expected_version {
+        Some(version) => {
+            state
+                .runtime
+                .director
+                .approve_expected(&command_id, &run_id, version)
+                .await
+        }
+        None => state.runtime.director.approve(&command_id, &run_id).await,
+    }
 }
 
 #[tauri::command]

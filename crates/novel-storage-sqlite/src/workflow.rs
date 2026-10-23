@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use novel_application::{
     CandidateBody, ChapterFullDetail, ClaimedRun, CommandOutcome, ControlCommit, ControlWrite,
-    NewArtifact, NewAttempt, NewCandidate, NewInvocation, OpenRunRecord, PortError, RunContract,
-    RunSummary, StoredEvent, WorkflowRepository,
+    NewArtifact, NewAttempt, NewCandidate, NewInvocation, OpenRunRecord, PortError,
+    RunArtifactView, RunContract, RunSummary, RunUsageView, StoredEvent, WorkflowRepository,
 };
-use novel_domain::{ControlEvent, DomainError, RunControl, apply_event, note_lease, parse_status};
+use novel_domain::{
+    ControlEvent, DomainError, RunControl, RunGate, RunPause, apply_event, note_lease, parse_status,
+};
 use novel_workflow::{AttemptPhase, AttemptView, ResumeIntent, book_scope};
 use serde::de::DeserializeOwned;
 use sqlx::Row;
@@ -447,6 +449,7 @@ impl WorkflowRepository for SqliteKernel {
         command_id: &str,
         request_hash: &str,
         run_id: &str,
+        expected_version: Option<i64>,
         now_ms: i64,
     ) -> Result<CommandOutcome, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
@@ -458,6 +461,11 @@ impl WorkflowRepository for SqliteKernel {
             .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
         if current.control.status != novel_domain::RunStatus::WaitingApproval {
             return Err(PortError::Conflict("这一步还没有到需要确认的时候。".into()));
+        }
+        if expected_version.is_some_and(|expected| expected != current.control.version) {
+            return Err(PortError::Conflict(
+                "创作进度已经变化，请刷新后重新确认。".into(),
+            ));
         }
         let gate = current
             .control
@@ -721,6 +729,81 @@ impl WorkflowRepository for SqliteKernel {
                 })
             })
             .collect()
+    }
+
+    async fn run_control(&self, run_id: &str) -> Result<RunControl, PortError> {
+        let row = sqlx::query(
+            "SELECT status, version, pause_json, gate_json, cursor_step_id, failure_reason
+             FROM workflow_control WHERE run_id = ?",
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        let row = row.ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
+        let status: String = row.try_get("status").map_err(map_sql)?;
+        let pause: Option<String> = row.try_get("pause_json").map_err(map_sql)?;
+        let gate: Option<String> = row.try_get("gate_json").map_err(map_sql)?;
+        Ok(RunControl {
+            version: row.try_get("version").map_err(map_sql)?,
+            status: parse_status(&status).map_err(map_domain)?,
+            pause: pause
+                .map(|value| serde_json::from_str::<RunPause>(&value))
+                .transpose()
+                .map_err(|_| PortError::Integrity("运行暂停记录无法解析。".into()))?,
+            gate: gate
+                .map(|value| serde_json::from_str::<RunGate>(&value))
+                .transpose()
+                .map_err(|_| PortError::Integrity("运行审批门无法解析。".into()))?,
+            cursor_step_id: row.try_get("cursor_step_id").map_err(map_sql)?,
+            failure_reason: row.try_get("failure_reason").map_err(map_sql)?,
+        })
+    }
+
+    async fn run_artifacts(&self, run_id: &str) -> Result<Vec<RunArtifactView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, run_id, type, scope, version, status, protected_user_content, payload_json, created_at
+             FROM workflow_artifact WHERE run_id = ? ORDER BY version DESC, created_at DESC",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(RunArtifactView {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    run_id: row.try_get("run_id").map_err(map_sql)?,
+                    artifact_type: row.try_get("type").map_err(map_sql)?,
+                    scope: row.try_get("scope").map_err(map_sql)?,
+                    version: row.try_get("version").map_err(map_sql)?,
+                    status: row.try_get("status").map_err(map_sql)?,
+                    protected_user_content: row
+                        .try_get("protected_user_content")
+                        .map_err(map_sql)?,
+                    payload_json: row.try_get("payload_json").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn run_usage(&self, run_id: &str) -> Result<RunUsageView, PortError> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) as calls,
+                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
+             FROM llm_invocation WHERE run_id = ?",
+        )
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(RunUsageView {
+            calls: row.try_get("calls").map_err(map_sql)?,
+            prompt_tokens: row.try_get("prompt_tokens").map_err(map_sql)?,
+            completion_tokens: row.try_get("completion_tokens").map_err(map_sql)?,
+        })
     }
 
     /// Phase 2.1: 获取章节的完整详情。

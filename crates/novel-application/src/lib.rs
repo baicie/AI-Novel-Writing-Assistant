@@ -27,7 +27,8 @@ pub use dto::{
     ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
     CreateNovelInput, GenerationEvent, KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult,
     ListRunsResult, NovelDetail, NovelSummary, RecoverableTaskListResponse, RecoverableTaskSummary,
-    RunContract, RunSummary, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot, command_view,
+    RunArtifactView, RunCandidateView, RunContract, RunDetailView, RunGateView, RunSummary,
+    RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot, command_view,
     event_from_stored,
 };
 pub use error::{AppError, AppErrorCode, PortError};

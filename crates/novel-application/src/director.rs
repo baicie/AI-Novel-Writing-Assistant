@@ -4,15 +4,15 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::Serialize;
 
-use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
+use novel_domain::{CreationExperience, NarrativeForm, PauseKind, ProjectMode, WritingMode};
 use novel_llm::authorize_endpoint;
 use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
 use crate::dto::{
     ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, CreateNovelInput, GenerationEvent,
-    ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, RunContract, UpdateNovelFields,
-    VolumeSnapshot, event_from_stored,
+    ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, RunCandidateView, RunContract,
+    RunDetailView, RunGateView, RunUsageView, UpdateNovelFields, VolumeSnapshot, event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
@@ -499,6 +499,34 @@ impl DirectorService {
         self.command(command_id, run_id, "approve", None).await
     }
 
+    /// Confirm a gate with an explicit expected control version. Used by the
+    /// native Director UI so a stale Gate click becomes a visible conflict.
+    pub async fn approve_expected(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: i64,
+    ) -> Result<CommandOutcome, AppError> {
+        if command_id.trim().is_empty() {
+            return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
+        }
+        let request_hash = json_hash(&RunCommandHash {
+            run_id,
+            kind: "approve_expected",
+            intent: None,
+        })?;
+        Ok(self
+            .runs
+            .approve(
+                command_id,
+                &request_hash,
+                run_id,
+                Some(expected_version),
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
     pub async fn cancel(&self, command_id: &str, run_id: &str) -> Result<CommandOutcome, AppError> {
         self.command(command_id, run_id, "cancel", None).await
     }
@@ -574,6 +602,73 @@ impl DirectorService {
             .await?)
     }
 
+    /// 返回某本小说当前仍可继续的 Run；数据来自 workflow_control 的持久化状态。
+    pub async fn active_run(
+        &self,
+        novel_id: &str,
+    ) -> Result<Option<crate::dto::RunSummary>, AppError> {
+        Ok(self.list_runs(novel_id).await?.into_iter().find(|run| {
+            matches!(
+                run.state.as_str(),
+                "queued" | "running" | "waiting_approval" | "paused"
+            )
+        }))
+    }
+
+    /// Tauri Director 的稳定读模型。状态、Gate、当前 Step、候选和用量均来自持久化事实。
+    pub async fn get_run_detail(
+        &self,
+        novel_id: &str,
+        run_id: &str,
+    ) -> Result<RunDetailView, AppError> {
+        let summary = self
+            .list_runs(novel_id)
+            .await?
+            .into_iter()
+            .find(|run| run.id == run_id)
+            .ok_or_else(|| AppError::not_found("没有找到这次创作。"))?;
+        let control = self.runs.run_control(run_id).await?;
+        let artifacts = self.runs.run_artifacts(run_id).await?;
+        let candidate = self.runs.latest_candidate(run_id).await?;
+        let usage = self.runs.run_usage(run_id).await?;
+        let pause_kind = control
+            .pause
+            .as_ref()
+            .map(|pause| pause_kind_name(pause.kind));
+        let pause_reason = control.pause.as_ref().map(|pause| pause.reason.clone());
+        let gate = control.gate.as_ref().map(|gate| RunGateView {
+            id: gate.id.clone(),
+            artifact_types: gate.artifact_types.clone(),
+        });
+        Ok(RunDetailView {
+            id: summary.id,
+            novel_id: summary.novel_id,
+            chapter_id: summary.chapter_id,
+            chapter_title: summary.chapter_title,
+            status: control.status.as_str().to_string(),
+            control_version: control.version,
+            cursor_step_id: control.cursor_step_id,
+            pause_kind: pause_kind.map(str::to_string),
+            pause_reason,
+            failure_reason: control.failure_reason,
+            gate,
+            latest_candidate: candidate.map(|candidate| RunCandidateView {
+                id: candidate.id,
+                content: candidate.content,
+            }),
+            artifacts,
+            usage: RunUsageView {
+                calls: usage.calls,
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+            },
+            provider: summary.provider,
+            model: summary.model,
+            created_at: summary.created_at,
+            updated_at: summary.updated_at,
+        })
+    }
+
     /// Phase 2.1：获取小说的所有运行列表（按时间倒序）。
     pub async fn list_runs(&self, novel_id: &str) -> Result<Vec<crate::dto::RunSummary>, AppError> {
         Ok(self.runs.list_runs(novel_id).await?)
@@ -611,7 +706,7 @@ impl DirectorService {
         let outcome = match kind {
             "approve" => {
                 self.runs
-                    .approve(command_id, &request_hash, run_id, now)
+                    .approve(command_id, &request_hash, run_id, None, now)
                     .await?
             }
             "cancel" => {
@@ -656,4 +751,13 @@ struct RunCommandHash<'a> {
     run_id: &'a str,
     kind: &'a str,
     intent: Option<&'a str>,
+}
+
+fn pause_kind_name(kind: PauseKind) -> &'static str {
+    match kind {
+        PauseKind::ManualRecovery => "manual_recovery",
+        PauseKind::Replan => "replan",
+        PauseKind::Safety => "safety",
+        PauseKind::MigrationReview => "migration_review",
+    }
 }

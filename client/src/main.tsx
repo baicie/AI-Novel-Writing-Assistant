@@ -95,6 +95,23 @@ if (hasDesktopShell()) {
     }).catch((error: unknown) => reportError(`channel smoke failed: ${String(error)}`));
   }
 
+  if ((window as Window & { __AI_NOVEL_SMOKE_DIRECTOR__?: unknown }).__AI_NOVEL_SMOKE_DIRECTOR__ === true) {
+    void (async () => {
+      const novel = await createNovelWithSetup({ title: "桌面导演烟测", description: "" });
+      await createChapter({ novelId: novel.id, title: "第一章", sortOrder: 1 });
+      window.location.hash = `#/lab/director/${encodeURIComponent(novel.id)}`;
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      const page = document.querySelector("[data-tauri-director-page]");
+      const start = document.querySelector("[data-tauri-director-start]");
+      reportClientRuntime({
+        config: runtimeConfig ?? null,
+        locationHash: window.location.hash,
+        runtimeMode: APP_RUNTIME,
+        message: `director ui smoke ok page=${Boolean(page)} start=${Boolean(start)}`,
+      }).catch(() => undefined);
+    })().catch((error: unknown) => reportError(`director ui smoke failed: ${String(error)}`));
+  }
+
   if ((window as Window & { __AI_NOVEL_SMOKE_ADAPTER__?: unknown }).__AI_NOVEL_SMOKE_ADAPTER__ === true) {
     void import("./api/client").then(async ({ apiClient }) => {
       const created = await apiClient.post<{ data: { id: string } }>("/novels", {

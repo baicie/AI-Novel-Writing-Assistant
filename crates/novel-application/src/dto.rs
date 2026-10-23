@@ -220,6 +220,65 @@ pub struct ListRunsResult {
     pub total: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunArtifactView {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub artifact_type: String,
+    pub scope: String,
+    pub version: i64,
+    pub status: String,
+    pub protected_user_content: bool,
+    pub payload_json: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGateView {
+    pub id: String,
+    pub artifact_types: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunCandidateView {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunUsageView {
+    pub calls: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunDetailView {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_title: String,
+    pub status: String,
+    pub control_version: i64,
+    pub cursor_step_id: Option<String>,
+    pub pause_kind: Option<String>,
+    pub pause_reason: Option<String>,
+    pub failure_reason: Option<String>,
+    pub gate: Option<RunGateView>,
+    pub latest_candidate: Option<RunCandidateView>,
+    pub artifacts: Vec<RunArtifactView>,
+    pub usage: RunUsageView,
+    pub provider: String,
+    pub model: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// 章节完整详情。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

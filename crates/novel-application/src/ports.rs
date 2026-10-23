@@ -10,8 +10,8 @@ use novel_workflow::AttemptView;
 use crate::dto::{
     ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
     CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult, NovelDetail,
-    NovelSummary, RecoverableTaskSummary, RunContract, RunSummary, TaskOverviewSummary,
-    UpdateNovelFields, VolumeSnapshot,
+    NovelSummary, RecoverableTaskSummary, RunArtifactView, RunContract, RunSummary, RunUsageView,
+    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -416,6 +416,12 @@ pub trait WorkflowRepository: Send + Sync {
     async fn list_runs(&self, novel_id: &str) -> Result<Vec<RunSummary>, PortError>;
     /// 列出本地内核中的全部运行，供只读任务中心展示。
     async fn list_all_runs(&self) -> Result<Vec<RunSummary>, PortError>;
+    /// 读取持久化控制状态，供 Director 投影使用。
+    async fn run_control(&self, run_id: &str) -> Result<RunControl, PortError>;
+    /// 读取某个 Run 的产物，按版本倒序。
+    async fn run_artifacts(&self, run_id: &str) -> Result<Vec<RunArtifactView>, PortError>;
+    /// 读取某个 Run 的模型调用汇总。
+    async fn run_usage(&self, run_id: &str) -> Result<RunUsageView, PortError>;
     /// 获取章节的完整详情。
     async fn get_chapter_full(
         &self,
@@ -446,6 +452,7 @@ pub trait WorkflowRepository: Send + Sync {
         command_id: &str,
         request_hash: &str,
         run_id: &str,
+        expected_version: Option<i64>,
         now_ms: i64,
     ) -> Result<CommandOutcome, PortError>;
     async fn resume(
