@@ -316,6 +316,8 @@ pub struct QualityDebtView {
     pub review_version: i64,
     pub status: String,
     pub resolution_evidence: Option<String>,
+    pub decision_version: i64,
+    pub accepted_reason: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

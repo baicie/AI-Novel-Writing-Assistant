@@ -359,3 +359,18 @@ pub async fn clear_candidate_edit_draft(
         .clear_candidate_edit_draft(&run_id, &gate_id, &client_id, &content, local_revision)
         .await
 }
+
+#[tauri::command]
+pub async fn accept_quality_debt(
+    state: State<'_, AppState>,
+    run_id: String,
+    debt_id: String,
+    expected_version: i64,
+    reason: String,
+) -> Result<novel_application::QualityDebtView, AppError> {
+    state
+        .runtime
+        .director
+        .accept_quality_debt(&run_id, &debt_id, expected_version, &reason)
+        .await
+}

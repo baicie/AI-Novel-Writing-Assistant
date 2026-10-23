@@ -38,3 +38,60 @@
 ## 本轮结论
 
 P11.3 Gate **未完成**，不得标记 VERIFIED。
+
+
+## P11.3 实现（本轮）
+
+### 数据模型
+
+新增 `review_issue_occurrence`：
+
+- 每次审校实际发现的问题一条；
+- 绑定 run/chapter/novel、review_version、model_issue_id、stable_issue_key；
+- 保留 type/severity/description/evidence/suggestion/sourceRef；
+- 不删除历史 occurrence。
+
+Quality Debt 增加：
+
+- `decision_version`：accepted 决策 CAS 版本；
+- `accepted_reason`：作者接受原因。
+
+### 稳定关联
+
+`stable_issue_key = hash(normalized type + sourceRef + normalized evidence)`。
+
+- 不依赖模型 `issueId`。
+- 证据/引用无法确定相同则生成不同 key，保持两个独立问题。
+- 相同 key 的 open debt 只更新审校版本/严重度/证据，不覆盖 accepted/resolved。
+- 同一轮重复 occurrence 都保留，Quality Debt 去重。
+
+### 生命周期
+
+- open：审校发现。
+- resolved：无问题审校通过；记录 resolution_evidence（含审校版本）。
+- accepted：Native Command `accept_quality_debt`，必须 expected `decision_version` + 非空原因。
+- accepted 不等于已修复；状态独立保留。
+- 历史不删除。
+
+### Native UI
+
+质量问题行显示状态；open 状态提供“接受并保留”，调用真实 Tauri Command，失败展示冲突。
+
+### 测试
+
+```text
+cargo test -p novel-storage-sqlite --test workflow_lease
+- quality_debt_accept_is_versioned_and_preserves_history PASS
+
+cargo test -p novel-application --lib stable_issue
+- stable_issue_identity_ignores_model_issue_id_and_normalizes_evidence PASS
+
+p9_repair_flow / p11_repair_faults
+PASS（occurrence 写入与审校流程）
+```
+
+未完成：
+
+- 同一业务问题跨两次审校的端到端断言（目前由稳定 key 与 occurrence 表设计保证，未加专门 fixture）。
+- 质量债详情 UI 仅显示摘要、状态和接受按钮，未展示完整证据/解决历史。
+- resolved 与具体 Review Artifact 外键仍未显式关联（使用 review_version 文本证据）。

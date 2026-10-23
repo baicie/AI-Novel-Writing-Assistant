@@ -461,6 +461,24 @@ pub struct SaveCandidateEditDraftRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct NewReviewOccurrence {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub model_issue_id: Option<String>,
+    pub stable_issue_key: String,
+    pub issue_type: String,
+    pub severity: String,
+    pub description: String,
+    pub evidence: String,
+    pub suggestion: String,
+    pub source_ref: Option<String>,
+    pub review_version: i64,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewQualityDebt {
     pub id: String,
     pub novel_id: String,
@@ -547,6 +565,20 @@ pub trait WorkflowRepository: Send + Sync {
         items: &[NewQualityDebt],
         now_ms: i64,
     ) -> Result<(), PortError>;
+    async fn record_review_occurrences_fenced(
+        &self,
+        fence: &LeaseFence,
+        occurrences: &[NewReviewOccurrence],
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn accept_quality_debt(
+        &self,
+        run_id: &str,
+        debt_id: &str,
+        expected_version: i64,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<QualityDebtView, PortError>;
     async fn list_quality_debt(
         &self,
         novel_id: &str,

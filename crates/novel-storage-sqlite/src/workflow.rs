@@ -355,7 +355,15 @@ impl WorkflowRepository for SqliteKernel {
                      description, evidence, suggestion, source_ref, review_version, status,
                      resolution_evidence, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?)
-                 ON CONFLICT(run_id, issue_id) DO NOTHING",
+                 ON CONFLICT(run_id, issue_id) DO UPDATE SET
+                   severity = excluded.severity,
+                   description = excluded.description,
+                   evidence = excluded.evidence,
+                   suggestion = excluded.suggestion,
+                   source_ref = excluded.source_ref,
+                   review_version = excluded.review_version,
+                   updated_at = excluded.updated_at
+                 WHERE chapter_quality_debt.status = 'open'",
             )
             .bind(&item.id)
             .bind(&item.novel_id)
@@ -387,7 +395,7 @@ impl WorkflowRepository for SqliteKernel {
         let rows = sqlx::query(
             "SELECT id, novel_id, chapter_id, run_id, issue_id, issue_type, severity,
                     description, evidence, suggestion, source_ref, review_version, status,
-                    resolution_evidence, created_at, updated_at
+                    resolution_evidence, decision_version, accepted_reason, created_at, updated_at
              FROM chapter_quality_debt WHERE novel_id = ? AND chapter_id = ?
              ORDER BY created_at ASC, id ASC",
         )
@@ -413,6 +421,8 @@ impl WorkflowRepository for SqliteKernel {
                     review_version: row.try_get("review_version").map_err(map_sql)?,
                     status: row.try_get("status").map_err(map_sql)?,
                     resolution_evidence: row.try_get("resolution_evidence").map_err(map_sql)?,
+                    decision_version: row.try_get("decision_version").map_err(map_sql)?,
+                    accepted_reason: row.try_get("accepted_reason").map_err(map_sql)?,
                     created_at: row.try_get("created_at").map_err(map_sql)?,
                     updated_at: row.try_get("updated_at").map_err(map_sql)?,
                 })
@@ -689,7 +699,15 @@ impl WorkflowRepository for SqliteKernel {
                      description, evidence, suggestion, source_ref, review_version, status,
                      resolution_evidence, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?)
-                 ON CONFLICT(run_id, issue_id) DO NOTHING",
+                 ON CONFLICT(run_id, issue_id) DO UPDATE SET
+                   severity = excluded.severity,
+                   description = excluded.description,
+                   evidence = excluded.evidence,
+                   suggestion = excluded.suggestion,
+                   source_ref = excluded.source_ref,
+                   review_version = excluded.review_version,
+                   updated_at = excluded.updated_at
+                 WHERE chapter_quality_debt.status = 'open'",
             )
             .bind(&item.id)
             .bind(&item.novel_id)
@@ -771,6 +789,106 @@ impl WorkflowRepository for SqliteKernel {
         .map_err(map_sql)?;
         tx.commit().await.map_err(map_sql)?;
         Ok(result.rows_affected() == 1)
+    }
+
+    async fn record_review_occurrences_fenced(
+        &self,
+        fence: &novel_application::LeaseFence,
+        occurrences: &[novel_application::NewReviewOccurrence],
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(first) = occurrences.first() {
+            verify_lease_fence(&mut tx, fence, &first.run_id, now_ms).await?;
+        }
+        for item in occurrences {
+            sqlx::query(
+                "INSERT INTO review_issue_occurrence
+                 (id, novel_id, chapter_id, run_id, model_issue_id, stable_issue_key,
+                  issue_type, severity, description, evidence, suggestion, source_ref,
+                  review_version, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&item.id)
+            .bind(&item.novel_id)
+            .bind(&item.chapter_id)
+            .bind(&item.run_id)
+            .bind(&item.model_issue_id)
+            .bind(&item.stable_issue_key)
+            .bind(&item.issue_type)
+            .bind(&item.severity)
+            .bind(&item.description)
+            .bind(&item.evidence)
+            .bind(&item.suggestion)
+            .bind(&item.source_ref)
+            .bind(item.review_version)
+            .bind(item.created_at)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        }
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn accept_quality_debt(
+        &self,
+        run_id: &str,
+        debt_id: &str,
+        expected_version: i64,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<QualityDebtView, PortError> {
+        let result = sqlx::query(
+            "UPDATE chapter_quality_debt
+             SET status = 'accepted', accepted_reason = ?, resolution_evidence = ?,
+                 decision_version = decision_version + 1, updated_at = ?
+             WHERE id = ? AND run_id = ? AND decision_version = ? AND status != 'resolved'",
+        )
+        .bind(reason)
+        .bind(reason)
+        .bind(now_ms)
+        .bind(debt_id)
+        .bind(run_id)
+        .bind(expected_version)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if result.rows_affected() != 1 {
+            return Err(PortError::Conflict(
+                "质量债状态已变化，请刷新后再决定。".into(),
+            ));
+        }
+        let row = sqlx::query(
+            "SELECT id, novel_id, chapter_id, run_id, issue_id, issue_type, severity,
+                    description, evidence, suggestion, source_ref, review_version, status,
+                    resolution_evidence, decision_version, accepted_reason, created_at, updated_at
+             FROM chapter_quality_debt WHERE id = ?",
+        )
+        .bind(debt_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(QualityDebtView {
+            id: row.try_get("id").map_err(map_sql)?,
+            novel_id: row.try_get("novel_id").map_err(map_sql)?,
+            chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+            run_id: row.try_get("run_id").map_err(map_sql)?,
+            issue_id: row.try_get("issue_id").map_err(map_sql)?,
+            issue_type: row.try_get("issue_type").map_err(map_sql)?,
+            severity: row.try_get("severity").map_err(map_sql)?,
+            description: row.try_get("description").map_err(map_sql)?,
+            evidence: row.try_get("evidence").map_err(map_sql)?,
+            suggestion: row.try_get("suggestion").map_err(map_sql)?,
+            source_ref: row.try_get("source_ref").map_err(map_sql)?,
+            review_version: row.try_get("review_version").map_err(map_sql)?,
+            status: row.try_get("status").map_err(map_sql)?,
+            resolution_evidence: row.try_get("resolution_evidence").map_err(map_sql)?,
+            decision_version: row.try_get("decision_version").map_err(map_sql)?,
+            accepted_reason: row.try_get("accepted_reason").map_err(map_sql)?,
+            created_at: row.try_get("created_at").map_err(map_sql)?,
+            updated_at: row.try_get("updated_at").map_err(map_sql)?,
+        })
     }
 
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError> {

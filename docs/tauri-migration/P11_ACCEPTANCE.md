@@ -156,3 +156,14 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - Candidate + Attempt CandidateSaved + Invocation 单事务。
 - Attempt 不可保存时全回滚。
 - H1 安全续跑使用完整事实。
+
+## P11.3 Quality Debt
+
+**PARTIAL / 核心已实现**
+
+- Review Issue Occurrence 表
+- 稳定 issue key（不依赖模型 issueId）
+- accepted Command + decision_version CAS + 原因
+- accepted 不改变 resolved/历史
+- Native 接受按钮
+- 跨两轮审校的端到端 fixture 与完整详情 UI 未完成

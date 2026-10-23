@@ -938,6 +938,28 @@ impl DirectorService {
             .await?)
     }
 
+    pub async fn accept_quality_debt(
+        &self,
+        run_id: &str,
+        debt_id: &str,
+        expected_version: i64,
+        reason: &str,
+    ) -> Result<crate::dto::QualityDebtView, AppError> {
+        if reason.trim().is_empty() {
+            return Err(AppError::validation("接受质量问题需要填写原因。"));
+        }
+        Ok(self
+            .runs
+            .accept_quality_debt(
+                run_id,
+                debt_id,
+                expected_version,
+                reason,
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
     pub async fn list_candidate_edit_drafts(
         &self,
         novel_id: &str,

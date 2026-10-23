@@ -20,8 +20,8 @@ use crate::hash::sha256_hex;
 use crate::hub::EventHub;
 use crate::ports::{
     ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, LeaseFence, ModelSecrets, NewArtifact,
-    NewAttempt, NewCandidate, NewInvocation, NewQualityDebt, NovelRepository, PromoteOutcome,
-    WorkflowRepository,
+    NewAttempt, NewCandidate, NewInvocation, NewQualityDebt, NewReviewOccurrence, NovelRepository,
+    PromoteOutcome, WorkflowRepository,
 };
 
 mod worker_validation;
@@ -1435,35 +1435,95 @@ async fn record_review_debt(
             .await?;
         return Ok(());
     }
-    let items = issues
-        .iter()
-        .filter_map(|issue| {
-            let issue_id = issue.get("issueId")?.as_str()?.to_string();
-            Some(NewQualityDebt {
-                id: format!("debt-{}-{issue_id}", claimed.run_id),
+    let now = worker.clock.now_ms();
+    let mut occurrences = Vec::new();
+    let mut debts = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for issue in &issues {
+        let issue_type = issue
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let severity = issue
+            .get("severity")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("medium");
+        let description = issue
+            .get("description")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let evidence = issue
+            .get("evidence")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let suggestion = issue
+            .get("suggestion")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let source_ref = issue.get("sourceRef").and_then(serde_json::Value::as_str);
+        let model_issue_id = issue.get("issueId").and_then(serde_json::Value::as_str);
+        let stable_key = stable_issue_key(issue_type, source_ref, evidence);
+        occurrences.push(NewReviewOccurrence {
+            id: worker.ids.new_id(),
+            novel_id: claimed.novel_id.clone(),
+            chapter_id: claimed.contract.target_chapter_id.clone(),
+            run_id: claimed.run_id.clone(),
+            model_issue_id: model_issue_id.map(str::to_string),
+            stable_issue_key: stable_key.clone(),
+            issue_type: issue_type.to_string(),
+            severity: severity.to_string(),
+            description: description.to_string(),
+            evidence: evidence.to_string(),
+            suggestion: suggestion.to_string(),
+            source_ref: source_ref.map(str::to_string),
+            review_version,
+            created_at: now,
+        });
+        if seen.insert(stable_key.clone()) {
+            debts.push(NewQualityDebt {
+                id: format!("debt-{}-{stable_key}", claimed.run_id),
                 novel_id: claimed.novel_id.clone(),
                 chapter_id: claimed.contract.target_chapter_id.clone(),
                 run_id: claimed.run_id.clone(),
-                issue_id,
-                issue_type: issue.get("type")?.as_str()?.to_string(),
-                severity: issue.get("severity")?.as_str()?.to_string(),
-                description: issue.get("description")?.as_str()?.to_string(),
-                evidence: issue.get("evidence")?.as_str()?.to_string(),
-                suggestion: issue.get("suggestion")?.as_str()?.to_string(),
-                source_ref: issue
-                    .get("sourceRef")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
+                issue_id: stable_key,
+                issue_type: issue_type.to_string(),
+                severity: severity.to_string(),
+                description: description.to_string(),
+                evidence: evidence.to_string(),
+                suggestion: suggestion.to_string(),
+                source_ref: source_ref.map(str::to_string),
                 review_version,
-                now_ms: worker.clock.now_ms(),
-            })
-        })
-        .collect::<Vec<_>>();
+                now_ms: now,
+            });
+        }
+    }
     worker
         .runs
-        .record_quality_debt_fenced(&claimed.fence, &items, worker.clock.now_ms())
+        .record_review_occurrences_fenced(&claimed.fence, &occurrences, now)
+        .await?;
+    worker
+        .runs
+        .record_quality_debt_fenced(&claimed.fence, &debts, now)
         .await?;
     Ok(())
+}
+
+/// Deterministic identity for tracking the same business issue across reviews.
+/// If any of the stable inputs is absent the full normalized evidence is used;
+/// uncertain matches remain separate rather than being auto-merged.
+fn stable_issue_key(issue_type: &str, source_ref: Option<&str>, evidence: &str) -> String {
+    let normalized = evidence
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let material = format!(
+        "{}\u{001f}{}\u{001f}{}",
+        issue_type.trim().to_lowercase(),
+        source_ref.unwrap_or("").trim().to_lowercase(),
+        normalized
+    );
+    format!("issue-{}", &sha256_hex(material.as_bytes())[..32])
 }
 
 async fn execute_context(
@@ -1727,5 +1787,14 @@ mod structured_validation_tests {
             validate_structured_output("consistency_review", r#"{"issues":[{"type":"x"}]}"#)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn stable_issue_identity_ignores_model_issue_id_and_normalizes_evidence() {
+        let a = super::stable_issue_key("timeline", Some("chapter-1"), "  Time    LINE ");
+        let b = super::stable_issue_key("timeline", Some("chapter-1"), "time line");
+        let c = super::stable_issue_key("timeline", Some("chapter-1"), "different evidence");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }

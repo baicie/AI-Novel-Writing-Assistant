@@ -134,3 +134,8 @@
 
 - 持久化 Cancel 竞争、Re-review 完成后 SIGKILL、Candidate/Attempt/Invocation 原子落库已通过。
 - 仍未覆盖：Cancel 与 Commit 同一毫秒的数据库级竞争、Re-review Provider 返回后未落地时的中途崩溃自动复用、真实付费 Provider timeout。
+
+## B-022 P11.3
+
+- Occurrence/稳定 key/accepted CAS 已实现。
+- 未完成：同一问题跨两轮审校端到端测试、完整质量债历史 UI、resolved 与 Review Artifact 外键。

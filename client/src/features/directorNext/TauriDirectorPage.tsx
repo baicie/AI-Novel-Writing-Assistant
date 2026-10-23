@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  acceptQualityDebt,
   approveRun,
   cancelRun,
   clearCandidateEditDraft,
@@ -290,6 +291,12 @@ export default function TauriDirectorPage() {
     },
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "确认修改后候选失败，请刷新后重试。"),
   });
+  const acceptDebt = useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      acceptQualityDebt({ runId, debtId: id, expectedVersion: version, reason: "作者确认保留该质量问题，暂不自动修复。" }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
+    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "接受质量问题失败，请刷新后重试。"),
+  });
   const cancel = useMutation({
     mutationFn: () => cancelRun({ runId, commandId: commandId("director-cancel") }),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
@@ -378,7 +385,9 @@ export default function TauriDirectorPage() {
               <ul className="space-y-2 text-xs">
                 {detail.qualityDebt.map(item => <li key={String(item.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
                   <span>{String(item.issueType)} · {String(item.severity)} · {String(item.description)}</span>
-                  <span className="text-muted-foreground">{String(item.status)}</span>
+                  <span className="flex items-center gap-2 text-muted-foreground">{String(item.status)}
+                    {String(item.status) === "open" ? <Button data-testid="director-accept-quality-debt" variant="outline" onClick={() => acceptDebt.mutate({ id: String(item.id), version: Number(item.decisionVersion ?? 0) })} disabled={acceptDebt.isPending}>接受并保留</Button> : null}
+                  </span>
                 </li>)}
               </ul>
             </section> : null}

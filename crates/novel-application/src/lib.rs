@@ -45,11 +45,11 @@ pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
     DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LeaseFence, LookupRepository,
     ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument, NewEmbedding,
-    NewInvocation, NewNovel, NewQualityDebt, NewVolume, NewWorld, NoFault, NoModelSecrets,
-    NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveCandidateEditDraftRecord,
-    SaveChapterDraftRecord, SaveChapterRecord, SearchHit, StoredEvent, SystemClock,
-    TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds,
-    WorkflowRepository, WorldRepository,
+    NewInvocation, NewNovel, NewQualityDebt, NewReviewOccurrence, NewVolume, NewWorld, NoFault,
+    NoModelSecrets, NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace,
+    SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord, SearchHit,
+    StoredEvent, SystemClock, TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord,
+    UpdateWorldFields, UuidIds, WorkflowRepository, WorldRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

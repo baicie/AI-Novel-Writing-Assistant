@@ -508,3 +508,63 @@ async fn candidate_checkpoint_rolls_back_when_attempt_is_not_saveable() {
     .unwrap();
     assert_eq!((candidates, invocations, events), (0, 0, 0));
 }
+
+#[tokio::test]
+async fn quality_debt_accept_is_versioned_and_preserves_history() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("debt.sqlite"))
+        .await
+        .unwrap();
+    WorkflowRepository::record_quality_debt(
+        &kernel,
+        &[novel_application::NewQualityDebt {
+            id: "debt-1".into(),
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            run_id: "r".into(),
+            issue_id: "stable-issue".into(),
+            issue_type: "timeline".into(),
+            severity: "high".into(),
+            description: "时间线冲突".into(),
+            evidence: "证据".into(),
+            suggestion: "修正".into(),
+            source_ref: Some("chapter-1".into()),
+            review_version: 1,
+            now_ms: 10,
+        }],
+    )
+    .await
+    .unwrap();
+    let open = WorkflowRepository::list_quality_debt(&kernel, "n", "c")
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].decision_version, 0);
+    let accepted =
+        WorkflowRepository::accept_quality_debt(&kernel, "r", "debt-1", 0, "作者确认保留", 20)
+            .await
+            .unwrap();
+    assert_eq!(accepted.status, "accepted");
+    assert_eq!(accepted.decision_version, 1);
+    assert_eq!(accepted.accepted_reason.as_deref(), Some("作者确认保留"));
+    assert!(matches!(
+        WorkflowRepository::accept_quality_debt(&kernel, "r", "debt-1", 0, "旧版本", 21).await,
+        Err(PortError::Conflict(_))
+    ));
+    let after = WorkflowRepository::list_quality_debt(&kernel, "n", "c")
+        .await
+        .unwrap();
+    assert_eq!(after[0].status, "accepted");
+    assert_eq!(
+        after[0].resolution_evidence.as_deref(),
+        Some("作者确认保留")
+    );
+    // Accepted is not resolved; the original debt row remains.
+    let resolved: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapter_quality_debt WHERE id='debt-1' AND status='accepted'",
+    )
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(resolved, 1);
+}

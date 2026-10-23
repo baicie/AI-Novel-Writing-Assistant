@@ -572,6 +572,10 @@ export function saveCandidateEditDraft(input: {
   return invoke("save_candidate_edit_draft", { request: input });
 }
 
+export function acceptQualityDebt(input: { runId: string; debtId: string; expectedVersion: number; reason: string }): Promise<Record<string, unknown>> {
+  return invoke("accept_quality_debt", input);
+}
+
 export function listCandidateEditDrafts(input: { novelId: string; runId: string }): Promise<CandidateEditDraftView[]> {
   return invoke("list_candidate_edit_drafts", input);
 }
