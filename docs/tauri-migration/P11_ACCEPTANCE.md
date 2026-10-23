@@ -69,8 +69,8 @@ cargo test -p novel-application --test p11_repair_faults
 
 ## 回归
 
-- Rust workspace：237 passed
-- 干净 Worktree all-targets（HEAD b57f912a）：PASS
+- Rust workspace：238 passed
+- 干净 Worktree all-targets（HEAD 22e5d2c4）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
 - typecheck：PASS
@@ -78,6 +78,14 @@ cargo test -p novel-application --test p11_repair_faults
 - fmt：PASS
 - clippy：PASS（既有 warning）
 - Tauri production bundle audit：PASS
-- 生产 `.app`：20.19 MiB，DMG 9.1 MiB
+- 生产 `.app`：20.23 MiB，DMG 9.1 MiB
 
 Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更）。
+
+## P11.2-W1 最终
+
+- 代码提交：`22e5d2c4`
+- Candidate Journal writer identity：sessionStorage（窗口级）
+- Discovery：novel + run 范围列出全部草稿
+- Native SIGKILL 新进程恢复：PASS
+- Native 双窗口同时操作：PARTIAL（嵌入式 WebDriver 单窗口）

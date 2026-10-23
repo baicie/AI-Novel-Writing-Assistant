@@ -122,7 +122,7 @@ test:candidate-journal-restart 1 passing
 6. 旧共享 localStorage 身份记录仍可发现。
 7. Discovery 按 novel/run 隔离。
 
-### Native E2E
+### Native E2E（W1）
 
 ```text
 test:candidate-journal-crash    SIGKILL 预期非零
