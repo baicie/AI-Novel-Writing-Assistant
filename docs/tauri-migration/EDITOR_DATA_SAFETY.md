@@ -1,6 +1,6 @@
 # Editor Data Safety
 
-基线：`d7ad9d2c`。本轮增加独立 SQLite 本地草稿 Journal，不再仅依赖 `sessionStorage`。
+基线：`7f7b7e60`。本轮增加独立 SQLite 本地草稿 Journal，不再仅依赖 `sessionStorage`。
 
 ## 1. 数据合同
 
@@ -47,7 +47,7 @@
 | 两个窗口编辑同一章 | PARTIAL | `client_id` 隔离和 storage 测试；无真实双窗口 E2E |
 | 中文 composition 期间保存 | BLOCKED | 系统输入法 composition 不可可靠自动驱动；列入人工验收 |
 
-## 2.1 已确认并修复的 P0
+## 2.1 已确认并修复的 P0 缺陷
 
 原实现 `ON CONFLICT DO UPDATE` 不检查 revision：两个异步写入乱序时，较旧请求可以覆盖较新草稿。
 

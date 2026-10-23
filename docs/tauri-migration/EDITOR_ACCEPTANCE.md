@@ -11,7 +11,7 @@
 | Frontend draft race tests | 6 PASS |
 | Full frontend tests | 186 PASS |
 | Rust workspace | 223 PASS |
-| Clean worktree all-targets | PASS（HEAD `d7ad9d2c`） |
+| Clean worktree all-targets | PASS（HEAD `7f7b7e60`） |
 
 ## 人工验收
 

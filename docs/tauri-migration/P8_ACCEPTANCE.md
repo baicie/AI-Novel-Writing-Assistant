@@ -63,7 +63,7 @@ P8 后端结构化步骤和原生 Director MVP 已有实际代码与自动化证
 
 - Director E2E：2 个独立测试 × 连续 3 轮全部通过（16s / 14s / 24s），无 flaky。
 - Cancel、Safety、独立进程 Restart 各 1 个测试通过。
-- 独立干净 Git Worktree 检出 `d7ad9d2c`：`cargo test --workspace --all-targets` PASS；原工作树仍因用户未跟踪 `integration_runs.rs` 阻塞。
+- 独立干净 Git Worktree 检出 `7f7b7e60`：`cargo test --workspace --all-targets` PASS；原工作树仍因用户未跟踪 `integration_runs.rs` 阻塞。
 - 前端测试 186 passing（补充草稿保存竞态测试）。
 - 生产 Release 仍为 `withGlobalTauri:false`、capabilities 仅 default，无 WDIO marker。
 
