@@ -126,6 +126,7 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
             token_budget: Some(512),
             context_token_budget: Some(24_000),
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })

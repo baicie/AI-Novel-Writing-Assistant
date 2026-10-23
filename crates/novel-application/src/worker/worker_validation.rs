@@ -230,6 +230,8 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                 .and_then(serde_json::Value::as_array)
                 .ok_or("审校结果缺少 issues 数组")?;
             let mut normalized_issues = Vec::with_capacity(issues.len());
+            let mut seen_ids: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
             for (index, issue) in issues.iter().enumerate() {
                 for key in ["type", "severity", "evidence", "suggestion"] {
                     required_string(issue, key)?;
@@ -245,6 +247,28 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                             crate::hash::sha256_hex(issue.to_string().as_bytes())
                         )
                     });
+                let identity = format!(
+                    "{}|{}|{}",
+                    issue
+                        .get("type")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    issue
+                        .get("evidence")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    issue
+                        .get("suggestion")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                );
+                if let Some(previous) = seen_ids.get(&issue_id) {
+                    if previous == &identity {
+                        continue;
+                    }
+                    return Err("审校返回了重复 issueId，但问题内容不同；不能合并不同问题".into());
+                }
+                seen_ids.insert(issue_id.clone(), identity);
                 let description = issue
                     .get("description")
                     .and_then(serde_json::Value::as_str)

@@ -34,6 +34,7 @@ pub struct OpenRunInput {
     pub token_budget: Option<u64>,
     pub context_token_budget: Option<u64>,
     pub max_automatic_retries: u8,
+    pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
 }
@@ -440,6 +441,9 @@ impl DirectorService {
         if input.max_automatic_retries > 1 {
             return Err(AppError::validation("自动重试次数只能是 0 或 1。"));
         }
+        if input.repair_budget.is_some_and(|budget| budget > 1) {
+            return Err(AppError::validation("质量修复次数只能是 0 或 1。"));
+        }
         let prompt_version = input
             .prompt_versions
             .get("chapter_draft")
@@ -468,6 +472,7 @@ impl DirectorService {
                 .context_token_budget
                 .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKEN_BUDGET),
             max_automatic_retries: input.max_automatic_retries,
+            repair_budget: input.repair_budget.unwrap_or(0),
             endpoint: input.endpoint.clone(),
             allow_localhost_http: input.allow_localhost_http,
         };
@@ -482,6 +487,7 @@ impl DirectorService {
                 .context_token_budget
                 .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKEN_BUDGET),
             max_automatic_retries: input.max_automatic_retries,
+            repair_budget: input.repair_budget,
             endpoint: &input.endpoint,
             allow_localhost_http: input.allow_localhost_http,
             plan_version: PRODUCTION_PLAN_VERSION,
@@ -614,6 +620,47 @@ impl DirectorService {
                 expected_version,
                 &self.ids.new_id(),
                 payload_json,
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
+    pub async fn confirm_candidate_after_edit(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        base_candidate_id: &str,
+        base_content_sha256: &str,
+        content: &str,
+    ) -> Result<CommandOutcome, AppError> {
+        if command_id.trim().is_empty() {
+            return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
+        }
+        if content.trim().is_empty() {
+            return Err(AppError::validation("修改后的候选正文不能为空。"));
+        }
+        let intent = format!(
+            "{base_candidate_id}:{base_content_sha256}:{}",
+            sha256_hex(content.as_bytes())
+        );
+        let request_hash = json_hash(&RunCommandHash {
+            run_id,
+            kind: "confirm_candidate_after_edit",
+            intent: Some(&intent),
+        })?;
+        Ok(self
+            .runs
+            .confirm_candidate_after_edit(
+                command_id,
+                &request_hash,
+                run_id,
+                expected_version,
+                base_candidate_id,
+                base_content_sha256,
+                content,
+                &self.ids.new_id(),
+                &self.ids.new_id(),
                 self.clock.now_ms(),
             )
             .await?)
@@ -773,6 +820,7 @@ impl DirectorService {
             latest_candidate: candidate.map(|candidate| RunCandidateView {
                 id: candidate.id,
                 content: candidate.content,
+                content_sha256: candidate.content_sha256,
             }),
             quality_debt,
             legal_actions,
@@ -935,6 +983,7 @@ struct OpenRunHash<'a> {
     token_budget: Option<u64>,
     context_token_budget: u64,
     max_automatic_retries: u8,
+    repair_budget: Option<u8>,
     endpoint: &'a str,
     allow_localhost_http: bool,
     plan_version: &'a str,

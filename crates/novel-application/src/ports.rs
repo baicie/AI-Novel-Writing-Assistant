@@ -217,6 +217,7 @@ pub struct StoredEvent {
 pub struct CandidateBody {
     pub id: String,
     pub content: String,
+    pub content_sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -508,6 +509,19 @@ pub trait WorkflowRepository: Send + Sync {
         expected_version: Option<i64>,
         artifact_id: &str,
         payload_json: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
+    async fn confirm_candidate_after_edit(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        base_candidate_id: &str,
+        base_content_sha256: &str,
+        content: &str,
+        new_candidate_id: &str,
+        artifact_id: &str,
         now_ms: i64,
     ) -> Result<CommandOutcome, PortError>;
     /// 获取章节的完整详情。

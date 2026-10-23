@@ -40,6 +40,7 @@
 "allow-reject-run",
     "allow-regenerate-run",
     "allow-confirm-after-edit-run",
+"allow-confirm-candidate-after-edit-run",
     "allow-cancel-run",
     "allow-cancel-generation",
     "allow-smoke-channel-message",

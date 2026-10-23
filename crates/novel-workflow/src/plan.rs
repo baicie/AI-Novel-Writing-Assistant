@@ -1,7 +1,8 @@
 use novel_domain::{ArtifactStatus, ArtifactView};
 use serde_json::Value;
 
-pub const PRODUCTION_PLAN_VERSION: &str = "novel-production-v2";
+pub const PRODUCTION_PLAN_VERSION: &str = "novel-production-v3";
+pub const PRODUCTION_PLAN_VERSION_V2: &str = "novel-production-v2";
 pub const PRODUCTION_PLAN_VERSION_V1: &str = "novel-production-v1";
 pub const CHAPTER_PLAN_VERSION: &str = "chapter-chain-v1";
 
@@ -64,6 +65,10 @@ pub fn production_plan() -> WorkflowDefinition {
     plan_with_version(PRODUCTION_PLAN_VERSION)
 }
 
+pub fn production_plan_v2() -> WorkflowDefinition {
+    plan_with_version(PRODUCTION_PLAN_VERSION_V2)
+}
+
 pub fn production_plan_v1() -> WorkflowDefinition {
     plan_with_version(PRODUCTION_PLAN_VERSION_V1)
 }
@@ -71,6 +76,7 @@ pub fn production_plan_v1() -> WorkflowDefinition {
 pub fn plan_for_version(version: &str) -> Option<WorkflowDefinition> {
     match version {
         PRODUCTION_PLAN_VERSION => Some(production_plan()),
+        PRODUCTION_PLAN_VERSION_V2 => Some(production_plan_v2()),
         PRODUCTION_PLAN_VERSION_V1 => Some(production_plan_v1()),
         _ => None,
     }

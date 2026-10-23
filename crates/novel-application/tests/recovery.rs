@@ -111,6 +111,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -129,6 +130,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -265,6 +267,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -291,6 +294,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -485,6 +489,7 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -564,6 +569,7 @@ async fn mock_draft_stream_reaches_event_subscribers_before_checkpoint() {
             token_budget: Some(256),
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })

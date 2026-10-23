@@ -51,6 +51,7 @@ pub async fn open(
             token_budget: payload.token_budget,
             context_token_budget: payload.context_token_budget,
             max_automatic_retries: payload.max_automatic_retries,
+            repair_budget: payload.repair_budget,
             endpoint: payload.endpoint,
             allow_localhost_http: payload.allow_localhost_http,
         })
@@ -246,6 +247,7 @@ pub struct OpenRunBody {
     pub token_budget: Option<u64>,
     pub context_token_budget: Option<u64>,
     pub max_automatic_retries: u8,
+    pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
 }

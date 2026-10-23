@@ -457,7 +457,7 @@ impl WorkflowRepository for SqliteKernel {
     }
 
     async fn latest_candidate(&self, run_id: &str) -> Result<Option<CandidateBody>, PortError> {
-        let row = sqlx::query("SELECT id, content FROM chapter_candidate WHERE run_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1")
+        let row = sqlx::query("SELECT id, content, content_sha256 FROM chapter_candidate WHERE run_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1")
             .bind(run_id)
             .fetch_optional(&self.pool)
             .await
@@ -467,6 +467,7 @@ impl WorkflowRepository for SqliteKernel {
             Some(row) => Ok(Some(CandidateBody {
                 id: row.try_get("id").map_err(map_sql)?,
                 content: row.try_get("content").map_err(map_sql)?,
+                content_sha256: row.try_get("content_sha256").map_err(map_sql)?,
             })),
         }
     }
@@ -697,6 +698,145 @@ impl WorkflowRepository for SqliteKernel {
             command_id,
             request_hash,
             "confirm_after_edit",
+            now_ms,
+            true,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(outcome)
+    }
+
+    async fn confirm_candidate_after_edit(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        base_candidate_id: &str,
+        base_content_sha256: &str,
+        content: &str,
+        new_candidate_id: &str,
+        artifact_id: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(existing) = lookup_command(&mut tx, command_id, request_hash).await? {
+            return Ok(existing);
+        }
+        let current = load_control(&mut tx, run_id)
+            .await?
+            .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
+        if current.control.status != novel_domain::RunStatus::WaitingApproval {
+            return Err(PortError::Conflict("这一步还没有到需要确认的时候。".into()));
+        }
+        if expected_version.is_some_and(|expected| expected != current.control.version) {
+            return Err(PortError::Conflict(
+                "创作进度已经变化，请刷新后重新确认。".into(),
+            ));
+        }
+        let gate = current
+            .control
+            .gate
+            .clone()
+            .ok_or_else(|| PortError::Integrity("缺少等待确认的内容。".into()))?;
+        if !gate
+            .artifact_types
+            .iter()
+            .any(|kind| kind == "chapter_approval")
+        {
+            return Err(PortError::Conflict(
+                "当前确认点不是章节候选，不能使用候选正文编辑确认。".into(),
+            ));
+        }
+        let latest: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT id, content_sha256, chapter_id FROM chapter_candidate WHERE run_id = ?
+             ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        let (latest_id, latest_sha, chapter_id) =
+            latest.ok_or_else(|| PortError::Conflict("没有可编辑的候选正文。".into()))?;
+        if latest_id != base_candidate_id || latest_sha != base_content_sha256 {
+            return Err(PortError::Conflict(
+                "候选正文已经变化或已被其他窗口修改，请刷新后重新编辑。".into(),
+            ));
+        }
+        if content.trim().is_empty() {
+            return Err(PortError::Integrity("修改后的候选正文不能为空。".into()));
+        }
+        let content_sha = sha256_hex(content.as_bytes());
+        sqlx::query(
+            "INSERT INTO chapter_candidate(id, chapter_id, run_id, step_id, content, content_sha256, interrupted, created_at, updated_at)
+             VALUES (?, ?, ?, 'author_edit', ?, ?, 0, ?, ?)",
+        )
+        .bind(new_candidate_id)
+        .bind(&chapter_id)
+        .bind(run_id)
+        .bind(content)
+        .bind(&content_sha)
+        .bind(now_ms)
+        .bind(now_ms)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        let seq = next_seq(&mut tx, run_id).await?;
+        insert_event(
+            &mut tx,
+            run_id,
+            seq,
+            "checkpoint_saved",
+            Some("author_edit"),
+            &serde_json::json!({ "candidateId": new_candidate_id }).to_string(),
+            now_ms,
+        )
+        .await?;
+        let artifact_type = gate
+            .artifact_types
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "chapter_approval".to_string());
+        let scope = sqlx::query_scalar::<_, String>(
+            "SELECT scope FROM workflow_artifact WHERE run_id = ? AND type = ?
+             ORDER BY version DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .bind(&artifact_type)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .unwrap_or_else(|| format!("chapter:{chapter_id}"));
+        crate::novels::insert_artifact(
+            &mut tx,
+            artifact_id,
+            &current.novel_id,
+            Some(run_id),
+            &artifact_type,
+            &scope,
+            "user_edited",
+            true,
+            &serde_json::json!({
+                "candidateId": new_candidate_id,
+                "baseCandidateId": base_candidate_id,
+                "authorEdited": true,
+            })
+            .to_string(),
+            &sha256_hex(content.as_bytes()),
+            now_ms,
+        )
+        .await?;
+        let outcome = transition_command(
+            &mut tx,
+            &current,
+            run_id,
+            ControlEvent::ResolveGate,
+            "gate_confirmed_after_edit_candidate",
+            Some(&gate.id),
+            &serde_json::json!({ "candidateId": new_candidate_id }).to_string(),
+            command_id,
+            request_hash,
+            "confirm_candidate_after_edit",
             now_ms,
             true,
         )

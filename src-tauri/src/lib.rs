@@ -210,6 +210,7 @@ pub fn run() {
 commands::run::reject_run,
             commands::run::regenerate_run,
             commands::run::confirm_after_edit_run,
+commands::run::confirm_candidate_after_edit_run,
             commands::run::cancel_run,
             commands::run::resume_run,
             commands::run::replay_run,

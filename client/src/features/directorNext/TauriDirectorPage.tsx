@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   approveRun,
   cancelRun,
+  confirmCandidateAfterEdit,
   regenerateRun,
   rejectRun,
   getActiveRun,
@@ -56,6 +57,22 @@ function pretty(value: string): string {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 }
 
+function candidateDiff(original: string, edited: string): Array<{ kind: "same" | "added" | "removed"; text: string }> {
+  const before = original.split("\n");
+  const after = edited.split("\n");
+  const out: Array<{ kind: "same" | "added" | "removed"; text: string }> = [];
+  const max = Math.max(before.length, after.length);
+  for (let index = 0; index < max; index += 1) {
+    if (before[index] === after[index]) {
+      if (before[index] !== undefined) out.push({ kind: "same", text: before[index] });
+    } else {
+      if (before[index] !== undefined) out.push({ kind: "removed", text: before[index] });
+      if (after[index] !== undefined) out.push({ kind: "added", text: after[index] });
+    }
+  }
+  return out;
+}
+
 export default function TauriDirectorPage() {
   const { novelId = "" } = useParams();
   const queryClient = useQueryClient();
@@ -64,6 +81,8 @@ export default function TauriDirectorPage() {
   const [liveText, setLiveText] = useState("");
   const [events, setEvents] = useState<GenerationEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingCandidate, setEditingCandidate] = useState(false);
+  const [candidateEdit, setCandidateEdit] = useState("");
   const mounted = useRef(true);
 
   useEffect(() => () => { mounted.current = false; }, []);
@@ -77,6 +96,22 @@ export default function TauriDirectorPage() {
   const detailQuery = useQuery<RunDetailView>({ queryKey: ["tauri-director", novelId, "detail", runId], queryFn: () => getRunDetail(novelId, runId), enabled: !!runId, refetchInterval: 3000 });
   const detail = detailQuery.data;
   const chapters = chaptersQuery.data ?? [];
+  const latestCandidate = detail?.latestCandidate ?? null;
+  const chapterApprovalGate = detail?.gate?.artifactTypes.includes("chapter_approval") ?? false;
+  const candidateEditKey = runId && latestCandidate ? `director:candidate-edit:${runId}:${latestCandidate.id}` : "";
+  useEffect(() => {
+    if (!editingCandidate || !latestCandidate) return;
+    const stored = candidateEditKey ? sessionStorage.getItem(candidateEditKey) : null;
+    setCandidateEdit(stored ?? latestCandidate.content);
+  }, [candidateEditKey, editingCandidate, latestCandidate?.id]);
+  useEffect(() => {
+    if (!editingCandidate || !candidateEditKey) return;
+    sessionStorage.setItem(candidateEditKey, candidateEdit);
+  }, [candidateEdit, candidateEditKey, editingCandidate]);
+  const candidateDiffLines = useMemo(
+    () => latestCandidate ? candidateDiff(latestCandidate.content, candidateEdit) : [],
+    [latestCandidate, candidateEdit],
+  );
   const model = modelQuery.data;
   const currentChapter = chapters.find(chapter => chapter.id === chapterId) ?? chapters[0];
 
@@ -171,6 +206,25 @@ export default function TauriDirectorPage() {
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "重新生成失败，请刷新后重试。"),
   });
+  const confirmEdit = useMutation({
+    mutationFn: () => {
+      if (!latestCandidate) throw new Error("没有可确认的候选正文。");
+      return confirmCandidateAfterEdit({
+        runId,
+        commandId: commandId("director-confirm-edit"),
+        expectedVersion: detail?.controlVersion,
+        baseCandidateId: latestCandidate.id,
+        baseContentSha256: latestCandidate.contentSha256,
+        content: candidateEdit,
+      });
+    },
+    onSuccess: async () => {
+      setEditingCandidate(false);
+      if (candidateEditKey) sessionStorage.removeItem(candidateEditKey);
+      await queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] });
+    },
+    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "确认修改后候选失败，请刷新后重试。"),
+  });
   const cancel = useMutation({
     mutationFn: () => cancelRun({ runId, commandId: commandId("director-cancel") }),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
@@ -237,6 +291,7 @@ export default function TauriDirectorPage() {
                 {detail?.legalActions?.includes("confirm") && gate ? <Button data-testid="director-approve-button" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
                 {detail?.legalActions?.includes("reject") ? <Button data-testid="director-reject-button" variant="outline" disabled={reject.isPending} onClick={() => reject.mutate()}>{reject.isPending ? "拒绝中…" : "拒绝这个候选"}</Button> : null}
                 {detail?.legalActions?.includes("regenerate") ? <Button data-testid="director-regenerate-button" variant="outline" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>{regenerate.isPending ? "重新生成中…" : "重新生成候选"}</Button> : null}
+                {chapterApprovalGate && latestCandidate ? <Button data-testid="director-edit-candidate-button" variant="outline" onClick={() => setEditingCandidate(true)}>{editingCandidate ? "正在编辑候选" : "编辑候选正文"}</Button> : null}
                 {detail?.legalActions?.includes("resume") && detail.latestCandidate ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
                 {detail?.legalActions?.includes("cancel") ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
@@ -271,6 +326,25 @@ export default function TauriDirectorPage() {
               </details>)}
             </section> : null}
 
+            {editingCandidate && latestCandidate ? <section data-testid="director-candidate-editor" className="space-y-3 rounded-md bg-muted/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">编辑候选正文</h2>
+                <span className="text-xs text-muted-foreground">只修改候选，不会直接覆盖正式章节</span>
+              </div>
+              <textarea
+                data-testid="director-candidate-edit-input"
+                className="min-h-56 w-full rounded-md border border-input bg-background p-3 text-sm leading-6"
+                value={candidateEdit}
+                onChange={(event) => setCandidateEdit(event.target.value)}
+              />
+              <div className="max-h-56 overflow-auto rounded-md bg-background/60 p-3 text-xs">
+                {candidateDiffLines.map((line, index) => <div key={`${line.kind}-${index}`} className={line.kind === "added" ? "text-primary" : line.kind === "removed" ? "text-destructive line-through" : "text-muted-foreground"}>{line.kind === "added" ? "+ " : line.kind === "removed" ? "- " : "  "}{line.text}</div>)}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button data-testid="director-confirm-candidate-edit" disabled={confirmEdit.isPending || !candidateEdit.trim() || candidateEdit === latestCandidate.content} onClick={() => confirmEdit.mutate()}>{confirmEdit.isPending ? "确认中…" : "确认修改后候选"}</Button>
+                <Button data-testid="director-cancel-candidate-edit" variant="outline" onClick={() => { setCandidateEdit(latestCandidate.content); setEditingCandidate(false); if (candidateEditKey) sessionStorage.removeItem(candidateEditKey); }}>恢复原候选</Button>
+              </div>
+            </section> : null}
             <section className="rounded-md bg-muted/20 p-4">
               <h2 className="text-sm font-semibold">候选正文</h2>
               <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm leading-6">{liveText || detail?.latestCandidate?.content || "尚未产生候选正文。"}</pre>

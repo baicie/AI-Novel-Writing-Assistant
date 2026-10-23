@@ -39,6 +39,7 @@ impl RunUseCases for DirectorService {
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 3,
+            repair_budget: None,
             endpoint: String::new(),
             allow_localhost_http: false,
         };
@@ -135,6 +136,7 @@ mod tests {
             token_budget: None,
             context_token_budget: None,
             max_automatic_retries: 3,
+            repair_budget: None,
             endpoint: String::new(),
             allow_localhost_http: false,
         };

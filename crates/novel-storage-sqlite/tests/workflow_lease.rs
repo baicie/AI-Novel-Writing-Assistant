@@ -20,6 +20,7 @@ fn contract() -> RunContract {
         token_budget: Some(100),
         context_token_budget: 24_000,
         max_automatic_retries: 0,
+        repair_budget: 0,
         endpoint: "https://api.example.com/v1/chat/completions".into(),
         allow_localhost_http: false,
     }

@@ -11,6 +11,7 @@
     "test:editor": "wdio run wdio.conf.mjs --spec specs/editor.spec.mjs",
     "test:editor-restart": "wdio run wdio.conf.mjs --spec specs/editor-restart.spec.mjs",
     "test:editor-crash": "wdio run wdio.conf.mjs --spec specs/editor-crash.spec.mjs",
-    "test:editor-crash-restart": "wdio run wdio.conf.mjs --spec specs/editor-crash-restart.spec.mjs"
+    "test:editor-crash-restart": "wdio run wdio.conf.mjs --spec specs/editor-crash-restart.spec.mjs",
+    "test:confirm-edit-restart": "wdio run wdio.conf.mjs --spec specs/confirm-edit-restart.spec.mjs"
   }
 }

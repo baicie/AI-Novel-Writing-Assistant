@@ -21,6 +21,7 @@ pub struct OpenRunRequest {
     pub token_budget: Option<u64>,
     pub context_token_budget: Option<u64>,
     pub max_automatic_retries: u8,
+    pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
 }
@@ -97,6 +98,7 @@ pub async fn open_run(
             token_budget: request.token_budget,
             context_token_budget: request.context_token_budget,
             max_automatic_retries: request.max_automatic_retries,
+            repair_budget: request.repair_budget,
             endpoint: request.endpoint,
             allow_localhost_http: request.allow_localhost_http,
         })
@@ -250,5 +252,29 @@ pub async fn confirm_after_edit_run(
         .runtime
         .director
         .confirm_after_edit(&command_id, &run_id, expected_version, &payload_json)
+        .await
+}
+
+#[tauri::command]
+pub async fn confirm_candidate_after_edit_run(
+    state: State<'_, AppState>,
+    command_id: String,
+    run_id: String,
+    expected_version: Option<i64>,
+    base_candidate_id: String,
+    base_content_sha256: String,
+    content: String,
+) -> Result<CommandOutcome, AppError> {
+    state
+        .runtime
+        .director
+        .confirm_candidate_after_edit(
+            &command_id,
+            &run_id,
+            expected_version,
+            &base_candidate_id,
+            &base_content_sha256,
+            &content,
+        )
         .await
 }

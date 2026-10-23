@@ -87,3 +87,10 @@
 - P9.2 repair timeout、SSE 中断、取消后迟到、进程崩溃恢复未专门 E2E；residual pause 后 tick 可能返回一次 Conflict。
 - P9.3 Confirm After Edit 编辑 UI、Regenerate 的过期 Gate/双窗口/断线竞态 E2E 未完成。
 - 非 Mock 的真实 Provider、真实写作质量与完整旧版功能未验收。
+
+## B-013 P10 剩余
+
+- P10.1 repair timeout/SSE EOF/cancel-after-repair、repair candidate 落库后进程崩溃、re-review 后崩溃、Lease 过期 repair 专项测试未完成。
+- P10.2 accepted quality debt、issue 跨审校可靠关联、完整 Context Broker/RAG、promptText 导出审计未完成。
+- P10.3 双窗口同时编辑、编辑中取消、保存候选失败、正式章节被外部更新未自动化。
+- 真实 Provider/计费/真实用户库未验收。

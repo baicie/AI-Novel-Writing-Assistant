@@ -150,6 +150,7 @@ export interface RunGateView {
 export interface RunCandidateView {
   id: string;
   content: string;
+  contentSha256: string;
 }
 
 export interface RunUsageView {
@@ -551,6 +552,17 @@ export function regenerateRun(input: { runId: string; commandId: string; expecte
 
 export function confirmAfterEditRun(input: { runId: string; commandId: string; expectedVersion?: number; payloadJson: string }): Promise<CommandOutcome> {
   return invoke("confirm_after_edit_run", input);
+}
+
+export function confirmCandidateAfterEdit(input: {
+  runId: string;
+  commandId: string;
+  expectedVersion?: number;
+  baseCandidateId: string;
+  baseContentSha256: string;
+  content: string;
+}): Promise<CommandOutcome> {
+  return invoke("confirm_candidate_after_edit_run", input);
 }
 
 export function cancelRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {

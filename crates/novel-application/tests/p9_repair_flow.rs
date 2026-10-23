@@ -41,6 +41,7 @@ fn issues() -> String {
 async fn run_with(
     outputs: Vec<(&'static str, String)>,
     max_retries: u8,
+    repair_budget: Option<u8>,
 ) -> (Arc<SqliteKernel>, String, String, Arc<ScriptedLlm>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.keep().join("repair.sqlite");
@@ -79,6 +80,7 @@ async fn run_with(
             token_budget: Some(512),
             context_token_budget: Some(24_000),
             max_automatic_retries: max_retries,
+            repair_budget,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -87,19 +89,7 @@ async fn run_with(
     let mut approvals = 0;
     let mut status = "queued".to_string();
     for tick in 0..60 {
-        let tick_result = runtime.worker.tick().await;
-        if let Err(error) = tick_result {
-            let runs = runtime
-                .director
-                .list_runs(&novel.id)
-                .await
-                .unwrap_or_default();
-            if runs.iter().any(|run| run.state == "paused") {
-                break;
-            }
-            panic!("unexpected worker error: {error:?}");
-        }
-        match tick_result.unwrap() {
+        match runtime.worker.tick().await.unwrap() {
             TickOutcome::Advanced {
                 status: next,
                 run_id,
@@ -147,6 +137,7 @@ async fn issues_are_repair_planned_re_reviewed_and_committed_only_after_clean_re
             ),
         ],
         1,
+        Some(1),
     )
     .await;
     let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel_id, &chapter_id)
@@ -202,9 +193,11 @@ async fn residual_issues_after_repair_stop_at_safety_without_commit() {
             ("STEP:chapter_list", chapters()),
             ("STEP:consistency_review", issues()),
             ("STEP:chapter_repair", "仍有问题的修复候选".into()),
+            ("STEP:consistency_review", issues()),
             ("STEP:chapter_draft", "原始候选正文".into()),
         ],
         1,
+        Some(1),
     )
     .await;
     let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel_id, &chapter_id)
@@ -226,4 +219,39 @@ async fn residual_issues_after_repair_stop_at_safety_without_commit() {
         .await
         .unwrap();
     assert!(debt.iter().any(|item| item.status == "open"));
+}
+
+#[tokio::test]
+async fn remote_retry_budget_does_not_authorize_quality_repair() {
+    let (kernel, novel_id, chapter_id, llm) = run_with(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "不应被调用的修复候选".into()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        1,
+        None,
+    )
+    .await;
+    let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    assert!(saved.content.is_empty());
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_repair"))
+    );
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel_id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "repair_notes")
+    );
 }

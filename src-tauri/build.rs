@@ -33,6 +33,7 @@ fn main() {
         "reject_run",
         "regenerate_run",
         "confirm_after_edit_run",
+        "confirm_candidate_after_edit_run",
         "cancel_run",
         "cancel_generation",
         "smoke_channel_message",

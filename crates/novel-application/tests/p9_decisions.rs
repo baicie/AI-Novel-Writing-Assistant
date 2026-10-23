@@ -67,6 +67,7 @@ async fn reject_regenerates_and_confirm_after_edit_protects_author_artifact() {
             token_budget: Some(512),
             context_token_budget: Some(24_000),
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })

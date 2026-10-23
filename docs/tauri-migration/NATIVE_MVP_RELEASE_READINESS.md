@@ -142,3 +142,11 @@ pnpm --filter @ai-novel/client test
 - P9.2 Review/Repair：IMPLEMENTED / PARTIAL（质量债、单次有界修复、re-review、residual safety；超时/崩溃/取消 E2E 未完成）。
 - P9.3 Decisions：backend IMPLEMENTED，Native Reject/Regenerate E2E PASS，Confirm After Edit 编辑 UI 未完成。
 - 最终质量：231 Rust tests、55 HTTP、186 frontend、3 Director WDIO、Editor SIGKILL、clean all-targets、生产隔离 audit 全部通过。
+
+## P10 修复可靠性
+
+- G2 预算分离 VERIFIED：Plan v3 + 独立 `repair_budget`。
+- G4 Confirm After Edit Native UI VERIFIED（4 Director E2E + 重启）。
+- G1 repair 超时/SSE/取消/跨进程恢复仍 PARTIAL。
+- G3 Quality Debt/Context 仍 PARTIAL（accepted/RAG/完整 Broker 未完成）。
+- 生产包审计 PASS，无测试插件/假 Key/WebDriver。

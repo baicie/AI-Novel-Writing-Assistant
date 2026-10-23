@@ -106,6 +106,7 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
             token_budget: Some(512),
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -276,6 +277,7 @@ async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
             token_budget: Some(512),
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -375,6 +377,7 @@ async fn consistency_issues_fail_closed_without_fake_repair_or_commit() {
             token_budget: Some(512),
             context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })

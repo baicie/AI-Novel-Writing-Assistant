@@ -247,6 +247,7 @@ pub struct RunGateView {
 pub struct RunCandidateView {
     pub id: String,
     pub content: String,
+    pub content_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +346,8 @@ pub struct RunContract {
     #[serde(default = "crate::context::default_context_token_budget")]
     pub context_token_budget: u64,
     pub max_automatic_retries: u8,
+    #[serde(default)]
+    pub repair_budget: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,
 }

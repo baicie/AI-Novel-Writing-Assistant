@@ -117,3 +117,32 @@ describe("Biz Novel Studio Native Director", () => {
     expect(castArtifacts.some(artifact => artifact.status === "stale")).toBe(true);
     await tauriInvoke("cancel_run", { commandId: `wdio-decision-cancel-${Date.now()}`, runId });
   });
+
+  it("edits a candidate, confirms after edit, commits it, and preserves the original candidate", async () => {
+    const fixture = await createFixture("WDIO 候选编辑书");
+    await openDirector(fixture.novelId);
+    await (await $("[data-testid=director-start-button]")).click();
+    const runId = await readRunId();
+    await confirmOneGate(fixture.novelId, runId, "林动");
+    await confirmOneGate(fixture.novelId, runId, "山门卷");
+    await (await $("[data-testid=director-approve-button]")).waitForDisplayed({ timeout: 45_000 });
+    await (await $("[data-testid=director-edit-candidate-button]")).click();
+    const input = await $("[data-testid=director-candidate-edit-input]");
+    await input.waitForDisplayed({ timeout: 20_000 });
+    const edited = "WDIO 作者修改后的候选正文：雨停之后才入山。";
+    await input.clearValue();
+    await input.addValue(edited);
+    await (await $("[data-testid=director-confirm-candidate-edit]")).click();
+    await browser.waitUntil(async () => {
+      const current = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+      return current.status === "succeeded";
+    }, { timeout: 45_000, timeoutMsg: "author-edited candidate did not commit" });
+    const chapter = await tauriInvoke("get_chapter", { novelId: fixture.novelId, chapterId: fixture.chapterId });
+    expect(chapter.content).toBe(edited);
+    const detail = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+    const approval = detail.artifacts.filter(artifact => artifact.artifactType === "chapter_approval");
+    expect(approval.some(artifact => artifact.status === "user_edited")).toBe(true);
+    expect(detail.latestCandidate.content).toBe(edited);
+    expect(chapter.officialVersion).toBeGreaterThanOrEqual(1);
+    fs.writeFileSync(`${dataDir}/confirm-edit-state.json`, JSON.stringify({ ...fixture, runId, edited }));
+  });

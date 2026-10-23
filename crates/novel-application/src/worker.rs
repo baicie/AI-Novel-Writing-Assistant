@@ -471,12 +471,17 @@ impl Worker {
                 )
                 .await;
         }
-        if claimed.contract.max_automatic_retries == 0 {
+        let repair_budget = match claimed.contract.plan_version.as_str() {
+            novel_workflow::PRODUCTION_PLAN_VERSION => claimed.contract.repair_budget,
+            novel_workflow::PRODUCTION_PLAN_VERSION_V2 => claimed.contract.max_automatic_retries,
+            _ => 0,
+        };
+        if repair_budget == 0 {
             return self
                 .pause(
                     claimed,
                     StopSignalKind::Safety,
-                    "一致性审校发现了问题，但冻结的预算不允许自动修复。已停在人工审查点，正文不会被自动提升。",
+                    "一致性审校发现了问题，但冻结的修复预算为 0。已停在人工审查点，正文不会被自动提升。",
                     Some("bounded_repair".into()),
                 )
                 .await;
@@ -690,9 +695,8 @@ impl Worker {
                 control,
             };
             return self
-                .pause(
+                .pause_safety(
                     &fresh,
-                    StopSignalKind::Safety,
                     "有界修复后仍有一致性问题，已停在上限并保留候选，等待人工决策。",
                     Some("bounded_repair".into()),
                 )
@@ -859,6 +863,39 @@ impl Worker {
             attempt_id,
         )
         .await
+    }
+
+    /// Persist a safety pause exactly once. A concurrent/previous pause may have
+    /// already won the control CAS; in that case return the paused outcome instead
+    /// of surfacing a misleading worker error. Other conflicts still propagate.
+    async fn pause_safety(
+        &self,
+        claimed: &ClaimedRun,
+        reason: &str,
+        step_id: Option<String>,
+    ) -> Result<TickOutcome, AppError> {
+        match self
+            .pause(claimed, StopSignalKind::Safety, reason, step_id)
+            .await
+        {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => {
+                let control = self.runs.run_control(&claimed.run_id).await?;
+                if control.status == novel_domain::RunStatus::Paused
+                    && control
+                        .pause
+                        .as_ref()
+                        .is_some_and(|pause| pause.kind == novel_domain::PauseKind::Safety)
+                {
+                    Ok(TickOutcome::Advanced {
+                        run_id: claimed.run_id.clone(),
+                        status: "paused".into(),
+                    })
+                } else {
+                    Err(error)
+                }
+            }
+        }
     }
 
     async fn pause(
@@ -1467,6 +1504,14 @@ mod structured_validation_tests {
     }
 
     #[test]
+    fn duplicate_review_ids_must_not_merge_different_issues() {
+        let exact = r#"{"issues":[{"issueId":"i1","type":"timeline","severity":"high","evidence":"e","suggestion":"s"},{"issueId":"i1","type":"timeline","severity":"high","evidence":"e","suggestion":"s"}]}"#;
+        let normalized = validate_structured_output("consistency_review", exact).unwrap();
+        assert!(normalized.contains("\"issues\":1"));
+        let conflicting = r#"{"issues":[{"issueId":"i1","type":"timeline","severity":"high","evidence":"e","suggestion":"s"},{"issueId":"i1","type":"character","severity":"high","evidence":"e2","suggestion":"s2"}]}"#;
+        assert!(validate_structured_output("consistency_review", conflicting).is_err());
+    }
+
     fn consistency_empty_is_clean_but_malformed_is_not_clean() {
         let clean = validate_structured_output("consistency_review", r#"{"issues":[]}"#).unwrap();
         assert!(clean.contains("\"issues\":0"));
