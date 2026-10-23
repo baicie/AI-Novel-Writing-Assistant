@@ -53,9 +53,10 @@ cargo test -p novel-application --test recovery
 - `bounded_repair`：已改为 fail-closed 安全暂停；没有真实自动修复循环/质量债修复。
 - `approval`：Gate 产物仍是 plumbing payload；真正审批由 storage approve 完成。
 - P8 UI：新增 Tauri MVP 页面/历史页；真实 UI 启动 Run、审批、取消、恢复的自动化点击未完成；旧 Workspace/角色/质量详情未迁移。旧 API 路径在桌面模式下返回 NOT_MIGRATED。
+- P8.4.1：Tauri `llm_provider()` 真实 OpenAI-compatible Provider 装配测试、真实 HTTP/SSE 流取消测试、Safety 暂停禁止普通 resume、取消后不提交正文。
 - World/State/History/Knowledge Context：未进入 context payload。
 - 旧版 User Edited / Replan / Reject / Regenerate 语义未完成。
 
 ## 真实 Provider 边界
 
-本轮没有调用真实付费模型。`ScriptedLlm` 是确定性测试 Provider，不是生产 Provider；所有 P8 测试结论只证明合同和数据库/工作流行为。
+本轮没有调用真实付费模型。`ScriptedLlm` 用于结构化合同/数据库/工作流测试；`runtime_provider_http` 与 `src-tauri/tests/runtime_provider` 使用真实 `OpenAiCompatibleProvider` + 本地 Mock HTTP/SSE Server，验证了 Provider/Runtime/取消网络路径，但仍不是真实付费 Provider 验收。
