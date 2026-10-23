@@ -1,6 +1,6 @@
 # P11 Acceptance
 
-基线：`3a6622ec`。最终代码/测试 HEAD：`c1c8dc4e`。
+基线：`3a6622ec`。最终代码/测试 HEAD：`bc4ad2cb`。
 
 ## 状态
 
@@ -70,7 +70,7 @@ cargo test -p novel-application --test p11_repair_faults
 ## 回归
 
 - Rust workspace：249 passed
-- 干净 Worktree all-targets（HEAD c1c8dc4e）：PASS
+- 干净 Worktree all-targets（HEAD bc4ad2cb）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
 - typecheck：PASS
@@ -186,4 +186,4 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - Local RAG / Chinese tokenizer / Context Policy baseline：**PARTIAL**
 - 中文孤立 CJK token 已修复；未来章节/Candidate 排除 benchmark 通过。
 - Long-form 10/50/100 章质量 benchmark：**NOT_STARTED**
-- 生产 `.app` 20.40 MiB。
+- 生产 `.app` 20.42 MiB。
