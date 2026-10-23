@@ -1,6 +1,6 @@
 # P11 Acceptance
 
-基线：`3a6622ec`。代码/测试提交见最终报告。
+基线：`3a6622ec`。最终代码/测试 HEAD：`b57f912a`。
 
 ## 状态
 
@@ -60,7 +60,7 @@ cargo test -p novel-application --test p11_repair_faults
 ## 回归
 
 - Rust workspace：237 passed
-- 干净 Worktree all-targets（HEAD 065f7fa1）：PASS
+- 干净 Worktree all-targets（HEAD b57f912a）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
 - typecheck：PASS
@@ -68,6 +68,6 @@ cargo test -p novel-application --test p11_repair_faults
 - fmt：PASS
 - clippy：PASS（既有 warning）
 - Tauri production bundle audit：PASS
-- 生产 `.app`：20.08 MiB，DMG 9.1 MiB
+- 生产 `.app`：20.19 MiB，DMG 9.1 MiB
 
 Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更）。
