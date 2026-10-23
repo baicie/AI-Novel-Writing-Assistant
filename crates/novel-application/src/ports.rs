@@ -591,6 +591,17 @@ pub trait WorkflowRepository: Send + Sync {
         now_ms: i64,
     ) -> Result<(), PortError>;
     async fn latest_candidate(&self, run_id: &str) -> Result<Option<CandidateBody>, PortError>;
+    async fn previous_candidate_id(
+        &self,
+        run_id: &str,
+        before_id: &str,
+    ) -> Result<Option<String>, PortError>;
+    async fn has_invocation(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        request_id: &str,
+    ) -> Result<bool, PortError>;
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError>;
     async fn approve(
         &self,

@@ -27,7 +27,7 @@ fn issues() -> String {
     serde_json::json!({"issues":[{"type":"timeline","severity":"high","evidence":"时间线冲突","suggestion":"修正时间"}]}).to_string()
 }
 
-async fn start_server() -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+async fn start_server(hold_repair: bool) -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let reviews = Arc::new(AtomicUsize::new(0));
@@ -82,6 +82,11 @@ async fn start_server() -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
                     }
                 } else if body.contains("STEP:chapter_repair") {
                     repairs.fetch_add(1, Ordering::SeqCst);
+                    if hold_repair {
+                        let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n").await;
+                        tokio::time::sleep(Duration::from_secs(120)).await;
+                        return;
+                    }
                     "跨进程修复候选正文".to_string()
                 } else {
                     "原始候选正文".to_string()
@@ -168,7 +173,7 @@ fn wait_for(path: &std::path::Path, timeout: Duration) -> bool {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn repair_candidate_checkpoint_survives_real_sigkill_and_does_not_replay() {
-    let (endpoint, reviews, repairs) = start_server().await;
+    let (endpoint, reviews, repairs) = start_server(false).await;
     let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("recovery.sqlite");
     let (novel_id, run_id) = seed(&db, &endpoint).await;
@@ -254,9 +259,13 @@ async fn repair_candidate_checkpoint_survives_real_sigkill_and_does_not_replay()
     };
     if !recovered {
         let _ = recovery.kill();
-        panic!("recovery worker did not exit after HoldInterrupted");
+        panic!("recovery worker did not exit after safe resume");
     }
-    let _ = recovery.wait();
+    let recovery_status = recovery.wait().unwrap();
+    assert!(
+        recovery_status.success(),
+        "recovery worker failed: {recovery_status:?}"
+    );
     assert_eq!(
         repairs.load(Ordering::SeqCst),
         before_repairs,
@@ -264,11 +273,15 @@ async fn repair_candidate_checkpoint_survives_real_sigkill_and_does_not_replay()
     );
     assert_eq!(
         reviews.load(Ordering::SeqCst),
-        before_reviews,
-        "re-review ran before recovery decision"
+        before_reviews + 1,
+        "safe resume must run re-review exactly once"
     );
     let control = kernel.run_control(&run_id).await.unwrap();
-    assert_eq!(control.status, novel_domain::RunStatus::Paused);
+    assert_eq!(control.status, novel_domain::RunStatus::WaitingApproval);
+    assert_eq!(
+        control.gate.as_ref().map(|gate| gate.id.as_str()),
+        Some("approval")
+    );
     let candidates_after: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
             .bind(&run_id)
@@ -293,6 +306,44 @@ async fn repair_candidate_checkpoint_survives_real_sigkill_and_does_not_replay()
             .await
             .unwrap();
     assert!(debt > 0, "quality debt must survive recovery");
+    let approvals: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_approval'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(approvals, 1, "approval gate must be created exactly once");
+    // Second recovery tick must be idempotent while waiting for the author.
+    let mut again = Command::new(&binary)
+        .env("P11_DB", &db)
+        .env("P11_ENDPOINT", &endpoint)
+        .env("P11_NOVEL", &novel_id)
+        .env("P11_OWNER", "worker-a")
+        .env("P11_AUTO_APPROVE", "0")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let again_status = again.wait().unwrap();
+    assert!(again_status.success());
+    assert_eq!(repairs.load(Ordering::SeqCst), before_repairs);
+    assert_eq!(reviews.load(Ordering::SeqCst), before_reviews + 1);
+    let approvals_again: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_approval'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(approvals_again, 1);
+    let candidate_after_again: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(candidate_after_again, 2);
     println!(
         "P11 recovery status={:?} repairs_after={} reviews_after={} candidates={} commits={} revisions={} debt={}",
         control.status,
@@ -304,4 +355,126 @@ async fn repair_candidate_checkpoint_survives_real_sigkill_and_does_not_replay()
         debt
     );
     let _ = child.id();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_started_repair_is_not_replayed_and_stays_unknown() {
+    let (endpoint, reviews, repairs) = start_server(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("remote-started.sqlite");
+    let (novel_id, run_id) = seed(&db, &endpoint).await;
+    let binary = std::env::var("CARGO_BIN_EXE_recovery_worker").expect("harness binary env");
+    let mut child = Command::new(&binary)
+        .env("P11_DB", &db)
+        .env("P11_ENDPOINT", &endpoint)
+        .env("P11_NOVEL", &novel_id)
+        .env("P11_OWNER", "worker-a")
+        .env("P11_AUTO_APPROVE", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let start = Instant::now();
+    while repairs.load(Ordering::SeqCst) == 0 {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "repair request did not start (pid {pid})"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let kernel = SqliteKernel::open(&db).await.unwrap();
+    let attempt_phase: String = sqlx::query_scalar("SELECT phase FROM workflow_step_attempt WHERE run_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(&run_id).fetch_one(kernel.pool()).await.unwrap();
+    assert_eq!(attempt_phase, "remote_started");
+    let candidates_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(candidates_before, 1);
+    let request_id: Option<String> = sqlx::query_scalar("SELECT request_id FROM workflow_step_attempt WHERE run_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(&run_id).fetch_one(kernel.pool()).await.unwrap();
+    assert!(request_id.is_some());
+    let before_repairs = repairs.load(Ordering::SeqCst);
+    let before_reviews = reviews.load(Ordering::SeqCst);
+
+    child.kill().unwrap();
+    let status = child.wait().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(9));
+    }
+    println!("P11B child_pid={pid} sigkill_status={status:?} repair_requests={before_repairs}");
+
+    let mut recovery = Command::new(&binary)
+        .env("P11_DB", &db)
+        .env("P11_ENDPOINT", &endpoint)
+        .env("P11_NOVEL", &novel_id)
+        .env("P11_OWNER", "worker-a")
+        .env("P11_AUTO_APPROVE", "0")
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let exit = recovery.wait().unwrap();
+    assert!(exit.success(), "recovery worker failed: {exit:?}");
+    assert_eq!(
+        repairs.load(Ordering::SeqCst),
+        before_repairs,
+        "unknown remote repair was replayed"
+    );
+    assert_eq!(
+        reviews.load(Ordering::SeqCst),
+        before_reviews,
+        "unknown remote repair entered re-review"
+    );
+    let control = kernel.run_control(&run_id).await.unwrap();
+    assert_eq!(control.status, novel_domain::RunStatus::Paused);
+    let candidates_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_candidate WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(candidates_after, 1);
+    let invocations: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM llm_invocation WHERE run_id = ? AND step_id = 'bounded_repair'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        invocations, 0,
+        "unknown usage must not be recorded as a fake zero"
+    );
+    let commits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_artifact WHERE run_id = ? AND type = 'chapter_commit'",
+    )
+    .bind(&run_id)
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(commits, 0);
+    let revisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = (SELECT chapter_id FROM workflow_run WHERE id = ?)").bind(&run_id).fetch_one(kernel.pool()).await.unwrap();
+    assert_eq!(revisions, 0);
+    let debt: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_quality_debt WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert!(debt > 0);
+    println!(
+        "P11B recovery status={:?} repairs_after={} reviews_after={} candidates={} invocations={} commits={} revisions={} debt={}",
+        control.status,
+        repairs.load(Ordering::SeqCst),
+        reviews.load(Ordering::SeqCst),
+        candidates_after,
+        invocations,
+        commits,
+        revisions,
+        debt
+    );
 }

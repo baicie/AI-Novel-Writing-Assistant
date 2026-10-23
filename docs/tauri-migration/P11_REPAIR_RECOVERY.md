@@ -122,3 +122,102 @@ Feature 隔离：
 - `test-harness` 仅在显式启用时构建 `recovery_worker`。
 - 普通构建不包含 test-only binary。
 - Worker 的 checkpoint hook 默认 no-op。
+
+
+## P11.1-H1 Repair Candidate Safe Resume
+
+### Attempt 状态转换
+
+| 阶段 | 持久化事实 | 恢复动作 |
+| --- | --- | --- |
+| 尚未开始远端请求 | Attempt `started`，无 Request ID | 可复用本地准备状态 |
+| RemoteStarted，结果未知 | Attempt `remote_started` + request_id | **HoldInterrupted / Paused，不重发** |
+| Provider 返回但未持久化 | Attempt `remote_started` | 同上，按未知处理 |
+| Repair Candidate 已保存 | Attempt `candidate_saved` + candidate_id + request_id + Invocation | v3 且校验通过：安全续跑；否则暂停 |
+| Repair Step 已确认 | Attempt `committed` + repair_notes | 按 Plan 继续 |
+| Re-review 已开始 | Re-review Attempt `remote_started` | HoldInterrupted |
+| Re-review 已完成 | 新 Review Artifact | 按 Plan 继续 |
+| Approval 已开启 | Control Gate | 等待作者确认，不再调用 HTTP |
+
+**不能仅凭 Candidate 存在推断后续事实完整。** 只有 `candidate_saved` + Invocation + candidate/hash + 当前 Plan 全部匹配才续跑。
+
+### 安全续跑校验
+
+`try_resume_repair_candidate` 要求：
+
+- Plan 为 `novel-production-v3`
+- 冻结 `repair_budget > 0`
+- latest Attempt：
+  - step_id = `bounded_repair`
+  - phase = `candidate_saved`
+  - candidate_id / request_id 存在
+- Control 当前 cursor 仍允许 `bounded_repair`
+- latest Candidate 就是 Attempt 绑定的 Candidate
+- Candidate 内容 SHA-256 与持久化 hash 一致
+- `llm_invocation` 存在且 request_id/step_id 精确匹配
+- 同一 scope 不存在已完成的 `repair_notes`
+- 存在原 Draft Candidate，用于 repair_notes 审计
+- Claim 已获得 Lease，Run 未被 Cancel
+- 无更新 Attempt（latest 即为该 Attempt）
+
+满足后：
+
+- 不调用 Repair Provider
+- 不新建 Repair Candidate
+- 不重新消费 repair budget
+- 用既有 Attempt 完成 Repair Step（写 repair_notes）
+- 只发起一次 Re-review
+- 进入 Approval Gate 后停止，不自动 Commit
+
+RemoteStarted / 旧 Plan / 校验失败：保持 HoldInterrupted 或 DataIntegrity 暂停。
+
+### H1 跨进程测试
+
+命令：
+
+```bash
+cargo test -p novel-storage-sqlite --features test-harness \
+  --test p11_recovery_process -- --nocapture
+```
+
+结果：
+
+```text
+Case A: child_pid=7090 sigkill_status=9 repairs=1 reviews=1
+        recovery status=WaitingApproval repairs_after=1 reviews_after=2 candidates=2 commits=0 revisions=0 debt=1
+
+Case B: child_pid=7091 sigkill_status=9 repair_requests=1
+        recovery status=Paused repairs_after=1 reviews_after=1 candidates=1 invocations=0 commits=0 revisions=0 debt=1
+```
+
+Case A：
+
+- Repair Candidate 已保存后 SIGKILL。
+- 新进程安全续跑。
+- Repair HTTP：1 → 1。
+- Re-review HTTP：1 → 2（仅一次新增）。
+- Candidate：2。
+- Repair Attempt：1。
+- Approval Artifact：1。
+- Chapter Commit：0。
+- Chapter Revision：0。
+- Quality Debt：1，保持 open。
+- Run：WaitingApproval。
+- 第二次恢复 tick：请求数、Candidate、Approval 均不变。
+
+Case B：
+
+- Repair 请求发出后 SIGKILL，结果未知。
+- 不重发 Repair。
+- 不生成 Repair Candidate。
+- 不生成 Invocation（不伪造 0 usage）。
+- 不进入 Re-review。
+- Run Paused（HoldInterrupted）。
+- Request ID 保留在 Attempt 中。
+- 无 Commit/Revision。
+
+### 旧 Plan
+
+- v1：无自动 repair，安全暂停。
+- v2：沿用 frozen legacy 语义，CandidateSaved 不进入 v3 安全续跑。
+- v3：启用本恢复语义。

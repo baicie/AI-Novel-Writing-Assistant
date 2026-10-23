@@ -168,3 +168,9 @@ pnpm --filter @ai-novel/client test
 - Candidate Journal writer identity 改为窗口级 sessionStorage。
 - Discovery 按 novel + run 列出旧草稿，用户选择恢复；旧 Gate 草稿保留。
 - SQLite 多 writer 隔离通过；Native 双窗口仍 PARTIAL。
+
+## P11.1-H1
+
+- Repair Candidate + Invocation + Attempt 完整时，新进程可安全续跑；Repair 请求不重发。
+- RemoteStarted 未知结果保持暂停，不伪造成功。
+- 重复恢复幂等。

@@ -136,3 +136,12 @@ test:candidate-journal-restart  1 passing
 - 嵌入式 WebDriver 当前只提供单窗口控制，未建立真实双 Window 同时操作 E2E。
 - 双窗口数据合同由 SQLite 集成测试验证；Native 双窗口标记 PARTIAL。
 - Gate 变化 UI 冲突 banner 仅通过草稿列表文案/禁用确认表达，未做独立视觉验收。
+
+
+## 窗口 writer identity 审查
+
+- 当前 Tauri 只创建 `main` 窗口，没有第二个窗口创建路径。
+- `sessionStorage` 是 WebView 窗口级存储；刷新保留，新 App 进程不继承旧进程身份。
+- 新进程通过 Discovery 发现旧 writer 草稿，不依赖旧 sessionStorage。
+- 没有发现窗口创建时继承已有 writer ID 的可复现 P0/P1 缺陷。
+- 真实双窗口自动化仍为 PARTIAL；数据合同由 SQLite 测试覆盖。

@@ -89,3 +89,31 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - Discovery：novel + run 范围列出全部草稿
 - Native SIGKILL 新进程恢复：PASS
 - Native 双窗口同时操作：PARTIAL（嵌入式 WebDriver 单窗口）
+
+## P11.1-H1
+
+**VERIFIED（仅 v3 Repair Candidate 已保存安全续跑）**
+
+- Repair Candidate + Invocation + Attempt 校验后复用
+- Repair HTTP 1 → 1
+- Re-review 仅新增 1 次
+- Approval 1
+- Commit/Revision 0
+- RemoteStarted 未知结果保持 Paused，不重发
+- 重复恢复幂等
+- 旧 Plan 不走新语义
+
+## P11.1-H1 最终证据
+
+- Case A SIGKILL PID 7090，退出状态 9
+- Repair HTTP 1 → 1
+- Re-review HTTP 1 → 2
+- Candidate 2
+- Approval 1
+- Commit 0
+- Revision 0
+- Quality Debt open 1
+- Run WaitingApproval
+- 二次恢复 tick 幂等
+- Case B RemoteStarted PID 7091，退出状态 9；恢复 Paused；Repair 1 → 1；Candidate 1；Invocation 0；Commit/Revision 0
+- 生产 `.app` 20.25 MiB

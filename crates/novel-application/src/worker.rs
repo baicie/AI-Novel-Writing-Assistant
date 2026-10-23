@@ -142,6 +142,12 @@ impl Worker {
 
     async fn advance(&self, claimed: ClaimedRun) -> Result<TickOutcome, AppError> {
         let attempts = self.runs.list_attempts(&claimed.run_id).await?;
+        if let Some(outcome) = self
+            .try_resume_repair_candidate(&claimed, &attempts)
+            .await?
+        {
+            return Ok(outcome);
+        }
         match decide(&attempts) {
             RecoveryDecision::HoldInterrupted { step_id, .. } => {
                 self.pause(
@@ -651,8 +657,27 @@ impl Worker {
             ))
             .await?;
         self.faults.after_repair_candidate_persisted().await?;
-        // Finish the repair record before re-review so both the repair and the
-        // review remain visible, then re-claim the control version for the review.
+        self.finish_repair_and_rereview(
+            claimed,
+            spec,
+            attempt_id,
+            &candidate.id,
+            &repaired_candidate_id,
+        )
+        .await
+    }
+
+    /// Complete a repair whose candidate and invocation are already durable. The
+    /// provider call and budget are never replayed on this path.
+    async fn finish_repair_and_rereview(
+        &self,
+        claimed: &ClaimedRun,
+        spec: &StepSpec,
+        attempt_id: String,
+        original_candidate_id: &str,
+        repaired_candidate_id: &str,
+    ) -> Result<TickOutcome, AppError> {
+        let scope = chapter_scope(&claimed.contract.target_chapter_id);
         self.finish_step(
             claimed,
             spec,
@@ -660,7 +685,7 @@ impl Worker {
             false,
             &serde_json::json!({
                 "status": "repair_candidate_created",
-                "originalCandidateId": candidate.id,
+                "originalCandidateId": original_candidate_id,
                 "repairedCandidateId": repaired_candidate_id,
             })
             .to_string(),
@@ -712,6 +737,91 @@ impl Worker {
                 .await;
         }
         Ok(outcome)
+    }
+
+    /// Resume only when the repair result is fully durable and belongs to the
+    /// current v3 contract. RemoteStarted and legacy plans keep the safe hold.
+    async fn try_resume_repair_candidate(
+        &self,
+        claimed: &ClaimedRun,
+        attempts: &[novel_workflow::AttemptView],
+    ) -> Result<Option<TickOutcome>, AppError> {
+        if claimed.contract.plan_version != novel_workflow::PRODUCTION_PLAN_VERSION
+            || claimed.contract.repair_budget == 0
+        {
+            return Ok(None);
+        }
+        let Some(attempt) = attempts.last() else {
+            return Ok(None);
+        };
+        if attempt.step_id != "bounded_repair" || attempt.phase != AttemptPhase::CandidateSaved {
+            return Ok(None);
+        }
+        let (Some(candidate_id), Some(request_id)) = (
+            attempt.candidate_id.as_deref(),
+            attempt.request_id.as_deref(),
+        ) else {
+            return Ok(None);
+        };
+        if claimed
+            .control
+            .cursor_step_id
+            .as_deref()
+            .is_some_and(|step| step != "bounded_repair")
+        {
+            return Ok(None);
+        }
+        let Some(latest) = self.runs.latest_candidate(&claimed.run_id).await? else {
+            return Ok(None);
+        };
+        if latest.id != candidate_id {
+            return Ok(None);
+        }
+        if sha256_hex(latest.content.as_bytes()) != latest.content_sha256 {
+            return self
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    "修复候选正文与保存的哈希不一致，未自动续跑。",
+                    Some("bounded_repair".into()),
+                )
+                .await
+                .map(Some);
+        }
+        if !self
+            .runs
+            .has_invocation(&claimed.run_id, "bounded_repair", request_id)
+            .await?
+        {
+            return Ok(None);
+        }
+        let artifacts = self.runs.list_artifacts(&claimed.novel_id).await?;
+        let scope = chapter_scope(&claimed.contract.target_chapter_id);
+        if artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "repair_notes" && artifact.scope == scope)
+        {
+            return Ok(None);
+        }
+        let Some(original_candidate_id) = self
+            .runs
+            .previous_candidate_id(&claimed.run_id, candidate_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let spec = find_step(&production_plan(), "bounded_repair")
+            .copied()
+            .expect("bounded repair step");
+        self.finish_repair_and_rereview(
+            claimed,
+            &spec,
+            attempt.id.clone(),
+            &original_candidate_id,
+            candidate_id,
+        )
+        .await
+        .map(Some)
     }
 
     async fn finish_protected_draft(&self, claimed: &ClaimedRun) -> Result<TickOutcome, AppError> {

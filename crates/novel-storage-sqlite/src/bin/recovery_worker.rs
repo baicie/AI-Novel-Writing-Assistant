@@ -85,6 +85,9 @@ async fn main() {
                         .await
                         .expect("approve");
                 }
+                if status == "waiting_approval" && !auto_approve {
+                    break;
+                }
                 if matches!(
                     status.as_str(),
                     "paused" | "succeeded" | "cancelled" | "failed"
@@ -92,7 +95,22 @@ async fn main() {
                     break;
                 }
             }
-            TickOutcome::Idle => tokio::time::sleep(Duration::from_millis(25)).await,
+            TickOutcome::Idle => {
+                if let Some(run) = runtime
+                    .director
+                    .active_run(&novel_id)
+                    .await
+                    .expect("active run")
+                {
+                    if matches!(
+                        run.state.as_str(),
+                        "waiting_approval" | "paused" | "succeeded" | "cancelled" | "failed"
+                    ) {
+                        break;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
             TickOutcome::Interrupted { .. } | TickOutcome::LostLease { .. } => break,
             TickOutcome::Stopped | TickOutcome::Saturated => break,
         }

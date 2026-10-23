@@ -472,6 +472,41 @@ impl WorkflowRepository for SqliteKernel {
         }
     }
 
+    async fn previous_candidate_id(
+        &self,
+        run_id: &str,
+        before_id: &str,
+    ) -> Result<Option<String>, PortError> {
+        sqlx::query_scalar(
+            "SELECT id FROM chapter_candidate WHERE run_id = ? AND id != ?
+             ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .bind(before_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)
+    }
+
+    async fn has_invocation(
+        &self,
+        run_id: &str,
+        step_id: &str,
+        request_id: &str,
+    ) -> Result<bool, PortError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM llm_invocation
+             WHERE run_id = ? AND step_id = ? AND request_id = ?",
+        )
+        .bind(run_id)
+        .bind(step_id)
+        .bind(request_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(count == 1)
+    }
+
     async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         let current = load_control(&mut tx, &write.run_id)
