@@ -14,7 +14,7 @@ fn prompts() -> std::collections::BTreeMap<String, String> {
 }
 
 #[tokio::test]
-async fn mock_director_loop_reaches_committed_chapter_and_survives_reopen() {
+async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("novel.sqlite");
     let kernel = Arc::new(SqliteKernel::open(&path).await.unwrap());

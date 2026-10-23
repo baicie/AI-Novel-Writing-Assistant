@@ -71,3 +71,10 @@
 ## 发布说明
 
 本次提交是桌面内核迁移切片，不是可直接发布的用户版本；按仓库规则未写入用户可见 release notes。待 UI 验收、签名和 DMG 完成后再合并到 `beta` 并补发布说明。
+
+## P8 当前进度
+
+- P8.1–P8.3 结构化最小后端切片：IMPLEMENTED；P8.4 UI：NOT_STARTED；P8.5 异常覆盖：PARTIAL。
+- `cargo test --workspace --exclude novel-http`：216 tests PASS。
+- P8 E2E：`p8_director_loop` 使用 ScriptedLlm 真实结构样本，走 Rust Runtime/SQLite/Gate/Commit；不是真实 Provider。
+- 详细合同：`P8_BUSINESS_CONTRACTS.md`；验收：`P8_ACCEPTANCE.md`。

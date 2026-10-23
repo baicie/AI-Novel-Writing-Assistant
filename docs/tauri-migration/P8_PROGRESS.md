@@ -1,35 +1,50 @@
-# P8 自动导演最小闭环进度
+# P8 自动导演迁移进度
 
-## 已完成
+## 当前阶段
 
-- 新增 `crates/novel-application/tests/p8_director_loop.rs`：
-  - 创建小说和章节；
-  - `open_run` 初始化导演 Run；
-  - Worker 走完 `story_macro → character_cast → volume_strategy → chapter_list → context → draft → consistency_review → approval → commit` 的 Rust 计划；
-  - book/chapter Gate 通过 `approve` 操作；
-  - MockLlm 生成候选；
-  - Candidate 经 `commit` 成为正式正文；
-  - 重开 SQLite 后正文和 revision 保持一致；
-  - 断言最终 Run 状态为 `succeeded`。
+P8.1–P8.3 的最小结构化后端切片已实现；P8.4 UI 未开始；P8.5 只完成 Scripted Mock 正常链和部分异常测试。
+
+## 已完成代码
+
+- `crates/novel-prompt/src/lib.rs`：新增 `story_macro`、`character_cast`、`volume_strategy`、`chapter_list`、`consistency_review` PromptAsset 及版本。
+- `crates/novel-testkit/src/lib.rs`：新增 `ScriptedLlm`，按 Prompt marker 返回结构化测试样本。
+- `crates/novel-application/src/worker.rs`：
+  - `story_macro`、`character_cast`、`volume_strategy`、`chapter_list`、`consistency_review` 从固定 payload 改为真实 LLM + JSON/Schema 校验；
+  - `context` 从上游 artifacts 组装；
+  - 失败/非法 JSON/ schema mismatch 进入 pause，不伪造成功；
+  - 卷数/章节序号唯一、章节卷归属、人物引用校验；
+  - `bounded_repair` 和 `approval` 仍是后续工作。
+- `crates/novel-application/src/worker/worker_validation.rs`：拆分出的结构化校验模块，避免 `worker.rs` 超过维护阈值。
+- `crates/novel-application/tests/p8_director_loop.rs`：
+  - `ScriptedLlm` 返回真实结构样本；
+  - 创建小说/章节 → Story Macro → Character Cast Gate → Volume Gate → Chapter Plan → Context → Draft → Review → Approval → Commit；
+  - 断言 artifact 内容、人物关系、Gate、最终正文、revision 和 SQLite 重开。
+- `crates/novel-application/tests/recovery.rs`：为结构化审校步骤补齐测试种子，保持取消/恢复测试覆盖真实流程。
 
 ## 验证
 
 ```bash
+cargo test --workspace --exclude novel-http
+# 216 passed
+
 cargo test -p novel-application --test p8_director_loop
 # 1 passed
-```
 
-相关 P7 测试：
+cargo test -p novel-application --lib structured_validation_tests
+# 4 passed
 
-```bash
 cargo test -p novel-application --test recovery
 # 6 passed
 ```
 
-## 明确边界
+## 尚存占位
 
-- P8 纵向闭环目前是 **Rust Application + SQLite + Mock Provider** 的可验证后端流程，不是真实 Provider 成功。
-- `story_macro`、`character_cast`、`volume_strategy`、`chapter_list`、`context`、`consistency_review` 目前是占位 artifact/固定 payload；原版 Prompt 语义和真实业务生成仍为 PARTIAL。
-- 人工 Gate 在 Rust application 测试中可操作；旧 AutoDirector UI 尚未迁移，不能宣称 UI 闭环完成。
-- 未迁移图像、短剧、漫画、移动端、云端协作。
-- 真实付费模型未调用。
+- `bounded_repair`：仍为占位 Step；没有真实修复循环/质量债。
+- `approval`：Gate 产物仍是 plumbing payload；真正审批由 storage approve 完成。
+- P8 UI：DirectorNovelPage/DirectorPanel/DirectorGate 尚未接 typed Tauri Transport；旧 API 路径在桌面模式下返回 NOT_MIGRATED。
+- World/State/History/Knowledge Context：未进入 context payload。
+- 旧版 User Edited / Replan / Reject / Regenerate 语义未完成。
+
+## 真实 Provider 边界
+
+本轮没有调用真实付费模型。`ScriptedLlm` 是确定性测试 Provider，不是生产 Provider；所有 P8 测试结论只证明合同和数据库/工作流行为。

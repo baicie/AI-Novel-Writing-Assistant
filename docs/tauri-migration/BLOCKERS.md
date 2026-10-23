@@ -23,10 +23,10 @@
 
 ## B-004 大量旧 UI API 尚未 Tauri 化
 
-- 现象：自动导演、任务中心写操作、知识库管理写操作、图像、短剧等仍调用 `/api/*`；任务中心运行只读投影和知识库文档列表已接 Tauri。
+- 现象：自动导演 UI、任务中心写操作、知识库管理写操作、图像、短剧等仍调用 `/api/*`；任务中心运行只读投影和知识库文档列表已接 Tauri；Rust 后端已新增结构化导演 Step 和 typed `openRun/approve/cancel/replay/subscribe` transport。
 - 处理：集中适配器对未知路径返回 `NOT_MIGRATED` 501，不返回假成功。
-- 影响：这些页面在纯 Tauri 发布模式下不可用；当前切片只保证书稿内核与基础模型/RAG 路径。
-- 下一动作：按 `COMPATIBILITY.md` 逐模块迁移；不得以 Node sidecar 补齐。
+- 影响：P8.4 的 DirectorNovelPage/DirectorPanel/DirectorGate 页面尚未接入 Tauri；当前只能验证后端/传输能力，不能宣称页面审批闭环。
+- 下一动作：按 `P8_BUSINESS_CONTRACTS.md` 逐模块迁移；不得以 Node sidecar 补齐。
 
 ## B-005 macOS DMG 打包
 
@@ -42,3 +42,10 @@
 - 复现：`pnpm typecheck`；单独 server 同样失败。
 - 解决：使用 `NODE_OPTIONS=--max-old-space-size=8192 pnpm typecheck` 后 server、client、desktop 三个 typecheck 全部通过。
 - 已解决：根 `typecheck` 脚本和 Tauri CI 均设置 `NODE_OPTIONS=--max-old-space-size=8192`，`pnpm typecheck` 实际通过。
+
+## B-007 P8 业务语义未完全迁移
+
+- 状态：**PARTIAL**。
+- 已迁移：Story Macro、Character Cast、Volume Strategy、Chapter List 的结构化最小合同；Context artifact 组装；Consistency Review 结构化 issues；Gate/Commit。
+- 未迁移：旧版逐字 Prompt/完整 Schema、拒绝/重新生成、人工重规划与受影响下游局部失效、World/State/History/Knowledge Context、Bounded Repair、质量债闭环、真实 Provider 验证。
+- 处理：后续按 Step 增补合同测试，不得用 `{ok:true}` 或固定 `issues:0` 冒充。
