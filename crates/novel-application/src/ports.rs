@@ -339,6 +339,10 @@ pub trait NovelRepository: Send + Sync {
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
     async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError>;
+    async fn list_worlds_for_context(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<novel_domain::World>, PortError>;
     async fn get_chapter(
         &self,
         novel_id: &str,

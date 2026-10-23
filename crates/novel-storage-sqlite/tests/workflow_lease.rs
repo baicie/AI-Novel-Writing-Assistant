@@ -18,6 +18,7 @@ fn contract() -> RunContract {
         model: "mock".into(),
         prompt_versions: BTreeMap::new(),
         token_budget: Some(100),
+        context_token_budget: 24_000,
         max_automatic_retries: 0,
         endpoint: "https://api.example.com/v1/chat/completions".into(),
         allow_localhost_http: false,

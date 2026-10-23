@@ -157,6 +157,7 @@ pub struct CharacterSnapshot {
     pub role: String,
     pub personality: Option<String>,
     pub arc: Option<String>,
+    pub profile: serde_json::Value,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -318,6 +319,8 @@ pub struct RunContract {
     pub model: String,
     pub prompt_versions: BTreeMap<String, String>,
     pub token_budget: Option<u64>,
+    #[serde(default = "crate::context::default_context_token_budget")]
+    pub context_token_budget: u64,
     pub max_automatic_retries: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,

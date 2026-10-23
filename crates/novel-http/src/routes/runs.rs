@@ -3,11 +3,11 @@ use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::response::{sse::Event, Sse, IntoResponse};
+use axum::response::{IntoResponse, Sse, sse::Event};
+use futures::Stream;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::time::sleep;
-use futures::Stream;
 
 use novel_application::{GenerationEvent, OpenRunInput};
 
@@ -49,6 +49,7 @@ pub async fn open(
             model: payload.model,
             prompt_versions: payload.prompt_versions,
             token_budget: payload.token_budget,
+            context_token_budget: payload.context_token_budget,
             max_automatic_retries: payload.max_automatic_retries,
             endpoint: payload.endpoint,
             allow_localhost_http: payload.allow_localhost_http,
@@ -130,7 +131,7 @@ pub async fn confirm_event(
     // 后续可扩展为：
     // 1. 将 last_confirmed_seq 记录到数据库用于崩溃恢复
     // 2. 更新内存状态追踪客户端进度
-    
+
     // 基础验证
     if payload.last_confirmed_seq < 0 {
         return Err(HttpError::bad_request("序号不能为负数"));
@@ -243,6 +244,7 @@ pub struct OpenRunBody {
     pub model: String,
     pub prompt_versions: BTreeMap<String, String>,
     pub token_budget: Option<u64>,
+    pub context_token_budget: Option<u64>,
     pub max_automatic_retries: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,

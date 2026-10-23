@@ -32,6 +32,7 @@ pub struct OpenRunInput {
     pub model: String,
     pub prompt_versions: BTreeMap<String, String>,
     pub token_budget: Option<u64>,
+    pub context_token_budget: Option<u64>,
     pub max_automatic_retries: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,
@@ -430,6 +431,12 @@ impl DirectorService {
         if input.command_id.trim().is_empty() {
             return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
         }
+        if input
+            .context_token_budget
+            .is_some_and(|budget| budget < 512)
+        {
+            return Err(AppError::validation("上下文预算不能小于 512。"));
+        }
         if input.max_automatic_retries > 1 {
             return Err(AppError::validation("自动重试次数只能是 0 或 1。"));
         }
@@ -457,6 +464,9 @@ impl DirectorService {
             model: input.model.clone(),
             prompt_versions: input.prompt_versions.clone(),
             token_budget: input.token_budget,
+            context_token_budget: input
+                .context_token_budget
+                .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKEN_BUDGET),
             max_automatic_retries: input.max_automatic_retries,
             endpoint: input.endpoint.clone(),
             allow_localhost_http: input.allow_localhost_http,
@@ -468,6 +478,9 @@ impl DirectorService {
             model: &input.model,
             prompt_versions: &input.prompt_versions,
             token_budget: input.token_budget,
+            context_token_budget: input
+                .context_token_budget
+                .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKEN_BUDGET),
             max_automatic_retries: input.max_automatic_retries,
             endpoint: &input.endpoint,
             allow_localhost_http: input.allow_localhost_http,
@@ -814,6 +827,7 @@ struct OpenRunHash<'a> {
     model: &'a str,
     prompt_versions: &'a BTreeMap<String, String>,
     token_budget: Option<u64>,
+    context_token_budget: u64,
     max_automatic_retries: u8,
     endpoint: &'a str,
     allow_localhost_http: bool,

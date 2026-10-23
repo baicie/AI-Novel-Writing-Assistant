@@ -13,6 +13,7 @@ use novel_workflow::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::context::{DEFAULT_OUTPUT_RESERVE, assemble_director_context};
 use crate::dto::{GenerationEvent, event_from_stored};
 use crate::error::AppError;
 use crate::hash::sha256_hex;
@@ -301,7 +302,7 @@ impl Worker {
                 run_id: claimed.run_id.clone(),
             });
         }
-        let prompt = draft_prompt(&claimed.contract, &chapter.title)?;
+        let prompt = draft_prompt(self, claimed, &chapter.title).await?;
         let summary = summarize(&prompt);
         let api_key = self
             .secrets
@@ -895,19 +896,25 @@ async fn execute_context(
     spec: &StepSpec,
 ) -> Result<TickOutcome, AppError> {
     let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+    let assembly = assemble_director_context(
+        worker.novels.as_ref(),
+        &artifacts,
+        &claimed.novel_id,
+        &claimed.contract.target_chapter_id,
+        claimed.contract.context_token_budget,
+        claimed
+            .contract
+            .token_budget
+            .unwrap_or(DEFAULT_OUTPUT_RESERVE),
+    )
+    .await?;
     let chapter_key = chapter_scope(&claimed.contract.target_chapter_id);
-    let story = latest_payload(&artifacts, "story_macro", book_scope())?;
-    let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
-    let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-    let chapter_plan = latest_payload(&artifacts, "chapter_list", book_scope())?;
     let payload = serde_json::json!({
-        "storyMacro": story,
-        "characterCast": cast,
-        "volumeStrategy": volume,
-        "chapterPlan": chapter_plan,
+        "assemblyVersion": assembly.trace.assembly_version,
         "targetChapterId": claimed.contract.target_chapter_id,
         "scope": chapter_key,
-        "tokenBudget": claimed.contract.token_budget,
+        "promptText": assembly.prompt_text,
+        "trace": assembly.trace,
     })
     .to_string();
     worker
@@ -980,9 +987,14 @@ async fn structured_prompt(
         .map_err(|_| AppError::validation("提示词缺少必要上下文"))
 }
 
-fn draft_prompt(contract: &crate::dto::RunContract, title: &str) -> Result<String, AppError> {
+async fn draft_prompt(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    title: &str,
+) -> Result<String, AppError> {
     use std::collections::BTreeMap;
-    let version = contract
+    let version = claimed
+        .contract
         .prompt_versions
         .get("chapter_draft")
         .map(String::as_str)
@@ -991,8 +1003,21 @@ fn draft_prompt(contract: &crate::dto::RunContract, title: &str) -> Result<Strin
         .map_err(|_| AppError::validation("正文提示词版本不存在"))?;
     let mut vars = BTreeMap::new();
     vars.insert("brief".into(), title.to_string());
+    if version == "chapter-draft-v2" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let context = latest_payload(
+            &artifacts,
+            "context",
+            &chapter_scope(&claimed.contract.target_chapter_id),
+        )?;
+        let prompt_text = context
+            .get("promptText")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
+        vars.insert("context".into(), prompt_text.to_string());
+    }
     novel_prompt::render(asset.template, &vars)
-        .map_err(|_| AppError::validation("正文提示词缺少章节目标"))
+        .map_err(|_| AppError::validation("正文提示词缺少章节上下文"))
 }
 
 fn summarize(prompt: &str) -> String {

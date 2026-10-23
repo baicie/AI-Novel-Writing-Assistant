@@ -29,6 +29,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "根据下面的章节目标写正文，不要输出解释。\n{{brief}}",
         },
         PromptAsset {
+            id: "chapter_draft",
+            version: "chapter-draft-v2",
+            family: "chapter",
+            template: "STEP:chapter_draft\n你是小说作者。必须严格依据下面已经确认的上下文写本章正文，不要引入与上下文冲突的事实，不要输出解释。\n章节目标：{{brief}}\n已确认上下文：\n{{context}}",
+        },
+        PromptAsset {
             id: "story_macro",
             version: "story-macro-v1",
             family: "director",
@@ -94,7 +100,7 @@ mod tests {
 
     #[test]
     fn version_must_match_and_missing_variables_fail() {
-        assert!(resolve("chapter_draft", "chapter-draft-v2").is_err());
+        assert!(resolve("chapter_draft", "chapter-draft-v3").is_err());
         let asset = resolve("chapter_draft", "chapter-draft-v1").unwrap();
         let mut vars = BTreeMap::new();
         vars.insert("brief".into(), "林动入山".into());

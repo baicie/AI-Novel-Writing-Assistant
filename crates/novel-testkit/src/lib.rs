@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -107,6 +108,7 @@ impl LlmProvider for MockLlm {
 pub struct ScriptedLlm {
     calls: AtomicUsize,
     outputs: Vec<(&'static str, String)>,
+    prompts: Mutex<Vec<String>>,
 }
 
 impl ScriptedLlm {
@@ -114,10 +116,14 @@ impl ScriptedLlm {
         Self {
             calls: AtomicUsize::new(0),
             outputs,
+            prompts: Mutex::new(Vec::new()),
         }
     }
     pub fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+    pub fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().expect("prompt log").clone()
     }
 }
 
@@ -142,6 +148,10 @@ impl LlmProvider for ScriptedLlm {
             return Err(novel_llm::LlmError::Cancelled);
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.prompts
+            .lock()
+            .expect("prompt log")
+            .push(request.prompt.clone());
         let output = self
             .outputs
             .iter()

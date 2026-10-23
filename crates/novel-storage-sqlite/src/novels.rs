@@ -594,6 +594,7 @@ impl NovelRepository for SqliteKernel {
                         .get("arc")
                         .and_then(|v| v.as_str())
                         .map(str::to_string),
+                    profile,
                     created_at: row.try_get("created_at").map_err(map_sql)?,
                     updated_at: row.try_get("updated_at").map_err(map_sql)?,
                 })
@@ -920,6 +921,40 @@ impl NovelRepository for SqliteKernel {
                     content: row.try_get("content").map_err(map_sql)?,
                     content_sha256: row.try_get("content_sha256").map_err(map_sql)?,
                     created_at: row.try_get("created_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_worlds_for_context(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<novel_domain::World>, PortError> {
+        let rows = sqlx::query(
+            "SELECT w.id, w.name, w.description, w.overview_summary, w.source_template_id,
+                    w.owner_novel_id, w.status, w.created_at, w.updated_at
+             FROM world w
+             WHERE w.owner_novel_id = ?
+                OR w.id = (SELECT world_id FROM novel WHERE id = ?)
+             ORDER BY w.updated_at DESC, w.id ASC",
+        )
+        .bind(novel_id)
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(novel_domain::World {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    name: row.try_get("name").map_err(map_sql)?,
+                    description: row.try_get("description").map_err(map_sql)?,
+                    overview_summary: row.try_get("overview_summary").map_err(map_sql)?,
+                    source_template_id: row.try_get("source_template_id").map_err(map_sql)?,
+                    owner_novel_id: row.try_get("owner_novel_id").map_err(map_sql)?,
+                    status: row.try_get("status").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                    updated_at: row.try_get("updated_at").map_err(map_sql)?,
                 })
             })
             .collect()

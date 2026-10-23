@@ -1,4 +1,5 @@
 mod app;
+mod context;
 mod director;
 mod dto;
 mod error;
@@ -22,6 +23,10 @@ mod tasks;
 mod usecase;
 mod worker;
 
+pub use context::{
+    CONTEXT_ASSEMBLY_VERSION, ContextAssembly, ContextSourceTrace, ContextTrace,
+    DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, assemble_director_context,
+};
 pub use director::{DirectorService, OpenRunInput};
 pub use dto::{
     ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,

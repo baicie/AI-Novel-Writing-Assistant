@@ -192,7 +192,7 @@ export async function handleLocalAiRevision(
       provider: aiRequest.provider || "openai-compatible",
       model: aiRequest.model || "gpt-4",
       promptVersions: {
-        chapter_draft: "chapter-draft-v1",
+        chapter_draft: "chapter-draft-v2",
         source: aiRequest.source || "freeform",
         scope: aiRequest.scope || "selection",
         instruction: aiRequest.instruction || "",
@@ -264,7 +264,7 @@ export async function handleLocalCursorContinuation(
       provider: contRequest.provider || "openai-compatible",
       model: contRequest.model || "gpt-4",
       promptVersions: {
-        chapter_draft: "chapter-draft-v1",
+        chapter_draft: "chapter-draft-v2",
         source: "continuation",
         operation: contRequest.operation || "continue",
         cursorOffset: String(contRequest.cursorOffset ?? 0),

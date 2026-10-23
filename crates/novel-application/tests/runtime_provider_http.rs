@@ -122,6 +122,7 @@ async fn tauri_runtime_uses_real_openai_compatible_http_provider_for_story_macro
                 prompts
             },
             token_budget: Some(1024),
+            context_token_budget: None,
             max_automatic_retries: 0,
             endpoint,
             allow_localhost_http: true,
