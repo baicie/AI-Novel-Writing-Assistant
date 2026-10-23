@@ -199,3 +199,76 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
             .unwrap();
     assert_eq!(revisions, 1);
 }
+
+#[tokio::test]
+async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("invalid.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let llm = Arc::new(ScriptedLlm::new(vec![(
+        "STEP:story_macro",
+        "{\"ok\":true}".to_string(),
+    )]));
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm,
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(novel_application::NoModelSecrets),
+        owner: "p8-invalid-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime.director.create_novel("无效结构", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "p8-invalid-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id,
+            provider: "mock".into(),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(512),
+            max_automatic_retries: 0,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+        })
+        .await
+        .unwrap();
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { ref status, .. } if status == "paused"),
+        "invalid schema must pause, got {outcome:?}"
+    );
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "story_macro"),
+        "invalid output must not be persisted as a successful artifact"
+    );
+    let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = ?")
+        .bind(&opened.run_id)
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap()
+        .try_get("status")
+        .unwrap();
+    assert_eq!(status, "paused");
+}

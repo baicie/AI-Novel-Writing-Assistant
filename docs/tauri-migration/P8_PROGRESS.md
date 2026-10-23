@@ -17,6 +17,7 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 UI 未开始；P8.5 �
 - `crates/novel-application/src/worker/worker_validation.rs`：拆分出的结构化校验模块，避免 `worker.rs` 超过维护阈值。
 - `crates/novel-application/tests/p8_director_loop.rs`：
   - `ScriptedLlm` 返回真实结构样本；
+  - 非法 Story Macro 输出进入 pause，不持久化成功 artifact；
   - 创建小说/章节 → Story Macro → Character Cast Gate → Volume Gate → Chapter Plan → Context → Draft → Review → Approval → Commit；
   - 断言 artifact 内容、人物关系、Gate、最终正文、revision 和 SQLite 重开。
 - `crates/novel-application/tests/recovery.rs`：为结构化审校步骤补齐测试种子，保持取消/恢复测试覆盖真实流程。
@@ -25,10 +26,10 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 UI 未开始；P8.5 �
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 216 passed
+# 217 passed
 
 cargo test -p novel-application --test p8_director_loop
-# 1 passed
+# 2 passed
 
 cargo test -p novel-application --lib structured_validation_tests
 # 4 passed

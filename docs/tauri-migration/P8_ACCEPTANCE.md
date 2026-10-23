@@ -18,17 +18,17 @@
 | P8.3 Consistency Review | IMPLEMENTED（最小合同） | 结构化 issues、空 clean、malformed/失败 pause；E2E clean 路径 | 旧版完整审校 Prompt、真实问题样本、质量债 |
 | P8.3 Bounded Repair | NOT_IMPLEMENTED | `bounded_repair` 仍是显式占位 Step | 修复预算、原始候选、修订历史、人工审批 |
 | P8.4 Tauri UI | NOT_STARTED | typed transport 已有 openRun/approve/cancel/replay，但 Director UI 未接 | 页面、Gate、取消/暂停/恢复、进度、质量、历史、跳转 |
-| P8.5 E2E happy path | VERIFIED（Scripted Mock） | `structured_director_loop...` 1 test | 真实 Provider |
-| P8.5 异常覆盖 | PARTIAL | 已有取消、SSE 中断、非法 JSON/schema 单测、审批等待、恢复测试 | 审批与取消竞态、连续确认、重规划编辑冲突、真实进程崩溃、预算耗尽全链路 |
+| P8.5 E2E happy path | VERIFIED（Scripted Mock） | `structured_director_loop...` + `malformed_story_macro...` 2 tests | 真实 Provider、审批竞态等 |
+| P8.5 异常覆盖 | PARTIAL | 已有取消、SSE 中断、非法 JSON/schema E2E/单测、审批等待、恢复测试 | 审批与取消竞态、连续确认、重规划编辑冲突、真实进程崩溃、预算耗尽全链路 |
 
 ## 测试命令
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 216 tests PASS（P8 实现后）
+# 217 tests PASS（P8 实现后）
 
 cargo test -p novel-application --test p8_director_loop
-# 1 PASS
+# 2 PASS
 
 cargo test -p novel-application --lib structured_validation_tests
 # 4 PASS

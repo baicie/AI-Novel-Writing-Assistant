@@ -86,7 +86,7 @@
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：216 tests（P8 结构化校验新增 4 个） |
+| `cargo test --workspace --exclude novel-http` | PASS：217 tests（P8 结构化校验新增 4 个） |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
 | `cargo test -p novel-storage-sqlite` | PASS：6 + 5 tests；覆盖源库只读、源备份、WAL、世界/角色/卷/章节关系、正文 hash、重复导入事务回滚、路径保护、旧 Run 不重放、租约 CAS |
 | `cargo test -p novel-llm` | PASS：10 + 4 tests |
@@ -117,7 +117,7 @@
 | `cargo test -p novel-application --test p8_director_loop` | PASS：1 test；Mock Runtime/SQLite 纵向 story macro → gates → draft → approval → commit → reopen |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪的旧版 `crates/novel-http/tests/integration_runs.rs` 引用已不存在的 TestContext 方法和旧 Run API；未修改该文件 |
 
-已跟踪 Rust 测试合计 273 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 274 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 9. 构建产物及路径
 
