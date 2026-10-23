@@ -30,7 +30,7 @@
 | SQLite FTS5 + 向量适配 | VERIFIED（内核） | 中文词项 FTS5、余弦检索、RRF/上下文预算测试；知识库列表已接只读 Command |
 | 导入导出 | PARTIAL | Rust JSON/Markdown/TXT 整书导出 Command 已接下载适配器；分章/其他范围未接入 |
 | 自动导演/任务中心/知识库/图像/短剧 UI | PARTIAL | 任务中心运行列表/详情和知识库文档列表已由只读 Commands 提供；自动导演、知识库管理写操作、图像、短剧等未迁移 API 明确返回 501 `NOT_MIGRATED`，不静默假成功 |
-| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.32 MiB |
+| macOS arm64 `.app` | VERIFIED | `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`，19.35 MiB |
 | macOS arm64 DMG | VERIFIED（未签名） | Tauri `bundle_dmg.sh` 在当前环境失败；使用 `hdiutil` 从同一 `.app` 生成并校验的 DMG 成功，8.8 MiB；未签名/未公证 |
 | Windows x64 / Linux x64 | NOT_STARTED | 尚未做目标平台原生依赖和打包验证 |
 
@@ -69,7 +69,7 @@
 - Workflow：最小章节生产链已可 create → tick → draft checkpoint → approval → commit；中断后保留候选、人工编辑保护和恢复测试通过。不是 LangGraph 逐行翻译。
 - RAG：SQLite FTS5 + 本地向量 BLOB/余弦适配层，提供 `index_knowledge`、`search_knowledge`、`search_knowledge_vector` Commands。未接 Qdrant，也没有完整知识库管理 UI。
 
-## 7. 最终质量审计与修复
+## 7. P7 最终审计与修复
 
 - 修复 `collect_gaps` 把已支持的 `World`/`Character` 误报为整表 unsupported 的问题。
 - 修复旧库导入的可选 `VolumeChapterPlan` 查询吞掉数据库错误的问题；现在数据库异常会向上返回。
@@ -77,6 +77,8 @@
 - 任务中心筛选未迁移任务类型时返回显式 501，不再返回空的成功列表。
 - IPC 审计：`build.rs` 注册 51 个 Command，`generate_handler!` 51 个，capabilities 51 个 `allow-*`，三者一致。
 - Release bundle 审计：无 Node/Electron/sidecar 文件或链接库；未发现日志中的 API Key 输出。
+- P7 新增：真实 Tauri WebView Channel smoke、SSE 截断/取消/有界队列/超时不计费重试、DNS/重定向/代理端点检查、分页 total 修复、Lease CAS 测试。
+- P8 最小后端闭环：`p8_director_loop` 真实 Runtime/SQLite/Mock 走通 story macro → gates → draft → approval → commit，并重开验证正文。
 
 ## 8. 已执行的测试与实际结果
 
@@ -84,10 +86,10 @@
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：205 tests |
+| `cargo test --workspace --exclude novel-http` | PASS：212 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
-| `cargo test -p novel-storage-sqlite` | PASS：4 + 5 tests；覆盖源库只读、源备份、世界/角色/卷/章节关系、正文 hash、重复导入事务回滚、旧 Run 不重放 |
-| `cargo test -p novel-llm` | PASS：8 + 3 tests |
+| `cargo test -p novel-storage-sqlite` | PASS：6 + 5 tests；覆盖源库只读、源备份、WAL、世界/角色/卷/章节关系、正文 hash、重复导入事务回滚、路径保护、旧 Run 不重放、租约 CAS |
+| `cargo test -p novel-llm` | PASS：10 + 4 tests |
 | `cargo test -p novel-domain -p novel-workflow` | PASS：13 + 6 tests |
 | `cargo test -p novel-http --test common_setup --test endpoint_tests --test integration --test integration_chapters --test integration_novels` | PASS：2 + 25 + 9 + 9 + 12 tests（已跟踪测试目标） |
 | `pnpm --filter @ai-novel/client typecheck` | PASS |
@@ -96,7 +98,7 @@
 | `pnpm build`（根级） | PASS（`NODE_OPTIONS=--max-old-space-size=8192`，有既有大 chunk 警告） |
 | `pnpm --filter @ai-novel/client test` | PASS：180 tests |
 | `cargo clippy`（非 `-D warnings`） | PASS，存在既有警告 |
-| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.32 MiB `.app` |
+| `cargo tauri build --target aarch64-apple-darwin --bundles app` | PASS，19.35 MiB `.app` |
 | `cargo tauri build ... --bundles app,dmg` | `.app` PASS；Tauri `bundle_dmg.sh` 失败 |
 | `hdiutil create/verify` 手动 DMG | PASS：8.8 MiB，校验和 VALID，内含 `.app` |
 | `scripts/audit-tauri-release.sh` | PASS：`.app` 无 Node/Electron/sidecar 文件，主二进制未链接 Node/Electron 库 |
@@ -114,11 +116,11 @@
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
 | `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪的旧版 `crates/novel-http/tests/integration_runs.rs` 引用已不存在的 TestContext 方法和旧 Run API；未修改该文件 |
 
-已跟踪 Rust 测试合计 262 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 269 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
 ## 9. 构建产物及路径
 
-- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.32 MiB）
+- macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.35 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
 - DMG：`target/aarch64-apple-darwin/release/bundle/dmg/Biz Novel Studio-0.1.0-arm64-manual.dmg`（8.8 MiB，未签名）
 - 迁移报告与文档：`docs/tauri-migration/`
