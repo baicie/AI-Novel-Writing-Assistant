@@ -317,6 +317,42 @@ pub async fn assemble_director_context(
             priority: 7,
         });
     }
+    // Earlier confirmed chapters are represented by their frozen chapter-plan
+    // summaries. This keeps long books within budget while retaining prior arcs.
+    let recent_orders: std::collections::BTreeSet<i32> =
+        recent.iter().map(|chapter| chapter.sort_order).collect();
+    let earlier: Vec<&ChapterSnapshot> = chapters
+        .iter()
+        .filter(|chapter| {
+            chapter.id != target.id
+                && chapter.sort_order < target.sort_order
+                && !recent_orders.contains(&chapter.sort_order)
+        })
+        .collect();
+    if !earlier.is_empty()
+        && let Some(plan) = latest_book_artifact(artifacts, "chapter_list")
+    {
+        let summaries = chapter_arc_summaries(&plan.payload_json, target.sort_order);
+        if !summaries.is_empty() {
+            let mut text = String::new();
+            for line in summaries {
+                if text.chars().count() + line.chars().count() > 6_000 {
+                    break;
+                }
+                text.push_str(&line);
+                text.push('\n');
+            }
+            drafts.push(SourceDraft {
+                source_type: "chapter_arc_summary".into(),
+                source_id: novel_id.to_string(),
+                source_version: Some(plan.version),
+                source_status: "confirmed".into(),
+                text,
+                mandatory: false,
+                priority: 7,
+            });
+        }
+    }
     for (source_type, reason) in [
         ("recent_summary", "not_migrated"),
         ("user_supplement", "not_migrated"),
@@ -389,4 +425,41 @@ pub async fn assemble_director_context(
             sources: traces,
         },
     })
+}
+
+fn latest_book_artifact<'a>(
+    artifacts: &'a [novel_domain::ArtifactView],
+    artifact_type: &str,
+) -> Option<&'a novel_domain::ArtifactView> {
+    artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.artifact_type == artifact_type && artifact.scope == book_scope()
+        })
+        .max_by_key(|artifact| artifact.version)
+}
+
+fn chapter_arc_summaries(payload_json: &str, before_order: i32) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(payload_json) else {
+        return Vec::new();
+    };
+    let Some(chapters) = value.get("chapters").and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(i32, String, String)> = chapters
+        .iter()
+        .filter_map(|chapter| {
+            let order = chapter.get("chapterOrder")?.as_i64()? as i32;
+            if order >= before_order {
+                return None;
+            }
+            let title = chapter.get("title")?.as_str()?.to_string();
+            let summary = chapter.get("summary")?.as_str()?.to_string();
+            Some((order, title, summary))
+        })
+        .collect();
+    rows.sort_by_key(|row| row.0);
+    rows.into_iter()
+        .map(|(order, title, summary)| format!("第{order}章 {title}：{summary}"))
+        .collect()
 }

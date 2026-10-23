@@ -37,3 +37,11 @@ PASS
 ## 最终状态
 
 **PARTIAL**：本地 SQLite/FTS/vector/RRF/Context Policy 已有基础；本轮补中文单字 token 与 Policy benchmark。完整本地知识库管理 UI 与中文词典未实现。
+
+
+## Context Policy 增量
+
+- 最近 3 章保留正式正文。
+- 更早章节从冻结 chapter_list 的标题/梗概生成 `chapter_arc_summary`，受 6000 字上限约束。
+- 100 章 benchmark 验证早期摘要可进入上下文，未来章节/Candidate 不泄漏。
+- 这是确定性摘要，不是新增 RAG/LLM 总结链路；后续可替换为本地检索事实。

@@ -71,6 +71,17 @@ async fn hundred_chapter_context_stability_benchmark() {
     }
     sqlx::query("INSERT INTO chapter_candidate(id, chapter_id, run_id, step_id, content, content_sha256, interrupted, created_at, updated_at) VALUES ('cand91','ch91','run','draft','第九章未确认候选正文','h',0,1,1)")
         .execute(kernel.pool()).await.unwrap();
+    let chapter_outlines: Vec<serde_json::Value> = (1..=91)
+        .map(|order| {
+            serde_json::json!({
+                "chapterOrder": order,
+                "title": format!("第{order}章"),
+                "volumeTitle": "卷一",
+                "summary": format!("前情节点 {order}：林动推进主线。"),
+                "characterNames": ["林动"]
+            })
+        })
+        .collect();
     let artifacts = vec![
         artifact(
             "story_macro",
@@ -98,9 +109,7 @@ async fn hundred_chapter_context_stability_benchmark() {
         artifact(
             "chapter_list",
             book_scope(),
-            serde_json::json!({"chapters":[
-                {"chapterOrder":91,"title":"第九十一章","volumeTitle":"卷一","summary":"真相逼近","characterNames":["林动","苏晚"]}
-            ]}),
+            serde_json::json!({"chapters": chapter_outlines}),
         ),
     ];
     let context =
@@ -127,7 +136,7 @@ async fn hundred_chapter_context_stability_benchmark() {
     );
     assert!(context.prompt_text.chars().count() <= 24_000);
     println!(
-        "P12 long-context benchmark: recent_recall={recall}/3 earlier_omitted_by_policy=87 candidate_leak=0 future_leak=0 chars={} trace={}",
+        "P12 long-context benchmark: recent_recall={recall}/3 early_arc_summary=true candidate_leak=0 future_leak=0 chars={} trace={}",
         context.prompt_text.chars().count(),
         context.trace.assembly_version
     );

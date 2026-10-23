@@ -51,19 +51,20 @@
 ```text
 P12 long-context benchmark:
 recent_recall=3/3
-earlier_omitted_by_policy=87
+early_arc_summary=true
 candidate_leak=0
 future_leak=0
-chars=930
+chars=935
 trace=director-context-v1
 ```
 
 说明：
 
 - 当前 Context Policy 仅取最近 3 章正式正文；
-- 87 章早期事实被省略，证明长篇早期事实缺口；
+- 最近 3 章保留正式正文；
+- 更早章节从冻结 chapter_list 摘要生成 `chapter_arc_summary`，100 章测试可召回前情节点；
 - 未来章节与 Candidate 不泄漏；
-- 仍需 recent summary / arc summary / 事实检索来覆盖长篇连续性。
+- 仍需更完整的 arc/fact 检索与质量指标。
 
 
 ## 确定性质量 Baseline（本轮新增）
