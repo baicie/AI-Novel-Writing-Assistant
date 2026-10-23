@@ -54,7 +54,7 @@ cargo test -p novel-application --test recovery
 - `approval`：Gate 产物仍是 plumbing payload；真正审批由 storage approve 完成。
 - P8 UI：Tauri Director 页面/历史页已通过 macOS WDIO embedded WebDriver 真实按钮操作；旧 Workspace/角色/质量详情未迁移。旧 API 路径在桌面模式下返回 NOT_MIGRATED。
 - 新增 `tests/desktop-e2e/`：WDIO 9.31.9 + `@wdio/tauri-service` 1.5.0 + `tauri-plugin-wdio` 1.5.0；真实 HTTP/SSE Mock Provider；真实 Rust Runtime/SQLite/Tauri Commands。
-- Native UI E2E 结果：director 6 passing、cancel 1 passing、safety 1 passing、独立进程 restart 1 passing。
+- Native UI E2E 结果：director 2 tests × 3 rounds 全通过、cancel 1、safety 1、独立进程 restart 1；每轮 14–24s，无 flaky 失败。
 - 边缘 UI：双击/双窗口/Channel 断线/中文拼音输入法仍未覆盖。
 - P8.4.1：Tauri `llm_provider()` 真实 OpenAI-compatible Provider 装配测试、真实 HTTP/SSE 流取消测试、Safety 暂停禁止普通 resume、取消后不提交正文。
 - World/State/History/Knowledge Context：未进入 context payload。

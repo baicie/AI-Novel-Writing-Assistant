@@ -81,14 +81,12 @@ Mock Provider 返回：
 pnpm --filter @ai-novel/desktop-e2e test:director
 ```
 
-结果：**6 passing**
+结果：**2 independent tests × 3 rounds 全通过**
 
-1. 渲染 Tauri Director 页面和真实启动表单
-2. 点击“提交并开始创作”创建真实 Rust Run
-3. 点击 Character Cast Gate 确认
-4. 点击 Volume Strategy Gate 确认
-5. 点击 Chapter Approval 确认，Run succeeded，正式正文写入
-6. 页面刷新后从 SQLite 恢复
+1. 独立创建测试小说，渲染 Tauri Director 页面和真实启动表单
+2. 独立创建另一测试小说，点击“提交并开始创作”创建真实 Rust Run；点击 Character Cast Gate、Volume Strategy Gate、Chapter Approval；Run succeeded；正式正文写入；页面刷新恢复
+
+连续 3 轮：16s / 14s / 24s，均 pass，无 flaky 失败。
 
 ```bash
 pnpm --filter @ai-novel/desktop-e2e test:cancel

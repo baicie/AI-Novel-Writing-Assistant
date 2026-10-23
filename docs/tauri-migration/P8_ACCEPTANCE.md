@@ -17,7 +17,7 @@
 | P8.3 Context | PARTIAL | artifact 级上下文组装，记录 tokenBudget | 世界/角色状态/历史正文/知识库/完整预算裁剪/脱敏 trace |
 | P8.3 Consistency Review | IMPLEMENTED（最小合同） | 结构化 issues、空 clean、malformed/失败 pause；E2E clean 路径 | 旧版完整审校 Prompt、真实问题样本、质量债 |
 | P8.3 Bounded Repair | FAIL_CLOSED（安全暂停）/ NOT_IMPLEMENTED（自动修复） | `consistency_review` 有问题时 `bounded_repair` 直接 pause，不生成 repair artifact、不提交正文；有 P8 测试 | 修复预算、原始候选、修订历史、人工审批后的自动修复 |
-| P8.4 Tauri UI | VERIFIED（Native UI 核心）；边缘用例 PARTIAL | macOS WDIO embedded WebDriver：真实按钮启动、Character Cast Gate、Volume Strategy Gate、Chapter Approval、Commit、Cancel、Safety、页面刷新、独立进程重启；`tests/desktop-e2e` | 双击/双窗口/Channel 断线/中文拼音输入法未覆盖；拒绝/重生成未实现 |
+| P8.4 Tauri UI | VERIFIED（Native UI 核心）；连续 3 轮 WDIO 通过；边缘用例 PARTIAL | macOS WDIO embedded WebDriver：真实按钮启动、Character Cast Gate、Volume Strategy Gate、Chapter Approval、Commit、Cancel、Safety、页面刷新、独立进程重启；`tests/desktop-e2e` | 双击/双窗口/Channel 断线/中文拼音输入法未覆盖；拒绝/重生成未实现 |
 | P8.5 E2E happy path | VERIFIED（Scripted Mock） | `structured_director_loop...` + `malformed_story_macro...` 2 tests | 真实 Provider、审批竞态等 |
 | P8.5 异常覆盖 | PARTIAL | 已有取消、SSE 中断、非法 JSON/schema E2E/单测、审批等待、恢复测试 | 审批与取消竞态、连续确认、重规划编辑冲突、真实进程崩溃、预算耗尽全链路 |
 
@@ -58,3 +58,11 @@ cargo test -p novel-application --test recovery
 ## 结论
 
 P8 后端结构化步骤和原生 Director MVP 已有实际代码与自动化证据，但完整 P8 自动导演（真实 UI 操作闭环、真实 Provider、修复循环、重规划保护）尚未完成，不能宣布 P8 全部 VERIFIED。P8.4 当前为 PARTIAL。
+
+## P8.4.3 稳定性补测
+
+- Director E2E：2 个独立测试 × 连续 3 轮全部通过（16s / 14s / 24s），无 flaky。
+- Cancel、Safety、独立进程 Restart 各 1 个测试通过。
+- 独立干净 Git Worktree 检出 `ca0b8cea`：`cargo test --workspace --all-targets` PASS；原工作树仍因用户未跟踪 `integration_runs.rs` 阻塞。
+- 前端测试 186 passing（补充草稿保存竞态测试）。
+- 生产 Release 仍为 `withGlobalTauri:false`、capabilities 仅 default，无 WDIO marker。

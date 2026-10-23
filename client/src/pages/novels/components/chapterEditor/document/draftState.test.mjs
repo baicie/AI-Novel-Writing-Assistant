@@ -29,3 +29,21 @@ test("save acknowledgement preserves newer local typing", () => {
 test("invalid draft storage falls back to the saved version", () => {
   assert.deepEqual(restoreChapterDraft("{broken", saved), saved);
 });
+
+test("busy generation refresh does not replace the author draft", () => {
+  const draft = { ...saved, content: "甲\n\n作者正在写" };
+  assert.equal(
+    receiveChapter(draft, { content: "甲\n\n后台新版本", updatedAt: "2026-10-11T00:03:00.000Z" }, true),
+    draft,
+  );
+});
+
+test("save acknowledgement for older text never overwrites newer typing", () => {
+  const draft = { ...saved, content: "甲\n\n继续输入的新正文" };
+  const acknowledged = acknowledgeChapterSave(draft, "甲\n\n提交时的旧正文", {
+    content: "甲\n\n提交时的旧正文",
+    updatedAt: "2026-10-11T00:04:00.000Z",
+  });
+  assert.equal(acknowledged.content, "甲\n\n继续输入的新正文");
+  assert.equal(acknowledged.savedContent, "甲\n\n提交时的旧正文");
+});

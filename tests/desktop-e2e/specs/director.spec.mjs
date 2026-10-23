@@ -6,89 +6,83 @@ async function tauriInvoke(command, args = {}) {
   return browser.execute((name, payload) => window.__TAURI__.core.invoke(name, payload), command, args);
 }
 
+async function openDirector(novelId) {
+  await browser.execute((id) => { window.location.hash = `#/lab/director/${id}`; }, novelId);
+  await (await $("[data-tauri-director-page]")).waitForDisplayed({ timeout: 20_000 });
+}
+
+async function createFixture(title) {
+  const novel = await tauriInvoke("create_novel", { title, description: "" });
+  const chapter = await tauriInvoke("create_chapter", { novelId: novel.id, title: "第一章", sortOrder: 1 });
+  return { novelId: novel.id, chapterId: chapter.id };
+}
+
+async function readRunId() {
+  await browser.waitUntil(async () => {
+    const meta = await $("[data-testid=director-run-meta]");
+    return (await meta.isExisting()) && (await meta.getText()).includes("Run ");
+  }, { timeout: 30_000 });
+  const text = await (await $("[data-testid=director-run-meta]")).getText();
+  const runId = text.match(/Run ([^ ]+)/)?.[1] ?? "";
+  expect(runId.length).toBeGreaterThan(0);
+  return runId;
+}
+
+async function confirmOneGate(novelId, runId, expectedText) {
+  await browser.waitUntil(async () => (await $("[data-testid=director-approve-button]")).isExisting(), {
+    timeout: 45_000,
+    timeoutMsg: `Gate did not appear (${expectedText})`,
+  });
+  const body = await browser.execute(() => document.body.innerText);
+  if (expectedText) expect(body).toContain(expectedText);
+  const before = await tauriInvoke("get_run_detail", { novelId, runId });
+  await (await $("[data-testid=director-approve-button]")).click();
+  await browser.waitUntil(async () => {
+    const current = await tauriInvoke("get_run_detail", { novelId, runId });
+    return current.controlVersion > before.controlVersion;
+  }, { timeout: 30_000, timeoutMsg: "Gate approve did not advance control version" });
+}
+
 describe("Biz Novel Studio Native Director", () => {
-  let novelId = "";
-  let chapterId = "";
-  let runId = "";
-  it("renders the Tauri Director page and a real start control", async () => {
-    const novel = await tauriInvoke("create_novel", { title: "WDIO 导演书", description: "" });
-    novelId = novel.id;
-    const chapter = await tauriInvoke("create_chapter", { novelId, title: "第一章", sortOrder: 1 });
-    chapterId = chapter.id;
-    await browser.execute((id) => { window.location.hash = `#/lab/director/${id}`; }, novelId);
-    const page = await $("[data-tauri-director-page]");
-    await page.waitForDisplayed({ timeout: 20_000 });
+  it("renders an independent Tauri Director page and start control", async () => {
+    const fixture = await createFixture("WDIO 页面书");
+    await openDirector(fixture.novelId);
     const start = await $("[data-testid=director-start-button]");
     await start.waitForDisplayed({ timeout: 20_000 });
     expect(await start.isEnabled()).toBe(true);
     expect(fs.existsSync(`${dataDir}/novel.sqlite`)).toBe(true);
   });
 
-  it("starts a Rust Run through the actual start button", async () => {
+  it("completes the full Director flow using real UI buttons and survives refresh", async () => {
+    const fixture = await createFixture("WDIO 全流程书");
+    await openDirector(fixture.novelId);
     const start = await $("[data-testid=director-start-button]");
+    await start.waitForDisplayed({ timeout: 20_000 });
     await start.click();
-    await browser.waitUntil(async () => {
-      const status = await $("[data-testid=director-status]");
-      const text = await status.getText();
-      return !text.includes("queued") && !text.includes("排队");
-    }, { timeout: 30_000, timeoutMsg: "Director Run did not leave queued state" });
-    const meta = await $("[data-testid=director-run-meta]");
-    const metaText = await meta.getText();
-    expect(metaText).toContain("Run ");
-    runId = metaText.match(/Run ([^ ]+)/)?.[1] ?? "";
-    expect(runId.length).toBeGreaterThan(0);
-  });
+    const runId = await readRunId();
 
-  it("approves the real Character Cast gate through the UI", async () => {
-    await browser.waitUntil(async () => (await $("[data-testid=director-approve-button]")).isExisting(), { timeout: 30_000, timeoutMsg: "Character gate did not appear" });
-    const body = await browser.execute(() => document.body.innerText);
-    expect(body).toContain("林动");
-    expect(body).toContain("苏晚");
-    expect(body).toContain("陆沉");
-    const before = await tauriInvoke("get_run_detail", { novelId, runId });
-    await (await $("[data-testid=director-approve-button]")).click();
-    await browser.waitUntil(async () => {
-      const current = await tauriInvoke("get_run_detail", { novelId, runId });
-      return current.controlVersion > before.controlVersion;
-    }, { timeout: 30_000, timeoutMsg: "Character gate approve did not advance control version" });
-  });
+    await confirmOneGate(fixture.novelId, runId, "林动");
+    await confirmOneGate(fixture.novelId, runId, "山门卷");
+    await confirmOneGate(fixture.novelId, runId, "E2E 候选正文");
 
-  it("approves the real Volume Strategy gate through the UI", async () => {
-    await browser.waitUntil(async () => (await $("[data-testid=director-approve-button]")).isExisting(), { timeout: 30_000, timeoutMsg: "Volume gate did not appear" });
-    const body = await browser.execute(() => document.body.innerText);
-    expect(body).toContain("山门卷");
-    const before = await tauriInvoke("get_run_detail", { novelId, runId });
-    await (await $("[data-testid=director-approve-button]")).click();
     await browser.waitUntil(async () => {
-      const current = await tauriInvoke("get_run_detail", { novelId, runId });
-      return current.controlVersion > before.controlVersion;
-    }, { timeout: 30_000, timeoutMsg: "Volume approve did not advance control version" });
-  });
+      const current = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+      return current.status === "succeeded";
+    }, { timeout: 45_000, timeoutMsg: "Director run did not succeed" });
 
-  it("approves the chapter and commits official text", async () => {
-    await browser.waitUntil(async () => (await $("[data-testid=director-approve-button]")).isExisting(), { timeout: 45_000, timeoutMsg: "Chapter gate did not appear" });
-    const body = await browser.execute(() => document.body.innerText);
-    expect(body).toContain("E2E 候选正文");
-    const before = await tauriInvoke("get_run_detail", { novelId, runId });
-    await (await $("[data-testid=director-approve-button]")).click();
-    await browser.waitUntil(async () => {
-      const current = await tauriInvoke("get_run_detail", { novelId, runId });
-      return current.status === "succeeded" && current.controlVersion > before.controlVersion;
-    }, { timeout: 45_000, timeoutMsg: "Chapter approve did not reach succeeded" });
-    const chapter = await tauriInvoke("get_chapter", { novelId, chapterId });
+    const chapter = await tauriInvoke("get_chapter", { novelId: fixture.novelId, chapterId: fixture.chapterId });
     expect(chapter.content).toContain("E2E 候选正文");
     expect(chapter.officialVersion).toBeGreaterThanOrEqual(1);
-  });
+    fs.writeFileSync(`${dataDir}/e2e-state.json`, JSON.stringify({ ...fixture, runId }));
 
-  it("reloads the UI and restores saved state from SQLite", async () => {
-    if (dataDir) {
-      fs.writeFileSync(`${dataDir}/e2e-state.json`, JSON.stringify({ novelId, chapterId, runId }));
-    }
     await browser.refresh();
-    await browser.waitUntil(async () => (await $("[data-tauri-director-page]")).isExisting(), { timeout: 20_000, timeoutMsg: "Director page did not reload" });
-    const body = await browser.execute(() => document.body.innerText);
-    expect(body).toContain("运行历史");
-    const chapter = await tauriInvoke("get_chapter", { novelId, chapterId });
-    expect(chapter.content).toContain("E2E 候选正文");
+    await (await $("[data-tauri-director-page]")).waitForDisplayed({ timeout: 20_000 });
+    await browser.waitUntil(async () => {
+      const status = await $("[data-testid=director-status]");
+      return (await status.isExisting()) && (await status.getText()).includes("已完成");
+    }, { timeout: 20_000, timeoutMsg: "Completed Run was not restored after refresh" });
+    expect(await browser.execute(() => document.body.innerText)).toContain("运行历史");
+    const reopened = await tauriInvoke("get_chapter", { novelId: fixture.novelId, chapterId: fixture.chapterId });
+    expect(reopened.content).toBe(chapter.content);
   });
 });

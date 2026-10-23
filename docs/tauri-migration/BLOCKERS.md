@@ -64,4 +64,5 @@
 - 已建立 macOS WDIO embedded WebDriver：WebdriverIO 9.31.9、`@wdio/tauri-service` 1.5.0、`tauri-plugin-wdio` 1.5.0、`tauri-plugin-wdio-webdriver` 1.5.0。
 - 已通过真实按钮：启动、Character Cast Gate、Volume Strategy Gate、Chapter Approval、Commit、Cancel、Safety、页面刷新、独立进程重启。
 - 未覆盖：双击/双窗口、Channel 断线重连、过期版本 UI、中文拼音输入法 composition、撤销/重做。
+- 稳定性：director E2E 连续 3 轮通过（14–24s），无 flaky。
 - E2E 使用隔离临时数据目录与本机 HTTP/SSE Mock Provider，不使用真实付费模型。

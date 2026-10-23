@@ -78,16 +78,17 @@ cargo test -p novel-application --test recovery
 
 ```text
 pnpm --filter @ai-novel/desktop-e2e test:director
-6 passing
+2 independent tests × 3 rounds, all passing
 ```
 
-- 页面/启动表单
+- 页面/启动表单（独立测试数据）
 - 点击启动真实 Rust Run
 - Character Cast Gate 确认
 - Volume Strategy Gate 确认
 - Chapter Approval Gate 确认
 - Run succeeded + 正文/revision 持久化
 - 页面刷新恢复
+- 连续 3 轮：16s / 14s / 24s，无 flaky
 
 ```text
 pnpm --filter @ai-novel/desktop-e2e test:cancel
@@ -140,6 +141,7 @@ structured_director_loop_reaches_committed_chapter_and_survives_reopen
 - `cargo fmt --check`：PASS
 - `cargo clippy --workspace --exclude novel-http --all-targets`：PASS（既有 warning）
 - Rust workspace（排除用户未跟踪阻塞文件）：221 tests PASS
+- 独立干净 Worktree：`cargo test --workspace --all-targets` PASS（HEAD `ca0b8cea`，不包含用户未跟踪文件）
 - HTTP 追踪测试：57 PASS
 - `pnpm typecheck`：PASS
 - `pnpm build`：PASS
