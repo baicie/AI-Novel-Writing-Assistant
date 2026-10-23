@@ -28,7 +28,7 @@
 
 自动证据：
 
-- `p9_repair_flow`：2 tests
+- `p9_repair_flow`：3 tests
   - issues → repair candidate → re-review clean → commit repaired
   - residual issues → Safety pause，无 commit，quality debt open
   - 原/修复候选均保留

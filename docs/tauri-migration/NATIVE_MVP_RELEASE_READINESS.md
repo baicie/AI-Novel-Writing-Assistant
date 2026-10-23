@@ -143,7 +143,7 @@ pnpm --filter @ai-novel/client test
 - P9.3 Decisions：backend IMPLEMENTED，Native Reject/Regenerate E2E PASS，Confirm After Edit 编辑 UI 未完成。
 - 最终质量：231 Rust tests、55 HTTP、186 frontend、3 Director WDIO、Editor SIGKILL、clean all-targets、生产隔离 audit 全部通过。
 
-## P10 修复可靠性
+## P10 修复可靠性（HEAD 703d75d7）
 
 - G2 预算分离 VERIFIED：Plan v3 + 独立 `repair_budget`。
 - G4 Confirm After Edit Native UI VERIFIED（4 Director E2E + 重启）。

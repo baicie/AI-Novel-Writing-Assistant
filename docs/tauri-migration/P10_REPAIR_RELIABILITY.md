@@ -1,6 +1,6 @@
 # P10.1 Repair Reliability
 
-## 1. 风险矩阵（基于 HEAD 388058ab 实际源码）
+## 1. 风险矩阵（基于 HEAD 703d75d7 实际源码）
 
 | 风险 | 状态 | 证据 / 处理 |
 | --- | --- | --- |
@@ -60,7 +60,7 @@
 
 ```text
 cargo test -p novel-application --test p9_repair_flow
-4 passed
+3 passed
 
 - clean repair + re-review clean + commit
 - residual issues + Safety pause + no commit
