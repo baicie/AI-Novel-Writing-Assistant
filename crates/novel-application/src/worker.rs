@@ -820,6 +820,11 @@ async fn execute_structured(
                 .await;
         }
     };
+    let raw = if raw.trim().is_empty() {
+        response.text.clone()
+    } else {
+        raw
+    };
     let payload = match validate_structured_output(step_id, &raw) {
         Ok(payload) => payload,
         Err(error) => {
