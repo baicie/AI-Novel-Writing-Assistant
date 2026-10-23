@@ -45,3 +45,29 @@ PASS
 - 更早章节从冻结 chapter_list 的标题/梗概生成 `chapter_arc_summary`，受 6000 字上限约束。
 - 100 章 benchmark 验证早期摘要可进入上下文，未来章节/Candidate 不泄漏。
 - 这是确定性摘要，不是新增 RAG/LLM 总结链路；后续可替换为本地检索事实。
+
+
+## 中文本地 RAG Benchmark（本轮新增）
+
+`crates/novel-application/tests/p12_rag_benchmark.rs`：
+
+- 4 篇本地知识文档：角色、世界、干扰项；
+- 3 个中文查询：魂兽、祖祠、林动；
+- 关键词检索 + 向量检索；
+- 结果包含 chunk_id 与 owner_type。
+
+输出：
+
+```text
+P12 Chinese RAG benchmark:
+lexical_recall=1.00
+lexical_precision=1.00
+vector_top1=Some("lin:0")
+```
+
+结论：
+
+- 中文 FTS 检索可召回角色/世界事实；
+- 向量检索 top1 正确；
+- 干扰文档未进入前 5；
+- 仍缺少人工标注大规模评估集与真实 Embedding 模型对比。

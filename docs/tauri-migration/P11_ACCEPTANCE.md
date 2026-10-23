@@ -69,7 +69,7 @@ cargo test -p novel-application --test p11_repair_faults
 
 ## 回归
 
-- Rust workspace：249 passed
+- Rust workspace：250 passed
 - 干净 Worktree all-targets（HEAD 4ec30b8b）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
