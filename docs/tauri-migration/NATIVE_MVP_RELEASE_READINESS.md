@@ -44,7 +44,7 @@ P0 修复：本地草稿旧异步写入可通过无条件 upsert 覆盖新草稿
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 223 passed
+# 224 passed
 
 # 用户未跟踪文件不进入的独立临时 worktree：
 git worktree add /tmp/biz-novel-clean HEAD

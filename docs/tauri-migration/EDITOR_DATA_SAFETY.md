@@ -64,7 +64,7 @@
 
 ```text
 cargo test -p novel-storage-sqlite --test chapter_draft
-2 passed
+3 passed（含 WAL/synchronous PRAGMA）
 ```
 
 包含真实 SQLite 并发 `tokio::join!` 与迟到旧写入拒绝。
@@ -106,7 +106,7 @@ Rust：
 
 ```text
 cargo test -p novel-storage-sqlite --test chapter_draft
-2 passed
+3 passed（含 WAL/synchronous PRAGMA）
 ```
 
 覆盖：

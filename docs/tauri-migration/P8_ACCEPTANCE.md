@@ -25,7 +25,7 @@
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 223 tests PASS
+# 224 tests PASS
 
 cargo test -p novel-application --test p8_director_loop
 # 3 PASS

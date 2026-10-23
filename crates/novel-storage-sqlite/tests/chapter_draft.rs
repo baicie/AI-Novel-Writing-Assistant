@@ -284,3 +284,24 @@ async fn concurrent_and_stale_draft_writes_cannot_overwrite_newer_text() {
         "较新的正文"
     );
 }
+
+#[tokio::test]
+async fn sqlite_uses_wal_and_normal_synchronous() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("pragmas.sqlite"))
+        .await
+        .unwrap();
+    let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(journal.to_lowercase(), "wal");
+    assert_eq!(
+        synchronous, 1,
+        "NORMAL synchronous is required for the tested durability level"
+    );
+}
