@@ -36,7 +36,7 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已交付 Tauri Direc
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 220 passed
+# 221 passed
 
 cargo test -p novel-application --test p8_director_loop
 # 3 passed

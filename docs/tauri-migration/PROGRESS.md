@@ -75,6 +75,6 @@
 ## P8 当前进度
 
 - P8.1–P8.3 结构化最小后端切片：IMPLEMENTED；P8.4 Tauri Director MVP：PARTIAL；P8.5 异常覆盖：PARTIAL。
-- `cargo test --workspace --exclude novel-http`：220 tests PASS。
+- `cargo test --workspace --exclude novel-http`：221 tests PASS。
 - P8 E2E：`p8_director_loop` 使用 ScriptedLlm 真实结构样本，走 Rust Runtime/SQLite/Gate/Commit；新增 fail-closed；不是真实 Provider。
 - 详细合同：`P8_BUSINESS_CONTRACTS.md`；验收：`P8_ACCEPTANCE.md`。

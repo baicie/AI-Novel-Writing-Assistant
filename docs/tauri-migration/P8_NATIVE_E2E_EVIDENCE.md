@@ -27,7 +27,7 @@ cargo test -p novel-application --test runtime_provider_http
 1 passed
 
 cargo test -p novel-desktop --test runtime_provider
-1 passed
+2 passed
 ```
 
 `novel-desktop` 测试直接调用 Tauri Release composition root 的 `llm_provider()`，通过真实 HTTP/SSE 完成请求，防止把测试 Provider 当成 Tauri 装配。
@@ -51,6 +51,7 @@ cargo test -p novel-desktop --test runtime_provider
   - `consistency_issues...` 测试中调用 `resume(..., true)` 必须返回冲突
   - Storage 在 `PauseKind::Safety` 上拒绝普通 resume
 - Tauri provider 装配测试：`src-tauri/tests/runtime_provider.rs` 直接调用 `novel_desktop::llm_provider()`，通过真实本地 HTTP/SSE 完成一次请求。
+- 真实 HTTP 流取消测试：同一 Tauri composition provider 在收到首个 SSE token 后取消，3 秒内返回 `LlmError::Cancelled`，不是只改数据库状态。
 - 结果：
 
 ```text
@@ -109,7 +110,7 @@ structured_director_loop_reaches_committed_chapter_and_survives_reopen
 
 - `cargo fmt --check`：PASS
 - `cargo clippy --workspace --exclude novel-http --all-targets`：PASS（既有 warning）
-- Rust workspace（排除用户未跟踪阻塞文件）：220 tests PASS
+- Rust workspace（排除用户未跟踪阻塞文件）：221 tests PASS
 - HTTP 追踪测试：57 PASS
 - `pnpm typecheck`：PASS
 - `pnpm build`：PASS

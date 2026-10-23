@@ -25,7 +25,7 @@
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 220 tests PASS
+# 221 tests PASS
 
 cargo test -p novel-application --test p8_director_loop
 # 3 PASS
@@ -34,7 +34,7 @@ cargo test -p novel-application --test runtime_provider_http
 # 1 PASS（真实 OpenAiCompatibleProvider + local HTTP/SSE）
 
 cargo test -p novel-desktop --test runtime_provider
-# 1 PASS（Tauri composition root provider）
+# 2 PASS（Tauri composition root provider + 真实 HTTP 流取消）
 
 cargo test -p novel-application --lib structured_validation_tests
 # 4 PASS
