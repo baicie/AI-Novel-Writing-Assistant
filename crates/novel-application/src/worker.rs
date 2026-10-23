@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -7,9 +7,9 @@ use novel_domain::{
 };
 use novel_llm::{LlmProvider, LlmRequest, TokenUsage, redact_secrets};
 use novel_workflow::{
-    AttemptPhase, CHAPTER_PLAN_VERSION, NextAction, PRODUCTION_PLAN_VERSION, RecoveryDecision,
-    StepScope, StepSpec, book_scope, chapter_scope, decide, find_step, next_action,
-    production_plan,
+    ArtifactView, AttemptPhase, CHAPTER_PLAN_VERSION, NextAction, PRODUCTION_PLAN_VERSION,
+    RecoveryDecision, StepScope, StepSpec, book_scope, chapter_scope, decide, find_step,
+    next_action, production_plan,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -230,12 +230,15 @@ impl Worker {
         match step_id {
             "draft" => self.execute_draft(claimed, resume_attempt).await,
             "commit" => self.execute_commit(claimed, &spec).await,
+            "story_macro" | "character_cast" | "volume_strategy" | "chapter_list"
+            | "consistency_review" => execute_structured(self, claimed, &spec, step_id).await,
+            "context" => execute_context(self, claimed, &spec).await,
             _ => {
-                let payload = if step_id == "consistency_review" {
-                    serde_json::json!({ "issues": 0 }).to_string()
-                } else {
-                    serde_json::json!({ "ok": true, "step": step_id }).to_string()
-                };
+                // The approval artifact is created by the gate transition; other
+                // non-business plumbing steps remain explicit placeholders until
+                // their original contract is ported.
+                let payload =
+                    serde_json::json!({ "step": step_id, "gate": spec.gateable }).to_string();
                 let status = if spec.gateable { "draft" } else { "confirmed" };
                 self.finish_step(claimed, &spec, status, false, &payload, None, None)
                     .await
@@ -704,6 +707,258 @@ impl Worker {
     }
 }
 
+async fn execute_structured(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    spec: &StepSpec,
+    step_id: &str,
+) -> Result<TickOutcome, AppError> {
+    let prompt = structured_prompt(worker, claimed, step_id).await?;
+    let summary = summarize(&prompt);
+    let attempt_id = worker.ids.new_id();
+    worker
+        .runs
+        .start_attempt(NewAttempt {
+            id: attempt_id.clone(),
+            run_id: claimed.run_id.clone(),
+            step_id: step_id.into(),
+            control_version: claimed.control.version,
+            created_at: worker.clock.now_ms(),
+        })
+        .await?;
+    let request_id = worker.ids.new_id();
+    if !worker
+        .runs
+        .mark_remote_started(&attempt_id, &request_id, worker.clock.now_ms())
+        .await?
+    {
+        return Ok(TickOutcome::LostLease {
+            run_id: claimed.run_id.clone(),
+        });
+    }
+    let api_key = worker
+        .secrets
+        .api_key(&claimed.contract.provider)
+        .await?
+        .unwrap_or_default();
+    let cancel = CancellationToken::new();
+    worker
+        .cancels
+        .lock()
+        .expect("cancel map")
+        .insert(claimed.run_id.clone(), cancel.clone());
+    let _cancel_guard = CancelRegistration {
+        run_id: claimed.run_id.clone(),
+        cancels: worker.cancels.clone(),
+    };
+    let (sender, mut receiver) = tokio::sync::mpsc::channel::<String>(64);
+    let collect = tokio::spawn(async move {
+        let mut text = String::new();
+        while let Some(delta) = receiver.recv().await {
+            text.push_str(&delta);
+        }
+        text
+    });
+    let started = worker.clock.now_ms();
+    let generated = worker
+        .llm
+        .generate(
+            LlmRequest {
+                request_id: request_id.clone(),
+                model: claimed.contract.model.clone(),
+                prompt,
+                endpoint: claimed.contract.endpoint.clone(),
+                api_key,
+                allow_localhost_http: claimed.contract.allow_localhost_http,
+                max_output_tokens: claimed.contract.token_budget,
+            },
+            sender,
+            cancel,
+        )
+        .await;
+    let raw = collect.await.unwrap_or_default();
+    let response = match generated {
+        Ok(response) => response,
+        Err(error) => {
+            worker
+                .runs
+                .mark_attempt(
+                    &attempt_id,
+                    AttemptPhase::Interrupted.as_str(),
+                    None,
+                    worker.clock.now_ms(),
+                )
+                .await?;
+            if matches!(error, novel_llm::LlmError::Cancelled) {
+                return worker
+                    .write(
+                        claimed,
+                        ControlEvent::Cancel,
+                        "run_cancelled",
+                        Some(step_id.into()),
+                        &serde_json::json!({ "reason": error.to_string() }).to_string(),
+                        None,
+                        None,
+                        None,
+                    )
+                    .await;
+            }
+            return worker
+                .pause(
+                    claimed,
+                    StopSignalKind::ProviderUnavailable,
+                    &error.to_string(),
+                    Some(step_id.into()),
+                )
+                .await;
+        }
+    };
+    let payload = match validate_structured_output(step_id, &raw) {
+        Ok(payload) => payload,
+        Err(error) => {
+            worker
+                .runs
+                .mark_attempt(
+                    &attempt_id,
+                    AttemptPhase::Interrupted.as_str(),
+                    None,
+                    worker.clock.now_ms(),
+                )
+                .await?;
+            return worker
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    &error,
+                    Some(step_id.into()),
+                )
+                .await;
+        }
+    };
+    let payload = if step_id == "chapter_list" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
+        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
+        validate_chapter_plan_references(&payload, &cast, &volume)?
+    } else {
+        payload
+    };
+    worker
+        .runs
+        .record_invocation(invocation(
+            worker,
+            claimed,
+            &request_id,
+            &summary,
+            started,
+            &response.usage,
+        ))
+        .await?;
+    let status = if spec.gateable { "draft" } else { "confirmed" };
+    worker
+        .finish_step(
+            claimed,
+            spec,
+            status,
+            false,
+            &payload,
+            None,
+            Some(attempt_id),
+        )
+        .await
+}
+
+async fn execute_context(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    spec: &StepSpec,
+) -> Result<TickOutcome, AppError> {
+    let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+    let chapter_key = chapter_scope(&claimed.contract.target_chapter_id);
+    let story = latest_payload(&artifacts, "story_macro", book_scope())?;
+    let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
+    let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
+    let chapter_plan = latest_payload(&artifacts, "chapter_list", book_scope())?;
+    let payload = serde_json::json!({
+        "storyMacro": story,
+        "characterCast": cast,
+        "volumeStrategy": volume,
+        "chapterPlan": chapter_plan,
+        "targetChapterId": claimed.contract.target_chapter_id,
+        "scope": chapter_key,
+        "tokenBudget": claimed.contract.token_budget,
+    })
+    .to_string();
+    worker
+        .finish_step(claimed, spec, "confirmed", false, &payload, None, None)
+        .await
+}
+
+async fn structured_prompt(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    step_id: &str,
+) -> Result<String, AppError> {
+    let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+    let (id, version, vars) = match step_id {
+        "story_macro" => {
+            let novel = worker.novels.get_novel(&claimed.novel_id).await?;
+            let mut vars = BTreeMap::new();
+            vars.insert(
+                "story_input".into(),
+                format!("{}\n{}", novel.title, novel.description),
+            );
+            ("story_macro", "story-macro-v1", vars)
+        }
+        "character_cast" => {
+            let mut vars = BTreeMap::new();
+            vars.insert(
+                "context".into(),
+                context_payload(&artifacts, &["story_macro"], 12_000)?,
+            );
+            ("character_cast", "character-cast-v1", vars)
+        }
+        "volume_strategy" => {
+            let mut vars = BTreeMap::new();
+            vars.insert(
+                "context".into(),
+                context_payload(&artifacts, &["story_macro", "character_cast"], 16_000)?,
+            );
+            ("volume_strategy", "volume-strategy-v1", vars)
+        }
+        "chapter_list" => {
+            let mut vars = BTreeMap::new();
+            vars.insert(
+                "context".into(),
+                context_payload(&artifacts, &["volume_strategy", "character_cast"], 20_000)?,
+            );
+            ("chapter_list", "chapter-list-v1", vars)
+        }
+        "consistency_review" => {
+            let candidate = worker
+                .runs
+                .latest_candidate(&claimed.run_id)
+                .await?
+                .ok_or_else(|| AppError::integrity("一致性审校缺少候选正文。"))?;
+            let mut context = context_payload(
+                &artifacts,
+                &["chapter_list", "character_cast", "story_macro"],
+                16_000,
+            )?;
+            context.push_str("\n候选正文：");
+            context.push_str(&truncate_chars(&candidate.content, 20_000));
+            let mut vars = BTreeMap::new();
+            vars.insert("context".into(), context);
+            ("consistency_review", "consistency-review-v1", vars)
+        }
+        _ => return Err(AppError::validation("未知的结构化步骤")),
+    };
+    let asset =
+        novel_prompt::resolve(id, version).map_err(|_| AppError::validation("提示词版本不存在"))?;
+    novel_prompt::render(asset.template, &vars)
+        .map_err(|_| AppError::validation("提示词缺少必要上下文"))
+}
+
 fn draft_prompt(contract: &crate::dto::RunContract, title: &str) -> Result<String, AppError> {
     use std::collections::BTreeMap;
     let version = contract
@@ -721,6 +976,237 @@ fn draft_prompt(contract: &crate::dto::RunContract, title: &str) -> Result<Strin
 
 fn summarize(prompt: &str) -> String {
     redact_secrets(prompt).chars().take(80).collect()
+}
+
+fn latest_payload(
+    artifacts: &[ArtifactView],
+    artifact_type: &str,
+    scope: &str,
+) -> Result<serde_json::Value, AppError> {
+    artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == artifact_type && artifact.scope == scope)
+        .max_by_key(|artifact| artifact.version)
+        .and_then(|artifact| serde_json::from_str(&artifact.payload_json).ok())
+        .ok_or_else(|| AppError::integrity(format!("缺少上游产物 {artifact_type}")))
+}
+
+fn context_payload(
+    artifacts: &[ArtifactView],
+    types: &[&str],
+    limit: usize,
+) -> Result<String, AppError> {
+    let mut context = serde_json::Map::new();
+    for artifact_type in types {
+        let value = latest_payload(artifacts, artifact_type, book_scope())?;
+        context.insert((*artifact_type).to_string(), value);
+    }
+    let text =
+        serde_json::to_string(&context).map_err(|_| AppError::integrity("上下文无法序列化"))?;
+    Ok(truncate_chars(&text, limit))
+}
+
+fn truncate_chars(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+fn validate_chapter_plan_references(
+    payload: &str,
+    cast: &serde_json::Value,
+    volume: &serde_json::Value,
+) -> Result<String, AppError> {
+    let plan: serde_json::Value =
+        serde_json::from_str(payload).map_err(|_| AppError::integrity("章节计划无法解析"))?;
+    let member_names: std::collections::BTreeSet<&str> = cast
+        .get("members")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|member| member.get("name").and_then(serde_json::Value::as_str))
+        .collect();
+    let volume_titles: std::collections::BTreeSet<&str> = volume
+        .get("volumes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|volume| volume.get("title").and_then(serde_json::Value::as_str))
+        .collect();
+    let chapters = plan
+        .get("chapters")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| AppError::integrity("章节计划缺少 chapters"))?;
+    for chapter in chapters {
+        let volume_title = chapter
+            .get("volumeTitle")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !volume_titles.contains(volume_title) {
+            return Err(AppError::validation("章节计划引用了不存在的卷"));
+        }
+        if let Some(names) = chapter
+            .get("characterNames")
+            .and_then(serde_json::Value::as_array)
+        {
+            for name in names.iter().filter_map(serde_json::Value::as_str) {
+                if !member_names.contains(name) {
+                    return Err(AppError::validation("章节计划引用了不存在的人物"));
+                }
+            }
+        }
+    }
+    Ok(payload.to_string())
+}
+
+fn required_string(value: &serde_json::Value, key: &str) -> Result<(), String> {
+    if value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+    {
+        Ok(())
+    } else {
+        Err(format!("结构化产物缺少非空字段 {key}"))
+    }
+}
+
+fn validate_structured_output(step_id: &str, raw: &str) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "模型输出不是合法 JSON".to_string())?;
+    match step_id {
+        "story_macro" => {
+            let expansion = value.get("expansion").ok_or("Story Macro 缺少 expansion")?;
+            let decomposition = value
+                .get("decomposition")
+                .ok_or("Story Macro 缺少 decomposition")?;
+            for key in [
+                "expanded_premise",
+                "protagonist_core",
+                "conflict_engine",
+                "mystery_box",
+                "emotional_line",
+                "tone_reference",
+            ] {
+                required_string(expansion, key)?;
+            }
+            for key in [
+                "selling_point",
+                "core_conflict",
+                "main_hook",
+                "progression_loop",
+                "growth_path",
+                "ending_flavor",
+            ] {
+                required_string(decomposition, key)?;
+            }
+            for key in ["conflict_layers", "setpiece_seeds"] {
+                if !expansion
+                    .get(key)
+                    .is_some_and(|v| v.is_object() || v.is_array())
+                {
+                    return Err(format!("Story Macro expansion.{key} 结构不正确"));
+                }
+            }
+            if !value
+                .get("constraints")
+                .is_some_and(serde_json::Value::is_array)
+                || !value.get("issues").is_some_and(serde_json::Value::is_array)
+            {
+                return Err("Story Macro constraints/issues 必须是数组".into());
+            }
+        }
+        "character_cast" => {
+            let members = value
+                .get("members")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("人物阵容缺少 members")?;
+            if members.len() < 3 {
+                return Err("人物阵容至少需要 3 人".into());
+            }
+            for member in members {
+                for key in ["name", "role", "castRole", "storyFunction"] {
+                    required_string(member, key)?;
+                }
+            }
+            let relations = value
+                .get("relations")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("人物阵容缺少 relations")?;
+            if relations.len() < 2 {
+                return Err("人物阵容至少需要 2 条关系".into());
+            }
+            for relation in relations {
+                for key in ["sourceName", "targetName", "surfaceRelation"] {
+                    required_string(relation, key)?;
+                }
+            }
+        }
+        "volume_strategy" => {
+            let volumes = value
+                .get("volumes")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("卷策略缺少 volumes")?;
+            if volumes.is_empty() {
+                return Err("卷策略不能为空".into());
+            }
+            let mut orders = std::collections::BTreeSet::new();
+            for volume in volumes {
+                for key in ["title", "roleLabel", "coreReward", "planningMode"] {
+                    required_string(volume, key)?;
+                }
+                let order = volume
+                    .get("volumeOrder")
+                    .and_then(serde_json::Value::as_i64)
+                    .ok_or("卷策略缺少 volumeOrder")?;
+                if !orders.insert(order) {
+                    return Err("卷策略存在重复 volumeOrder".into());
+                }
+            }
+        }
+        "chapter_list" => {
+            let chapters = value
+                .get("chapters")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("章节计划缺少 chapters")?;
+            if chapters.is_empty() {
+                return Err("章节计划不能为空".into());
+            }
+            let mut orders = std::collections::BTreeSet::new();
+            for chapter in chapters {
+                for key in ["title", "volumeTitle", "summary"] {
+                    required_string(chapter, key)?;
+                }
+                let order = chapter
+                    .get("chapterOrder")
+                    .and_then(serde_json::Value::as_i64)
+                    .ok_or("章节计划缺少 chapterOrder")?;
+                if !orders.insert(order) {
+                    return Err("章节计划存在重复 chapterOrder".into());
+                }
+                if chapter.get("characterNames").is_some_and(|v| !v.is_array()) {
+                    return Err("章节计划 characterNames 必须是数组".into());
+                }
+            }
+        }
+        "consistency_review" => {
+            let issues = value
+                .get("issues")
+                .and_then(serde_json::Value::as_array)
+                .ok_or("审校结果缺少 issues 数组")?;
+            for issue in issues {
+                for key in ["type", "severity", "evidence", "suggestion"] {
+                    required_string(issue, key)?;
+                }
+            }
+            let normalized = serde_json::json!({
+                "issues": issues.len(),
+                "issueDetails": issues,
+                "status": if issues.is_empty() { "clean" } else { "issues_found" },
+            });
+            return serde_json::to_string(&normalized).map_err(|_| "审校结果无法序列化".into());
+        }
+        _ => return Err("未知的结构化步骤".into()),
+    }
+    serde_json::to_string(&value).map_err(|_| "结构化产物无法序列化".into())
 }
 
 fn invocation(
@@ -804,5 +1290,42 @@ struct GateGuard(Arc<ConcurrencyGate>);
 impl Drop for GateGuard {
     fn drop(&mut self) {
         self.0.release();
+    }
+}
+
+#[cfg(test)]
+mod structured_validation_tests {
+    use super::validate_structured_output;
+
+    #[test]
+    fn story_macro_requires_real_structure() {
+        assert!(validate_structured_output("story_macro", r#"{"ok":true}"#).is_err());
+        let valid = r#"{"expansion":{"expanded_premise":"前提","protagonist_core":"核心","conflict_engine":"引擎","conflict_layers":{"external":"外","internal":"内","relational":"关系"},"mystery_box":"未知","emotional_line":"情绪","setpiece_seeds":["场面"],"tone_reference":"气质"},"decomposition":{"selling_point":"卖点","core_conflict":"冲突","main_hook":"钩子","progression_loop":"循环","growth_path":"成长","major_payoffs":["回报"],"ending_flavor":"结局"},"constraints":["规则"],"issues":[]}"#;
+        assert!(validate_structured_output("story_macro", valid).is_ok());
+    }
+
+    #[test]
+    fn character_cast_rejects_too_few_members_or_relations() {
+        let too_few = r#"{"members":[{"name":"甲","role":"主角","castRole":"protagonist","storyFunction":"作用"}],"relations":[]}"#;
+        assert!(validate_structured_output("character_cast", too_few).is_err());
+    }
+
+    #[test]
+    fn volume_and_chapter_plans_reject_duplicate_order() {
+        let bad_volume = r#"{"volumes":[{"volumeOrder":1,"title":"卷","roleLabel":"开局","coreReward":"回报","planningMode":"hard"},{"volumeOrder":1,"title":"卷二","roleLabel":"推进","coreReward":"回报二","planningMode":"soft"}]}"#;
+        assert!(validate_structured_output("volume_strategy", bad_volume).is_err());
+        let bad_chapters = r#"{"chapters":[{"chapterOrder":1,"title":"章","volumeTitle":"卷","summary":"梗概"},{"chapterOrder":1,"title":"章二","volumeTitle":"卷","summary":"梗概"}]}"#;
+        assert!(validate_structured_output("chapter_list", bad_chapters).is_err());
+    }
+
+    #[test]
+    fn consistency_empty_is_clean_but_malformed_is_not_clean() {
+        let clean = validate_structured_output("consistency_review", r#"{"issues":[]}"#).unwrap();
+        assert!(clean.contains("\"issues\":0"));
+        assert!(validate_structured_output("consistency_review", r#"{"issues":"none"}"#).is_err());
+        assert!(
+            validate_structured_output("consistency_review", r#"{"issues":[{"type":"x"}]}"#)
+                .is_err()
+        );
     }
 }

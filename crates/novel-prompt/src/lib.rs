@@ -21,12 +21,44 @@ pub enum PromptError {
 }
 
 pub fn builtin_prompts() -> &'static [PromptAsset] {
-    &[PromptAsset {
-        id: "chapter_draft",
-        version: "chapter-draft-v1",
-        family: "chapter",
-        template: "根据下面的章节目标写正文，不要输出解释。\n{{brief}}",
-    }]
+    &[
+        PromptAsset {
+            id: "chapter_draft",
+            version: "chapter-draft-v1",
+            family: "chapter",
+            template: "根据下面的章节目标写正文，不要输出解释。\n{{brief}}",
+        },
+        PromptAsset {
+            id: "story_macro",
+            version: "story-macro-v1",
+            family: "director",
+            template: "STEP:story_macro\n你是资深小说作者与剧情策划。根据故事输入输出严格 JSON：expansion（expanded_premise、protagonist_core、conflict_engine、conflict_layers、mystery_box、emotional_line、setpiece_seeds、tone_reference）、decomposition（selling_point、core_conflict、main_hook、progression_loop、growth_path、major_payoffs、ending_flavor）、constraints、issues。不要输出 Markdown。\n故事输入：{{story_input}}",
+        },
+        PromptAsset {
+            id: "character_cast",
+            version: "character-cast-v1",
+            family: "director",
+            template: "STEP:character_cast\n依据 Story Macro 输出严格 JSON：members（至少 3 人，每人包含 name、role、castRole、storyFunction、personality、outerGoal、innerNeed、relations 或关系字段）和 relations（至少 2 条，sourceName、targetName、surfaceRelation、conflictSource）。人物必须服务于主线冲突。\n{{context}}",
+        },
+        PromptAsset {
+            id: "volume_strategy",
+            version: "volume-strategy-v1",
+            family: "director",
+            template: "STEP:volume_strategy\n依据 Story Macro 和人物阵容输出严格 JSON：volumes（按 volumeOrder 排序，每卷包含 title、roleLabel、coreReward、planningMode：hard 或 soft）。至少 1 卷，不得重复序号。\n{{context}}",
+        },
+        PromptAsset {
+            id: "chapter_list",
+            version: "chapter-list-v1",
+            family: "director",
+            template: "STEP:chapter_list\n依据卷策略输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames）。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
+        },
+        PromptAsset {
+            id: "consistency_review",
+            version: "consistency-review-v1",
+            family: "director",
+            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；无问题用空数组）。不要返回 Markdown。不要把调用失败当作没有问题。\n{{context}}",
+        },
+    ]
 }
 
 pub fn resolve(id: &str, version: &str) -> Result<&'static PromptAsset, PromptError> {

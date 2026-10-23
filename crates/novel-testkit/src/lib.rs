@@ -102,6 +102,62 @@ impl LlmProvider for MockLlm {
     }
 }
 
+/// Deterministic provider for structured-step E2E tests. Each prompt must contain
+/// one of the registered markers; the matching value is returned as the full text.
+pub struct ScriptedLlm {
+    calls: AtomicUsize,
+    outputs: Vec<(&'static str, String)>,
+}
+
+impl ScriptedLlm {
+    pub fn new(outputs: Vec<(&'static str, String)>) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            outputs,
+        }
+    }
+    pub fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            streaming: true,
+            structured_output: true,
+            tool_call: false,
+            reasoning: false,
+            context_limit: 128_000,
+        }
+    }
+    async fn generate(
+        &self,
+        request: LlmRequest,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, novel_llm::LlmError> {
+        if cancel.is_cancelled() {
+            return Err(novel_llm::LlmError::Cancelled);
+        }
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let output = self
+            .outputs
+            .iter()
+            .find(|(marker, _)| request.prompt.contains(marker))
+            .map(|(_, value)| value.clone())
+            .ok_or_else(|| {
+                novel_llm::LlmError::InvalidResponse("ScriptedLlm 没有匹配的响应".into())
+            })?;
+        let _ = tokens.send(output.clone()).await;
+        Ok(LlmResponse {
+            text: output,
+            usage: TokenUsage::unknown(),
+        })
+    }
+}
+
 pub struct BlockingMockLlm {
     calls: AtomicUsize,
     text: String,

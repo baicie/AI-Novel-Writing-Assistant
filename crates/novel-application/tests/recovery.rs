@@ -47,6 +47,7 @@ async fn seed_ready_for_draft(kernel: &SqliteKernel, novel_id: &str, chapter_id:
         ("volume_strategy", book_scope().to_string()),
         ("chapter_list", book_scope().to_string()),
         ("context", chapter_scope(chapter_id)),
+        ("consistency_review", chapter_scope(chapter_id)),
     ] {
         WorkflowRepository::insert_external_artifact(
             kernel,
@@ -58,7 +59,11 @@ async fn seed_ready_for_draft(kernel: &SqliteKernel, novel_id: &str, chapter_id:
                 scope,
                 status: "confirmed".into(),
                 protected_user_content: false,
-                payload_json: "{}".into(),
+                payload_json: if kind == "consistency_review" {
+                    "{\"issues\":0}".into()
+                } else {
+                    "{}".into()
+                },
                 content_sha256: "seed".into(),
                 created_at: 1,
             },
@@ -190,6 +195,39 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
     );
 }
 
+async fn seed_character_gate(kernel: &SqliteKernel, novel_id: &str) {
+    for (kind, status, payload) in [
+        (
+            "story_macro",
+            "confirmed",
+            r#"{"expansion":{},"decomposition":{},"constraints":[],"issues":[]}"#,
+        ),
+        (
+            "character_cast",
+            "draft",
+            r#"{"members":[],"relations":[]}"#,
+        ),
+    ] {
+        WorkflowRepository::insert_external_artifact(
+            kernel,
+            NewArtifact {
+                id: format!("gate-{kind}"),
+                novel_id: novel_id.to_string(),
+                run_id: None,
+                artifact_type: kind.to_string(),
+                scope: book_scope().to_string(),
+                status: status.to_string(),
+                protected_user_content: false,
+                payload_json: payload.to_string(),
+                content_sha256: "gate".into(),
+                created_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
     let dir = tempfile::tempdir().unwrap();
@@ -212,6 +250,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
         .await
         .unwrap();
     let chapter_id = chapter.id.clone();
+    seed_character_gate(&kernel, &novel.id).await;
     let opened = runtime
         .director
         .open_run(OpenRunInput {
@@ -228,7 +267,6 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
         })
         .await
         .unwrap();
-    runtime.worker.tick().await.unwrap();
     let waiting = runtime.worker.tick().await.unwrap();
     assert!(
         matches!(waiting, TickOutcome::Advanced { ref status, .. } if status == "waiting_approval")
