@@ -171,6 +171,8 @@ export interface RunDetailView {
   failureReason?: string | null;
   gate?: RunGateView | null;
   latestCandidate?: RunCandidateView | null;
+  qualityDebt?: Array<Record<string, unknown>>;
+  legalActions?: string[];
   artifacts: RunArtifactView[];
   usage: RunUsageView;
   provider: string;
@@ -537,6 +539,18 @@ export function getRunDetail(novelId: string, runId: string): Promise<RunDetailV
 
 export function approveRun(input: { runId: string; commandId: string; expectedVersion?: number }): Promise<CommandOutcome> {
   return invoke("approve_run", input);
+}
+
+export function rejectRun(input: { runId: string; commandId: string; expectedVersion?: number }): Promise<CommandOutcome> {
+  return invoke("reject_run", input);
+}
+
+export function regenerateRun(input: { runId: string; commandId: string; expectedVersion?: number }): Promise<CommandOutcome> {
+  return invoke("regenerate_run", input);
+}
+
+export function confirmAfterEditRun(input: { runId: string; commandId: string; expectedVersion?: number; payloadJson: string }): Promise<CommandOutcome> {
+  return invoke("confirm_after_edit_run", input);
 }
 
 export function cancelRun(input: { runId: string; commandId: string }): Promise<CommandOutcome> {

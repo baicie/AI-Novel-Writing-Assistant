@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   approveRun,
   cancelRun,
+  regenerateRun,
+  rejectRun,
   getActiveRun,
   getModelSetup,
   getNovel,
@@ -137,7 +139,7 @@ export default function TauriDirectorPage() {
         targetChapterId: currentChapter.id,
         provider: "openai-compatible",
         model: model.model,
-        promptVersions: { chapter_draft: "chapter-draft-v1" },
+        promptVersions: { chapter_draft: "chapter-draft-v2" },
         tokenBudget: null,
         maxAutomaticRetries: 0,
         endpoint: model.endpoint,
@@ -158,6 +160,16 @@ export default function TauriDirectorPage() {
     mutationFn: () => approveRun({ runId, commandId: commandId("director-approve"), expectedVersion: detail?.controlVersion }),
     onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "确认失败，请刷新后重试。"),
+  });
+  const reject = useMutation({
+    mutationFn: () => rejectRun({ runId, commandId: commandId("director-reject"), expectedVersion: detail?.controlVersion }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
+    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "拒绝失败，请刷新后重试。"),
+  });
+  const regenerate = useMutation({
+    mutationFn: () => regenerateRun({ runId, commandId: commandId("director-regenerate"), expectedVersion: detail?.controlVersion }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
+    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "重新生成失败，请刷新后重试。"),
   });
   const cancel = useMutation({
     mutationFn: () => cancelRun({ runId, commandId: commandId("director-cancel") }),
@@ -222,9 +234,11 @@ export default function TauriDirectorPage() {
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.completionTokens ?? 0} 输出 tokens</span>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {detail?.status === "waiting_approval" && gate ? <Button data-testid="director-approve-button" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
-                {detail?.status === "paused" && detail.latestCandidate && detail.pauseKind !== "safety" ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
-                {detail && !["succeeded", "failed", "cancelled"].includes(detail.status) ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
+                {detail?.legalActions?.includes("confirm") && gate ? <Button data-testid="director-approve-button" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
+                {detail?.legalActions?.includes("reject") ? <Button data-testid="director-reject-button" variant="outline" disabled={reject.isPending} onClick={() => reject.mutate()}>{reject.isPending ? "拒绝中…" : "拒绝这个候选"}</Button> : null}
+                {detail?.legalActions?.includes("regenerate") ? <Button data-testid="director-regenerate-button" variant="outline" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>{regenerate.isPending ? "重新生成中…" : "重新生成候选"}</Button> : null}
+                {detail?.legalActions?.includes("resume") && detail.latestCandidate ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
+                {detail?.legalActions?.includes("cancel") ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
                 {completed ? <Button variant="ghost" onClick={() => { setSelectedRunId(""); setChapterId(""); }}>再创建一次</Button> : null}
               </div>
@@ -239,6 +253,15 @@ export default function TauriDirectorPage() {
               })}</ol>
             </div>
 
+            {detail?.qualityDebt?.length ? <section data-testid="director-quality-debt" className="space-y-2 rounded-md bg-muted/20 p-4">
+              <h2 className="text-sm font-semibold">质量问题</h2>
+              <ul className="space-y-2 text-xs">
+                {detail.qualityDebt.map(item => <li key={String(item.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
+                  <span>{String(item.issueType)} · {String(item.severity)} · {String(item.description)}</span>
+                  <span className="text-muted-foreground">{String(item.status)}</span>
+                </li>)}
+              </ul>
+            </section> : null}
             {gate && draftArtifacts.length > 0 ? <section className="space-y-3 rounded-md bg-muted/20 p-4">
               <h2 className="text-sm font-semibold">待确认内容</h2>
               <p className="text-xs text-muted-foreground">请核对本阶段结构化结果后确认。确认会推进真实 Rust Run；取消不会提交正文。</p>
@@ -265,7 +288,7 @@ export default function TauriDirectorPage() {
             </section>
             <section className="rounded-md bg-muted/20 p-4 text-xs text-muted-foreground">
               <h2 className="text-sm font-semibold text-foreground">暂未支持</h2>
-              <p className="mt-2 leading-5">拒绝/重新生成、多章节批量、世界模式、自定义 driver、handoff 和确认后编辑暂未接入 Rust 后端；这些操作不会显示为可执行按钮。</p>
+              <p className="mt-2 leading-5">多章节批量、世界模式、自定义 driver、handoff 和修改后确认的编辑界面仍待接入；不会把未接入能力显示为可执行按钮。</p>
             </section>
           </aside>
         </div>

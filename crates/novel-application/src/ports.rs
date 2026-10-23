@@ -10,8 +10,9 @@ use novel_workflow::AttemptView;
 use crate::dto::{
     ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,
     CharacterSnapshot, CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery,
-    ListNovelsResult, NovelDetail, NovelSummary, RecoverableTaskSummary, RunArtifactView,
-    RunContract, RunSummary, RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
+    ListNovelsResult, NovelDetail, NovelSummary, QualityDebtView, RecoverableTaskSummary,
+    RunArtifactView, RunContract, RunSummary, RunUsageView, TaskOverviewSummary, UpdateNovelFields,
+    VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -399,6 +400,23 @@ pub trait NovelRepository: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
+pub struct NewQualityDebt {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub issue_id: String,
+    pub issue_type: String,
+    pub severity: String,
+    pub description: String,
+    pub evidence: String,
+    pub suggestion: String,
+    pub source_ref: Option<String>,
+    pub review_version: i64,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewWorld {
     pub id: String,
     pub name: String,
@@ -461,6 +479,37 @@ pub trait WorkflowRepository: Send + Sync {
     async fn run_artifacts(&self, run_id: &str) -> Result<Vec<RunArtifactView>, PortError>;
     /// 读取某个 Run 的模型调用汇总。
     async fn run_usage(&self, run_id: &str) -> Result<RunUsageView, PortError>;
+    async fn record_quality_debt(&self, items: &[NewQualityDebt]) -> Result<(), PortError>;
+    async fn list_quality_debt(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<QualityDebtView>, PortError>;
+    async fn resolve_quality_debt(
+        &self,
+        run_id: &str,
+        evidence: &str,
+        now_ms: i64,
+    ) -> Result<u64, PortError>;
+    async fn reject_gate(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        regenerate: bool,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
+    async fn confirm_after_edit(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        artifact_id: &str,
+        payload_json: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
     /// 获取章节的完整详情。
     async fn get_chapter_full(
         &self,

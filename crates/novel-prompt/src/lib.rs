@@ -59,6 +59,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_list\n依据卷策略输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames）。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
         },
         PromptAsset {
+            id: "chapter_repair",
+            version: "chapter-repair-v1",
+            family: "director",
+            template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题和已确认上下文修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
+        },
+        PromptAsset {
             id: "consistency_review",
             version: "consistency-review-v1",
             family: "director",

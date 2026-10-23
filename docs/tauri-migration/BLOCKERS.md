@@ -73,3 +73,10 @@
 - 已自动验证：本地草稿 SQLite 跨进程恢复、SIGKILL 恢复、保存竞态、切章保存。
 - 未自动验证：macOS 拼音 composition 候选/光标、真实双窗口冲突 UI、窗口关闭按钮、AI Commit 与人工保存同秒冲突。
 - 处理：按 `EDITOR_ACCEPTANCE.md` 执行人工验收；不得把普通 WebDriver 中文字符输入当成输入法组合输入通过。
+
+## B-011 P9 Context / Repair / Decision 剩余能力
+
+- P9.1 Context：真实基础来源已接入；旧版完整 Context Broker、知识库/RAG、独立用户补充设定、真实 tokenizer 未迁移。
+- P9.2 Review/Repair：单次有界修复 + 质量债已实现；修复超时/SSE/取消/崩溃 E2E、residual pause 后 tick 错误传播仍需处理。
+- P9.3 Decisions：Reject/Regenerate/Confirm After Edit 后端已实现，Reject/Regenerate Native E2E 通过；Confirm After Edit 编辑 UI、双窗口/断线/审批取消竞态未完成。
+- 不得将 P9 当前 Mock 证据宣称为完整旧版自动导演或真实付费 Provider 验收。

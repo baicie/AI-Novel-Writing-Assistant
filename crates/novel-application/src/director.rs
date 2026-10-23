@@ -541,6 +541,84 @@ impl DirectorService {
             .await?)
     }
 
+    pub async fn reject(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+    ) -> Result<CommandOutcome, AppError> {
+        self.decide_gate(command_id, run_id, expected_version, false)
+            .await
+    }
+
+    pub async fn regenerate(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+    ) -> Result<CommandOutcome, AppError> {
+        self.decide_gate(command_id, run_id, expected_version, true)
+            .await
+    }
+
+    async fn decide_gate(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        regenerate: bool,
+    ) -> Result<CommandOutcome, AppError> {
+        if command_id.trim().is_empty() {
+            return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
+        }
+        let kind = if regenerate { "regenerate" } else { "reject" };
+        let request_hash = json_hash(&RunCommandHash {
+            run_id,
+            kind,
+            intent: expected_version.map(|_| "expected"),
+        })?;
+        Ok(self
+            .runs
+            .reject_gate(
+                command_id,
+                &request_hash,
+                run_id,
+                expected_version,
+                regenerate,
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
+    pub async fn confirm_after_edit(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        payload_json: &str,
+    ) -> Result<CommandOutcome, AppError> {
+        if command_id.trim().is_empty() {
+            return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
+        }
+        let request_hash = json_hash(&RunCommandHash {
+            run_id,
+            kind: "confirm_after_edit",
+            intent: expected_version.map(|_| "expected"),
+        })?;
+        Ok(self
+            .runs
+            .confirm_after_edit(
+                command_id,
+                &request_hash,
+                run_id,
+                expected_version,
+                &self.ids.new_id(),
+                payload_json,
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
     pub async fn cancel(&self, command_id: &str, run_id: &str) -> Result<CommandOutcome, AppError> {
         self.command(command_id, run_id, "cancel", None).await
     }
@@ -645,6 +723,10 @@ impl DirectorService {
         let artifacts = self.runs.run_artifacts(run_id).await?;
         let candidate = self.runs.latest_candidate(run_id).await?;
         let usage = self.runs.run_usage(run_id).await?;
+        let quality_debt = self
+            .runs
+            .list_quality_debt(&summary.novel_id, &summary.chapter_id)
+            .await?;
         let pause_kind = control
             .pause
             .as_ref()
@@ -654,6 +736,28 @@ impl DirectorService {
             id: gate.id.clone(),
             artifact_types: gate.artifact_types.clone(),
         });
+        let mut legal_actions = Vec::new();
+        match control.status {
+            novel_domain::RunStatus::WaitingApproval if control.gate.is_some() => {
+                legal_actions.extend(
+                    ["confirm", "reject", "regenerate", "confirm_after_edit"]
+                        .into_iter()
+                        .map(str::to_string),
+                );
+            }
+            novel_domain::RunStatus::Paused
+                if control
+                    .pause
+                    .as_ref()
+                    .is_none_or(|pause| pause.kind != novel_domain::PauseKind::Safety) =>
+            {
+                legal_actions.extend(["resume", "cancel"].into_iter().map(str::to_string));
+            }
+            novel_domain::RunStatus::Running | novel_domain::RunStatus::Queued => {
+                legal_actions.push("cancel".to_string());
+            }
+            _ => {}
+        }
         Ok(RunDetailView {
             id: summary.id,
             novel_id: summary.novel_id,
@@ -670,6 +774,8 @@ impl DirectorService {
                 id: candidate.id,
                 content: candidate.content,
             }),
+            quality_debt,
+            legal_actions,
             artifacts,
             usage: RunUsageView {
                 calls: usage.calls,

@@ -108,6 +108,7 @@ impl LlmProvider for MockLlm {
 pub struct ScriptedLlm {
     calls: AtomicUsize,
     outputs: Vec<(&'static str, String)>,
+    used: Mutex<Vec<bool>>,
     prompts: Mutex<Vec<String>>,
 }
 
@@ -115,6 +116,7 @@ impl ScriptedLlm {
     pub fn new(outputs: Vec<(&'static str, String)>) -> Self {
         Self {
             calls: AtomicUsize::new(0),
+            used: Mutex::new(vec![false; outputs.len()]),
             outputs,
             prompts: Mutex::new(Vec::new()),
         }
@@ -152,14 +154,22 @@ impl LlmProvider for ScriptedLlm {
             .lock()
             .expect("prompt log")
             .push(request.prompt.clone());
-        let output = self
-            .outputs
-            .iter()
-            .find(|(marker, _)| request.prompt.contains(marker))
-            .map(|(_, value)| value.clone())
-            .ok_or_else(|| {
-                novel_llm::LlmError::InvalidResponse("ScriptedLlm 没有匹配的响应".into())
-            })?;
+        let index = {
+            let used = self.used.lock().expect("scripted outputs");
+            self.outputs
+                .iter()
+                .enumerate()
+                .find(|(index, (marker, _))| !used[*index] && request.prompt.contains(marker))
+                .map(|(index, _)| index)
+                .ok_or_else(|| {
+                    novel_llm::LlmError::InvalidResponse("ScriptedLlm 没有匹配的响应".into())
+                })?
+        };
+        let output = {
+            let mut used = self.used.lock().expect("scripted outputs");
+            used[index] = true;
+            self.outputs[index].1.clone()
+        };
         let _ = tokens.send(output.clone()).await;
         Ok(LlmResponse {
             text: output,

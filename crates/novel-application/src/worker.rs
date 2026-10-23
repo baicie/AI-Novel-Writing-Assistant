@@ -7,9 +7,8 @@ use novel_domain::{
 };
 use novel_llm::{LlmProvider, LlmRequest, TokenUsage, redact_secrets};
 use novel_workflow::{
-    AttemptPhase, CHAPTER_PLAN_VERSION, NextAction, PRODUCTION_PLAN_VERSION, RecoveryDecision,
-    StepScope, StepSpec, book_scope, chapter_scope, decide, find_step, next_action,
-    production_plan,
+    AttemptPhase, CHAPTER_PLAN_VERSION, NextAction, RecoveryDecision, StepScope, StepSpec,
+    book_scope, chapter_scope, decide, find_step, next_action, plan_for_version, production_plan,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -20,7 +19,8 @@ use crate::hash::sha256_hex;
 use crate::hub::EventHub;
 use crate::ports::{
     ClaimedRun, Clock, ControlWrite, FaultInjector, Ids, ModelSecrets, NewArtifact, NewAttempt,
-    NewCandidate, NewInvocation, NovelRepository, PromoteOutcome, WorkflowRepository,
+    NewCandidate, NewInvocation, NewQualityDebt, NovelRepository, PromoteOutcome,
+    WorkflowRepository,
 };
 
 mod worker_validation;
@@ -175,9 +175,7 @@ impl Worker {
     }
 
     async fn follow_plan(&self, claimed: &ClaimedRun) -> Result<TickOutcome, AppError> {
-        if claimed.contract.plan_version != PRODUCTION_PLAN_VERSION
-            || claimed.contract.chapter_plan_version != CHAPTER_PLAN_VERSION
-        {
+        let Some(plan) = plan_for_version(&claimed.contract.plan_version) else {
             return self
                 .pause(
                     claimed,
@@ -186,13 +184,19 @@ impl Worker {
                     None,
                 )
                 .await;
+        };
+        if claimed.contract.chapter_plan_version != CHAPTER_PLAN_VERSION {
+            return self
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    "保存的章节计划版本无法继续，需要人工查看。",
+                    None,
+                )
+                .await;
         }
         let artifacts = self.runs.list_artifacts(&claimed.novel_id).await?;
-        match next_action(
-            &production_plan(),
-            &artifacts,
-            &claimed.contract.target_chapter_id,
-        ) {
+        match next_action(&plan, &artifacts, &claimed.contract.target_chapter_id) {
             NextAction::Succeed => {
                 self.transition(claimed, ControlEvent::Succeed, "run_completed", None, "{}")
                     .await
@@ -232,7 +236,9 @@ impl Worker {
         step_id: &str,
         resume_attempt: Option<String>,
     ) -> Result<TickOutcome, AppError> {
-        let spec = find_step(&production_plan(), step_id)
+        let plan = plan_for_version(&claimed.contract.plan_version)
+            .ok_or_else(|| AppError::integrity("创作计划版本不存在。"))?;
+        let spec = find_step(&plan, step_id)
             .copied()
             .ok_or_else(|| AppError::integrity("创作步骤不在已冻结的计划里。"))?;
         match step_id {
@@ -241,15 +247,18 @@ impl Worker {
             "story_macro" | "character_cast" | "volume_strategy" | "chapter_list"
             | "consistency_review" => execute_structured(self, claimed, &spec, step_id).await,
             "context" => execute_context(self, claimed, &spec).await,
-            "bounded_repair" => {
+            "bounded_repair"
+                if claimed.contract.plan_version == novel_workflow::PRODUCTION_PLAN_VERSION_V1 =>
+            {
                 self.pause(
                     claimed,
                     StopSignalKind::DataIntegrity,
-                    "一致性审校发现了问题，但自动修复能力尚未接入。已停止在人工审查点，不会生成修复产物或提交正文。",
+                    "旧计划版本仍停在人工审查点；不会静默迁移到新的自动修复规则。",
                     Some(step_id.into()),
                 )
                 .await
             }
+            "bounded_repair" => self.execute_bounded_repair(claimed, &spec).await,
             _ => {
                 // The approval artifact is created by the gate transition; other
                 // non-business plumbing steps remain explicit placeholders until
@@ -408,6 +417,7 @@ impl Worker {
             .record_invocation(invocation(
                 self,
                 claimed,
+                "draft",
                 &request_id,
                 &summary,
                 started,
@@ -433,6 +443,262 @@ impl Worker {
             Some(attempt_id),
         )
         .await
+    }
+
+    async fn execute_bounded_repair(
+        &self,
+        claimed: &ClaimedRun,
+        spec: &StepSpec,
+    ) -> Result<TickOutcome, AppError> {
+        let artifacts = self.runs.list_artifacts(&claimed.novel_id).await?;
+        let scope = chapter_scope(&claimed.contract.target_chapter_id);
+        let review = latest_payload(&artifacts, "consistency_review", &scope)?;
+        let issues = review
+            .get("issueDetails")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if issues.is_empty() {
+            return self
+                .finish_step(
+                    claimed,
+                    spec,
+                    "confirmed",
+                    false,
+                    &serde_json::json!({ "status": "no_issues" }).to_string(),
+                    None,
+                    None,
+                )
+                .await;
+        }
+        if claimed.contract.max_automatic_retries == 0 {
+            return self
+                .pause(
+                    claimed,
+                    StopSignalKind::Safety,
+                    "一致性审校发现了问题，但冻结的预算不允许自动修复。已停在人工审查点，正文不会被自动提升。",
+                    Some("bounded_repair".into()),
+                )
+                .await;
+        }
+        let candidate = self
+            .runs
+            .latest_candidate(&claimed.run_id)
+            .await?
+            .ok_or_else(|| AppError::integrity("修复缺少候选正文。"))?;
+        let context = latest_payload(&artifacts, "context", &scope)?;
+        let context_text = context
+            .get("promptText")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| AppError::integrity("修复缺少上下文。"))?;
+        let repair_asset = novel_prompt::resolve("chapter_repair", "chapter-repair-v1")
+            .map_err(|_| AppError::validation("修订提示词版本不存在"))?;
+        let mut vars = BTreeMap::new();
+        vars.insert("context".into(), context_text.to_string());
+        vars.insert(
+            "issues".into(),
+            serde_json::to_string(&issues)
+                .map_err(|_| AppError::integrity("审校问题无法序列化"))?,
+        );
+        vars.insert("candidate".into(), candidate.content.clone());
+        let prompt = novel_prompt::render(repair_asset.template, &vars)
+            .map_err(|_| AppError::validation("修订提示词缺少上下文"))?;
+        let summary = summarize(&prompt);
+        let attempt_id = self.ids.new_id();
+        self.runs
+            .start_attempt(NewAttempt {
+                id: attempt_id.clone(),
+                run_id: claimed.run_id.clone(),
+                step_id: "bounded_repair".into(),
+                control_version: claimed.control.version,
+                created_at: self.clock.now_ms(),
+            })
+            .await?;
+        let request_id = self.ids.new_id();
+        if !self
+            .runs
+            .mark_remote_started(&attempt_id, &request_id, self.clock.now_ms())
+            .await?
+        {
+            return Ok(TickOutcome::LostLease {
+                run_id: claimed.run_id.clone(),
+            });
+        }
+        let api_key = self
+            .secrets
+            .api_key(&claimed.contract.provider)
+            .await?
+            .unwrap_or_default();
+        let cancel = CancellationToken::new();
+        self.cancels
+            .lock()
+            .expect("cancel map")
+            .insert(claimed.run_id.clone(), cancel.clone());
+        let _cancel_guard = CancelRegistration {
+            run_id: claimed.run_id.clone(),
+            cancels: self.cancels.clone(),
+        };
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<String>(64);
+        let collect = tokio::spawn(async move {
+            let mut text = String::new();
+            while let Some(delta) = receiver.recv().await {
+                text.push_str(&delta);
+            }
+            text
+        });
+        let started = self.clock.now_ms();
+        let generated = self
+            .llm
+            .generate(
+                LlmRequest {
+                    request_id: request_id.clone(),
+                    model: claimed.contract.model.clone(),
+                    prompt,
+                    endpoint: claimed.contract.endpoint.clone(),
+                    api_key,
+                    allow_localhost_http: claimed.contract.allow_localhost_http,
+                    max_output_tokens: claimed.contract.token_budget,
+                },
+                sender,
+                cancel,
+            )
+            .await;
+        let raw = collect.await.unwrap_or_default();
+        let response = match generated {
+            Ok(response) => response,
+            Err(error) => {
+                self.runs
+                    .mark_attempt(
+                        &attempt_id,
+                        AttemptPhase::Interrupted.as_str(),
+                        None,
+                        self.clock.now_ms(),
+                    )
+                    .await?;
+                if matches!(error, novel_llm::LlmError::Cancelled) {
+                    return self
+                        .write(
+                            claimed,
+                            ControlEvent::Cancel,
+                            "run_cancelled",
+                            Some("bounded_repair".into()),
+                            &serde_json::json!({ "reason": error.to_string() }).to_string(),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await;
+                }
+                return self
+                    .pause(
+                        claimed,
+                        StopSignalKind::ProviderUnavailable,
+                        &error.to_string(),
+                        Some("bounded_repair".into()),
+                    )
+                    .await;
+            }
+        };
+        let repaired = if raw.trim().is_empty() {
+            response.text.clone()
+        } else {
+            raw
+        };
+        if repaired.trim().is_empty() {
+            return self
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    "修复模型返回了空正文，未生成修复候选。",
+                    Some("bounded_repair".into()),
+                )
+                .await;
+        }
+        let repaired_candidate_id = self.ids.new_id();
+        self.runs
+            .save_candidate(NewCandidate {
+                id: repaired_candidate_id.clone(),
+                chapter_id: claimed.contract.target_chapter_id.clone(),
+                run_id: claimed.run_id.clone(),
+                step_id: "bounded_repair".into(),
+                content: repaired.clone(),
+                content_sha256: sha256_hex(repaired.as_bytes()),
+                now_ms: self.clock.now_ms(),
+            })
+            .await?;
+        self.runs
+            .record_invocation(invocation(
+                self,
+                claimed,
+                "bounded_repair",
+                &request_id,
+                &summary,
+                started,
+                &response.usage,
+            ))
+            .await?;
+        // Finish the repair record before re-review so both the repair and the
+        // review remain visible, then re-claim the control version for the review.
+        self.finish_step(
+            claimed,
+            spec,
+            "confirmed",
+            false,
+            &serde_json::json!({
+                "status": "repair_candidate_created",
+                "originalCandidateId": candidate.id,
+                "repairedCandidateId": repaired_candidate_id,
+            })
+            .to_string(),
+            None,
+            Some(attempt_id),
+        )
+        .await?;
+        let control = self.runs.run_control(&claimed.run_id).await?;
+        let fresh = ClaimedRun {
+            run_id: claimed.run_id.clone(),
+            novel_id: claimed.novel_id.clone(),
+            contract: claimed.contract.clone(),
+            control,
+        };
+        let review_spec = find_step(&production_plan(), "consistency_review")
+            .copied()
+            .expect("review step");
+        let outcome = execute_structured(self, &fresh, &review_spec, "consistency_review").await?;
+        if !matches!(outcome, TickOutcome::Advanced { .. }) {
+            return Ok(outcome);
+        }
+        let after = self.runs.list_artifacts(&claimed.novel_id).await?;
+        let latest_review = after
+            .iter()
+            .filter(|artifact| {
+                artifact.artifact_type == "consistency_review" && artifact.scope == scope
+            })
+            .max_by_key(|artifact| artifact.version);
+        let remaining = latest_review
+            .and_then(|artifact| {
+                serde_json::from_str::<serde_json::Value>(&artifact.payload_json).ok()
+            })
+            .and_then(|payload| payload.get("issues").and_then(serde_json::Value::as_i64))
+            .unwrap_or(0);
+        if remaining > 0 {
+            let control = self.runs.run_control(&claimed.run_id).await?;
+            let fresh = ClaimedRun {
+                run_id: claimed.run_id.clone(),
+                novel_id: claimed.novel_id.clone(),
+                contract: claimed.contract.clone(),
+                control,
+            };
+            return self
+                .pause(
+                    &fresh,
+                    StopSignalKind::Safety,
+                    "有界修复后仍有一致性问题，已停在上限并保留候选，等待人工决策。",
+                    Some("bounded_repair".into()),
+                )
+                .await;
+        }
+        Ok(outcome)
     }
 
     async fn finish_protected_draft(&self, claimed: &ClaimedRun) -> Result<TickOutcome, AppError> {
@@ -870,6 +1136,7 @@ async fn execute_structured(
         .record_invocation(invocation(
             worker,
             claimed,
+            step_id,
             &request_id,
             &summary,
             started,
@@ -877,7 +1144,7 @@ async fn execute_structured(
         ))
         .await?;
     let status = if spec.gateable { "draft" } else { "confirmed" };
-    worker
+    let outcome = worker
         .finish_step(
             claimed,
             spec,
@@ -887,7 +1154,72 @@ async fn execute_structured(
             None,
             Some(attempt_id),
         )
-        .await
+        .await?;
+    if step_id == "consistency_review" {
+        record_review_debt(worker, claimed, &payload).await?;
+    }
+    Ok(outcome)
+}
+
+async fn record_review_debt(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    payload: &str,
+) -> Result<(), AppError> {
+    let value: serde_json::Value =
+        serde_json::from_str(payload).map_err(|_| AppError::integrity("审校产物无法解析"))?;
+    let issues = value
+        .get("issueDetails")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+    let review_version = artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.artifact_type == "consistency_review"
+                && artifact.scope == chapter_scope(&claimed.contract.target_chapter_id)
+        })
+        .map(|artifact| artifact.version)
+        .max()
+        .unwrap_or(0);
+    if issues.is_empty() {
+        worker
+            .runs
+            .resolve_quality_debt(
+                &claimed.run_id,
+                &format!("审校版本 v{review_version} 通过，无遗留问题。"),
+                worker.clock.now_ms(),
+            )
+            .await?;
+        return Ok(());
+    }
+    let items = issues
+        .iter()
+        .filter_map(|issue| {
+            let issue_id = issue.get("issueId")?.as_str()?.to_string();
+            Some(NewQualityDebt {
+                id: format!("debt-{}-{issue_id}", claimed.run_id),
+                novel_id: claimed.novel_id.clone(),
+                chapter_id: claimed.contract.target_chapter_id.clone(),
+                run_id: claimed.run_id.clone(),
+                issue_id,
+                issue_type: issue.get("type")?.as_str()?.to_string(),
+                severity: issue.get("severity")?.as_str()?.to_string(),
+                description: issue.get("description")?.as_str()?.to_string(),
+                evidence: issue.get("evidence")?.as_str()?.to_string(),
+                suggestion: issue.get("suggestion")?.as_str()?.to_string(),
+                source_ref: issue
+                    .get("sourceRef")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                review_version,
+                now_ms: worker.clock.now_ms(),
+            })
+        })
+        .collect::<Vec<_>>();
+    worker.runs.record_quality_debt(&items).await?;
+    Ok(())
 }
 
 async fn execute_context(
@@ -1027,6 +1359,7 @@ fn summarize(prompt: &str) -> String {
 fn invocation(
     worker: &Worker,
     claimed: &ClaimedRun,
+    step_id: &str,
     request_id: &str,
     summary: &str,
     started: i64,
@@ -1036,7 +1369,7 @@ fn invocation(
         id: worker.ids.new_id(),
         request_id: request_id.to_string(),
         run_id: claimed.run_id.clone(),
-        step_id: "draft".into(),
+        step_id: step_id.to_string(),
         provider: claimed.contract.provider.clone(),
         model: claimed.contract.model.clone(),
         input_summary: summary.to_string(),

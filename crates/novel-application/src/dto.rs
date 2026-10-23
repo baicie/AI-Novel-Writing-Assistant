@@ -272,10 +272,33 @@ pub struct RunDetailView {
     pub failure_reason: Option<String>,
     pub gate: Option<RunGateView>,
     pub latest_candidate: Option<RunCandidateView>,
+    pub quality_debt: Vec<QualityDebtView>,
+    pub legal_actions: Vec<String>,
     pub artifacts: Vec<RunArtifactView>,
     pub usage: RunUsageView,
     pub provider: String,
     pub model: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityDebtView {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub issue_id: String,
+    pub issue_type: String,
+    pub severity: String,
+    pub description: String,
+    pub evidence: String,
+    pub suggestion: String,
+    pub source_ref: Option<String>,
+    pub review_version: i64,
+    pub status: String,
+    pub resolution_evidence: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

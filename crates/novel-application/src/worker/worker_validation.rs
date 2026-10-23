@@ -229,15 +229,51 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                 .get("issues")
                 .and_then(serde_json::Value::as_array)
                 .ok_or("审校结果缺少 issues 数组")?;
-            for issue in issues {
+            let mut normalized_issues = Vec::with_capacity(issues.len());
+            for (index, issue) in issues.iter().enumerate() {
                 for key in ["type", "severity", "evidence", "suggestion"] {
                     required_string(issue, key)?;
                 }
+                let issue_id = issue
+                    .get("issueId")
+                    .or_else(|| issue.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| {
+                        format!(
+                            "issue-{index}-{}",
+                            crate::hash::sha256_hex(issue.to_string().as_bytes())
+                        )
+                    });
+                let description = issue
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        issue
+                            .get("evidence")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                    });
+                normalized_issues.push(serde_json::json!({
+                    "issueId": issue_id,
+                    "type": issue["type"],
+                    "severity": issue["severity"],
+                    "description": description,
+                    "evidence": issue["evidence"],
+                    "suggestion": issue["suggestion"],
+                    "sourceRef": issue.get("sourceRef").cloned().unwrap_or(serde_json::Value::Null),
+                }));
             }
             let normalized = serde_json::json!({
-                "issues": issues.len(),
-                "issueDetails": issues,
-                "status": if issues.is_empty() { "clean" } else { "issues_found" },
+                "issues": normalized_issues.len(),
+                "issueDetails": normalized_issues,
+                "status": if normalized_issues.is_empty() { "clean" } else { "issues_found" },
+                "reviewOutcome": if normalized_issues.is_empty() {
+                    "review_succeeded_no_issues"
+                } else {
+                    "review_succeeded_with_issues"
+                },
             });
             return serde_json::to_string(&normalized).map_err(|_| "审校结果无法序列化".into());
         }

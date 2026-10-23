@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use novel_application::{
     CandidateBody, ChapterFullDetail, ClaimedRun, CommandOutcome, ControlCommit, ControlWrite,
-    NewArtifact, NewAttempt, NewCandidate, NewInvocation, OpenRunRecord, PortError,
-    RunArtifactView, RunContract, RunSummary, RunUsageView, StoredEvent, WorkflowRepository,
+    NewArtifact, NewAttempt, NewCandidate, NewInvocation, NewQualityDebt, OpenRunRecord, PortError,
+    QualityDebtView, RunArtifactView, RunContract, RunSummary, RunUsageView, StoredEvent,
+    WorkflowRepository, sha256_hex,
 };
 use novel_domain::{
     ControlEvent, DomainError, RunControl, RunGate, RunPause, apply_event, note_lease, parse_status,
@@ -341,6 +342,95 @@ impl WorkflowRepository for SqliteKernel {
         Ok(())
     }
 
+    async fn record_quality_debt(&self, items: &[NewQualityDebt]) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        for item in items {
+            sqlx::query(
+                "INSERT INTO chapter_quality_debt
+                    (id, novel_id, chapter_id, run_id, issue_id, issue_type, severity,
+                     description, evidence, suggestion, source_ref, review_version, status,
+                     resolution_evidence, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', NULL, ?, ?)
+                 ON CONFLICT(run_id, issue_id) DO NOTHING",
+            )
+            .bind(&item.id)
+            .bind(&item.novel_id)
+            .bind(&item.chapter_id)
+            .bind(&item.run_id)
+            .bind(&item.issue_id)
+            .bind(&item.issue_type)
+            .bind(&item.severity)
+            .bind(&item.description)
+            .bind(&item.evidence)
+            .bind(&item.suggestion)
+            .bind(&item.source_ref)
+            .bind(item.review_version)
+            .bind(item.now_ms)
+            .bind(item.now_ms)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        }
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn list_quality_debt(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<QualityDebtView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, chapter_id, run_id, issue_id, issue_type, severity,
+                    description, evidence, suggestion, source_ref, review_version, status,
+                    resolution_evidence, created_at, updated_at
+             FROM chapter_quality_debt WHERE novel_id = ? AND chapter_id = ?
+             ORDER BY created_at ASC, id ASC",
+        )
+        .bind(novel_id)
+        .bind(chapter_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(QualityDebtView {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+                    run_id: row.try_get("run_id").map_err(map_sql)?,
+                    issue_id: row.try_get("issue_id").map_err(map_sql)?,
+                    issue_type: row.try_get("issue_type").map_err(map_sql)?,
+                    severity: row.try_get("severity").map_err(map_sql)?,
+                    description: row.try_get("description").map_err(map_sql)?,
+                    evidence: row.try_get("evidence").map_err(map_sql)?,
+                    suggestion: row.try_get("suggestion").map_err(map_sql)?,
+                    source_ref: row.try_get("source_ref").map_err(map_sql)?,
+                    review_version: row.try_get("review_version").map_err(map_sql)?,
+                    status: row.try_get("status").map_err(map_sql)?,
+                    resolution_evidence: row.try_get("resolution_evidence").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                    updated_at: row.try_get("updated_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn resolve_quality_debt(
+        &self,
+        run_id: &str,
+        evidence: &str,
+        now_ms: i64,
+    ) -> Result<u64, PortError> {
+        let result = sqlx::query(
+            "UPDATE chapter_quality_debt SET status = 'resolved', resolution_evidence = ?, updated_at = ?
+             WHERE run_id = ? AND status = 'open'",
+        )
+        .bind(evidence).bind(now_ms).bind(run_id)
+        .execute(&self.pool).await.map_err(map_sql)?;
+        Ok(result.rows_affected())
+    }
+
     async fn record_invocation(&self, invocation: NewInvocation) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         insert_invocation(&mut tx, &invocation).await?;
@@ -367,7 +457,7 @@ impl WorkflowRepository for SqliteKernel {
     }
 
     async fn latest_candidate(&self, run_id: &str) -> Result<Option<CandidateBody>, PortError> {
-        let row = sqlx::query("SELECT id, content FROM chapter_candidate WHERE run_id = ? ORDER BY updated_at DESC LIMIT 1")
+        let row = sqlx::query("SELECT id, content FROM chapter_candidate WHERE run_id = ? ORDER BY updated_at DESC, rowid DESC LIMIT 1")
             .bind(run_id)
             .fetch_optional(&self.pool)
             .await
@@ -442,6 +532,177 @@ impl WorkflowRepository for SqliteKernel {
         }
         tx.commit().await.map_err(map_sql)?;
         Ok(ControlCommit { control: next, seq })
+    }
+
+    async fn reject_gate(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        regenerate: bool,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(existing) = lookup_command(&mut tx, command_id, request_hash).await? {
+            return Ok(existing);
+        }
+        let current = load_control(&mut tx, run_id)
+            .await?
+            .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
+        if current.control.status != novel_domain::RunStatus::WaitingApproval {
+            return Err(PortError::Conflict("这一步还没有到需要拒绝的时候。".into()));
+        }
+        if expected_version.is_some_and(|expected| expected != current.control.version) {
+            return Err(PortError::Conflict(
+                "创作进度已经变化，请刷新后重新操作。".into(),
+            ));
+        }
+        let gate = current
+            .control
+            .gate
+            .clone()
+            .ok_or_else(|| PortError::Integrity("缺少等待确认的内容。".into()))?;
+        for artifact_type in &gate.artifact_types {
+            sqlx::query(
+                "UPDATE workflow_artifact SET status = 'stale'
+                 WHERE novel_id = ? AND run_id = ? AND type = ? AND status = 'draft'",
+            )
+            .bind(&current.novel_id)
+            .bind(run_id)
+            .bind(artifact_type)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        }
+        if regenerate {
+            for artifact_type in [
+                "volume_strategy",
+                "chapter_list",
+                "context",
+                "chapter_draft",
+                "consistency_review",
+                "repair_notes",
+                "chapter_approval",
+            ] {
+                sqlx::query(
+                    "UPDATE workflow_artifact SET status = 'stale'
+                     WHERE novel_id = ? AND run_id = ? AND type = ?",
+                )
+                .bind(&current.novel_id)
+                .bind(run_id)
+                .bind(artifact_type)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+            }
+        }
+        let kind = if regenerate { "regenerate" } else { "reject" };
+        let event = if regenerate {
+            "gate_regenerate_requested"
+        } else {
+            "gate_rejected"
+        };
+        let payload =
+            serde_json::json!({ "gateId": gate.id, "regenerate": regenerate }).to_string();
+        let outcome = transition_command(
+            &mut tx,
+            &current,
+            run_id,
+            ControlEvent::ResolveGate,
+            event,
+            Some(&gate.id),
+            &payload,
+            command_id,
+            request_hash,
+            kind,
+            now_ms,
+            true,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(outcome)
+    }
+
+    async fn confirm_after_edit(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        expected_version: Option<i64>,
+        artifact_id: &str,
+        payload_json: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(existing) = lookup_command(&mut tx, command_id, request_hash).await? {
+            return Ok(existing);
+        }
+        let current = load_control(&mut tx, run_id)
+            .await?
+            .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
+        if current.control.status != novel_domain::RunStatus::WaitingApproval {
+            return Err(PortError::Conflict("这一步还没有到需要确认的时候。".into()));
+        }
+        if expected_version.is_some_and(|expected| expected != current.control.version) {
+            return Err(PortError::Conflict(
+                "创作进度已经变化，请刷新后重新确认。".into(),
+            ));
+        }
+        let gate = current
+            .control
+            .gate
+            .clone()
+            .ok_or_else(|| PortError::Integrity("缺少等待确认的内容。".into()))?;
+        let artifact_type = gate
+            .artifact_types
+            .first()
+            .ok_or_else(|| PortError::Integrity("确认点没有产物。".into()))?
+            .clone();
+        let scope: String = sqlx::query_scalar(
+            "SELECT scope FROM workflow_artifact WHERE novel_id = ? AND run_id = ? AND type = ?
+             ORDER BY version DESC LIMIT 1",
+        )
+        .bind(&current.novel_id)
+        .bind(run_id)
+        .bind(&artifact_type)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("确认点产物不存在。".into()))?;
+        serde_json::from_str::<serde_json::Value>(payload_json)
+            .map_err(|_| PortError::Integrity("修改后的内容不是合法 JSON。".into()))?;
+        crate::novels::insert_artifact(
+            &mut tx,
+            artifact_id,
+            &current.novel_id,
+            Some(run_id),
+            &artifact_type,
+            &scope,
+            "user_edited",
+            true,
+            payload_json,
+            &sha256_hex(payload_json.as_bytes()),
+            now_ms,
+        )
+        .await?;
+        let outcome = transition_command(
+            &mut tx,
+            &current,
+            run_id,
+            ControlEvent::ResolveGate,
+            "gate_confirmed_after_edit",
+            Some(&gate.id),
+            &serde_json::json!({ "artifactId": artifact_id }).to_string(),
+            command_id,
+            request_hash,
+            "confirm_after_edit",
+            now_ms,
+            true,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(outcome)
     }
 
     async fn approve(

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-after-edit-run"
+description = "Enables the confirm_after_edit_run command without any pre-configured scope."
+commands.allow = ["confirm_after_edit_run"]
+
+[[permission]]
+identifier = "deny-confirm-after-edit-run"
+description = "Denies the confirm_after_edit_run command without any pre-configured scope."
+commands.deny = ["confirm_after_edit_run"]

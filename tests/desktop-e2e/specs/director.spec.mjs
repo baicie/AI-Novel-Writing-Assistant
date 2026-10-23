@@ -8,7 +8,12 @@ async function tauriInvoke(command, args = {}) {
 
 async function openDirector(novelId) {
   await browser.execute((id) => { window.location.hash = `#/lab/director/${id}`; }, novelId);
+  await browser.refresh();
   await (await $("[data-tauri-director-page]")).waitForDisplayed({ timeout: 20_000 });
+  await browser.waitUntil(async () => (await $("[data-testid=director-start-button]")).isExisting(), {
+    timeout: 20_000,
+    timeoutMsg: "Director start control missing after navigation",
+  });
 }
 
 async function createFixture(title) {
@@ -86,3 +91,29 @@ describe("Biz Novel Studio Native Director", () => {
     expect(reopened.content).toBe(chapter.content);
   });
 });
+
+  it("rejects and regenerates a gated candidate while retaining history", async () => {
+    const fixture = await createFixture("WDIO 拒绝重生成书");
+    await openDirector(fixture.novelId);
+    await (await $("[data-testid=director-start-button]")).click();
+    const runId = await readRunId();
+    await (await $("[data-testid=director-reject-button]")).waitForDisplayed({ timeout: 45_000 });
+    const before = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+    await (await $("[data-testid=director-reject-button]")).click();
+    await browser.waitUntil(async () => {
+      const current = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+      return current.controlVersion > before.controlVersion;
+    }, { timeout: 30_000 });
+    await (await $("[data-testid=director-regenerate-button]")).waitForDisplayed({ timeout: 45_000 });
+    const second = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+    await (await $("[data-testid=director-regenerate-button]")).click();
+    await browser.waitUntil(async () => {
+      const current = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+      return current.controlVersion > second.controlVersion;
+    }, { timeout: 30_000 });
+    const detail = await tauriInvoke("get_run_detail", { novelId: fixture.novelId, runId });
+    const castArtifacts = detail.artifacts.filter(artifact => artifact.artifactType === "character_cast");
+    expect(castArtifacts.length).toBeGreaterThanOrEqual(2);
+    expect(castArtifacts.some(artifact => artifact.status === "stale")).toBe(true);
+    await tauriInvoke("cancel_run", { commandId: `wdio-decision-cancel-${Date.now()}`, runId });
+  });

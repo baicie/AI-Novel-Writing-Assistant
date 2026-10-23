@@ -209,3 +209,46 @@ pub async fn subscribe_run(
     });
     Ok(())
 }
+
+#[tauri::command]
+pub async fn reject_run(
+    state: State<'_, AppState>,
+    command_id: String,
+    run_id: String,
+    expected_version: Option<i64>,
+) -> Result<CommandOutcome, AppError> {
+    state
+        .runtime
+        .director
+        .reject(&command_id, &run_id, expected_version)
+        .await
+}
+
+#[tauri::command]
+pub async fn regenerate_run(
+    state: State<'_, AppState>,
+    command_id: String,
+    run_id: String,
+    expected_version: Option<i64>,
+) -> Result<CommandOutcome, AppError> {
+    state
+        .runtime
+        .director
+        .regenerate(&command_id, &run_id, expected_version)
+        .await
+}
+
+#[tauri::command]
+pub async fn confirm_after_edit_run(
+    state: State<'_, AppState>,
+    command_id: String,
+    run_id: String,
+    expected_version: Option<i64>,
+    payload_json: String,
+) -> Result<CommandOutcome, AppError> {
+    state
+        .runtime
+        .director
+        .confirm_after_edit(&command_id, &run_id, expected_version, &payload_json)
+        .await
+}

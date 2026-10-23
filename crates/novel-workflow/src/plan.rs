@@ -1,7 +1,8 @@
 use novel_domain::{ArtifactStatus, ArtifactView};
 use serde_json::Value;
 
-pub const PRODUCTION_PLAN_VERSION: &str = "novel-production-v1";
+pub const PRODUCTION_PLAN_VERSION: &str = "novel-production-v2";
+pub const PRODUCTION_PLAN_VERSION_V1: &str = "novel-production-v1";
 pub const CHAPTER_PLAN_VERSION: &str = "chapter-chain-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,8 +61,24 @@ pub fn chapter_scope(chapter_id: &str) -> String {
 }
 
 pub fn production_plan() -> WorkflowDefinition {
+    plan_with_version(PRODUCTION_PLAN_VERSION)
+}
+
+pub fn production_plan_v1() -> WorkflowDefinition {
+    plan_with_version(PRODUCTION_PLAN_VERSION_V1)
+}
+
+pub fn plan_for_version(version: &str) -> Option<WorkflowDefinition> {
+    match version {
+        PRODUCTION_PLAN_VERSION => Some(production_plan()),
+        PRODUCTION_PLAN_VERSION_V1 => Some(production_plan_v1()),
+        _ => None,
+    }
+}
+
+fn plan_with_version(version: &'static str) -> WorkflowDefinition {
     WorkflowDefinition {
-        version: PRODUCTION_PLAN_VERSION,
+        version,
         chapter_version: CHAPTER_PLAN_VERSION,
         steps: vec![
             step(
