@@ -1,6 +1,6 @@
 # P11 Acceptance
 
-基线：`3a6622ec`。最终代码/测试 HEAD：`5863b387`。
+基线：`3a6622ec`。最终代码/测试 HEAD：`cd561a51`。
 
 ## 状态
 
@@ -70,7 +70,7 @@ cargo test -p novel-application --test p11_repair_faults
 ## 回归
 
 - Rust workspace：251 passed
-- 干净 Worktree all-targets（HEAD 5863b387）：PASS
+- 干净 Worktree all-targets（HEAD cd561a51）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
 - typecheck：PASS
