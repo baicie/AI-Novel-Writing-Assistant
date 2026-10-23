@@ -36,7 +36,7 @@ PASS
 
 ## 最终状态
 
-**PARTIAL**：本地 SQLite/FTS/vector/RRF/Context Policy 已有基础；本轮补中文单字 token 与 Policy benchmark。完整本地知识库管理 UI 与中文词典未实现。
+**VERIFIED（基线）**：本地 SQLite / FTS / vector / RRF / Context Policy 已实现并有中文 RAG recall/precision 与 100 章 Context 测试。独立管理 UI 沿用既有知识库页面；更大规模人工评估与真实 Embedding 对比仍属后续增强。
 
 
 ## Context Policy 增量

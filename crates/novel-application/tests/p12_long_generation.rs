@@ -14,7 +14,7 @@ fn volume() -> String {
     serde_json::json!({"volumes":[{"volumeOrder":1,"title":"山门卷","roleLabel":"开局","coreReward":"入门","planningMode":"hard"}]}).to_string()
 }
 fn chapter_plan() -> String {
-    let chapters: Vec<_> = (1..=10)
+    let chapters: Vec<_> = (1..=100)
         .map(|order| {
             serde_json::json!({
                 "chapterOrder": order, "title": format!("第{order}章"), "volumeTitle": "山门卷",
@@ -29,7 +29,7 @@ fn clean_review() -> String {
 }
 
 #[tokio::test]
-async fn ten_chapter_mock_generation_benchmark() {
+async fn hundred_chapter_mock_generation_benchmark() {
     let dir = tempfile::tempdir().unwrap();
     let kernel = Arc::new(
         SqliteKernel::open(&dir.path().join("long-gen.sqlite"))
@@ -42,7 +42,7 @@ async fn ten_chapter_mock_generation_benchmark() {
         ("STEP:volume_strategy", volume()),
         ("STEP:chapter_list", chapter_plan()),
     ];
-    for order in 1..=10 {
+    for order in 1..=100 {
         outputs.push((
             "STEP:chapter_draft",
             format!("第{order}章正文：林动推进主线，事实节点 {order}。"),
@@ -71,7 +71,7 @@ async fn ten_chapter_mock_generation_benchmark() {
         .await
         .unwrap();
     let mut chapters = Vec::new();
-    for order in 1..=10 {
+    for order in 1..=100 {
         chapters.push(
             runtime
                 .director
@@ -81,6 +81,7 @@ async fn ten_chapter_mock_generation_benchmark() {
         );
     }
     let mut prompt_snapshots = Vec::new();
+    let mut character_hits = 0;
     for (index, chapter) in chapters.iter().enumerate() {
         let opened = runtime
             .director
@@ -141,6 +142,9 @@ async fn ten_chapter_mock_generation_benchmark() {
         .await
         .unwrap();
         assert!(saved.content.contains(&format!("事实节点 {}", index + 1)));
+        if saved.content.contains("林动") {
+            character_hits += 1;
+        }
         let contexts = WorkflowRepository::run_artifacts(kernel.as_ref(), &opened.run_id)
             .await
             .unwrap();
@@ -157,21 +161,32 @@ async fn ten_chapter_mock_generation_benchmark() {
                 .to_string(),
         );
     }
-    // Recent formal chapters and earlier frozen summaries must be visible in later prompts.
-    assert!(prompt_snapshots[4].contains("第4章正文"));
+    // Continuity: every chapter after the first must see the immediately previous official chapter.
+    for index in 1..prompt_snapshots.len() {
+        assert!(
+            prompt_snapshots[index].contains(&format!("第{index}章正文")),
+            "chapter {} context is missing previous chapter",
+            index + 1
+        );
+    }
     assert!(!prompt_snapshots[0].contains("未确认"));
+    let debt: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chapter_quality_debt WHERE run_id IS NOT NULL")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
     let committed: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT chapter_id) FROM chapter_revision WHERE chapter_id IN (SELECT id FROM chapter WHERE novel_id = ?)").bind(&novel.id).fetch_one(kernel.pool()).await.unwrap();
     assert_eq!(
-        committed, 10,
-        "all ten chapters must have official revisions"
+        committed, 100,
+        "all hundred chapters must have official revisions"
     );
     let commits: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM workflow_artifact WHERE type = 'chapter_commit'")
             .fetch_one(kernel.pool())
             .await
             .unwrap();
-    assert_eq!(commits, 10);
+    assert_eq!(commits, 100);
     println!(
-        "P12 long-generation benchmark: chapters=10 commits=10 recent_context=true repair_budget=0"
+        "P12 long-generation benchmark: chapters=100 commits=100 prior_context_recall=99/99 character_presence={character_hits}/100 review_issues={debt} repair_budget=0"
     );
 }

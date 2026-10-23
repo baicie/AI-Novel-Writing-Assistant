@@ -34,7 +34,7 @@
 
 ## 最终状态
 
-**PARTIAL**：100 章 Context Continuity baseline 与确定性 clean/repair/residual 质量 baseline 通过；真实长篇生成质量与阈值仍未实现。
+**VERIFIED（确定性 Mock 基线）**：100 章 Context Continuity、100 章连续生成、人物出现、审查问题零残留与 clean/repair/residual 质量路径已通过。真实 Provider 文学质量与伏笔回收率仍属后续增强。
 
 
 ## 100 章 Context Continuity Benchmark（本轮新增）
@@ -87,11 +87,11 @@ residual_open_debt=2
 这是确定性 Mock 质量基线，不替代真实长篇生成质量评估。
 
 
-## 10 章 Mock 连续生成 Benchmark（本轮新增）
+## 50/100 章 Mock 连续生成 Benchmark（本轮新增）
 
 `crates/novel-application/tests/p12_long_generation.rs`：
 
-- 同一本小说、10 个章节；
+- 同一本小说、100 个章节；
 - 每章独立 Run；
 - 真实 Runtime / Worker / Gate / Candidate / Commit；
 - ScriptedLlm 提供确定性章节正文与 clean Review；
@@ -101,22 +101,27 @@ residual_open_debt=2
 
 ```text
 P12 long-generation benchmark:
-chapters=10
-commits=10
-recent_context=true
+chapters=100
+commits=100
+prior_context_recall=99/99
+character_presence=100/100
+review_issues=0
 repair_budget=0
 ```
 
 断言：
 
-- 10 章全部生成正式 Revision；
-- 每章 Commit 1 次；
-- 后续章节 Context 包含前章正文；
+- 50 章版本：chapters=50 commits=50 PASS
+- 100 章版本：chapters=100 commits=100 PASS
+- 99/99 前章 Context 召回；
+- 100/100 章节包含主角事实；
+- Review issues=0；
 - Repair 预算 0 时不触发修复；
 - 无残留错误 Commit。
 
 仍不是完整质量 Benchmark：
 
-- 未统计人物一致率/伏笔回收率/时间线冲突率；
+- 未统计伏笔回收率；
 - Mock 正文不评估文学质量；
-- 尚未跑 50/100 章。
+- 未使用真实 Provider（受本轮禁止真实付费调用约束）；
+- 时间线冲突率目前为 Mock clean review=0，不是真实审校统计。
