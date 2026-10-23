@@ -101,3 +101,9 @@
 - P11.2 Candidate Edit SQLite Journal 未实施，未确认编辑仍只在 sessionStorage；Gate NOT_STARTED。
 - P11.3 Review Issue Occurrence / accepted Command+UI / 稳定跨轮关联未实施；Gate PARTIAL。
 - 不得把真实 HTTP EOF/Cancel 测试宣称为完整跨进程恢复。
+
+## B-015 P11.1-H0 后续缺口
+
+- Repair Candidate SIGKILL checkpoint 已验证；Re-review 完成后 SIGKILL、RemoteStarted 未知、Lease 过期旧 Worker、真实 timeout、持久化 Cancel 与 Candidate 竞争仍未完成。
+- P11.2 Candidate Edit Journal 未开始。
+- P11.3 Quality Debt 生命周期未开始。

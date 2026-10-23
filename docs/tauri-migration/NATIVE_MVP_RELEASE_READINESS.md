@@ -156,3 +156,9 @@ pnpm --filter @ai-novel/client test
 - P11.1 Repair 真实 HTTP SSE EOF、取消迟到 token、成功修复已验证；跨进程/Lease/timeout 未完成，PARTIAL。
 - P11.2 Candidate Edit Journal 未实施，未确认候选编辑仍用 sessionStorage，NOT_STARTED。
 - P11.3 Quality Debt lifecycle 仅审计，accepted/occurrence 未实施，PARTIAL。
+
+## P11.1-H0
+
+- Repair Candidate 落库后真实 SIGKILL + 新进程恢复已通过。
+- 仅证明该检查点；Repair 其余故障注入仍 PARTIAL。
+- P11.2 Candidate Edit Journal 未完成。

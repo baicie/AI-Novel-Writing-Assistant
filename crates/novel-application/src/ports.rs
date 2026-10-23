@@ -287,6 +287,11 @@ impl Ids for UuidIds {
 #[async_trait]
 pub trait FaultInjector: Send + Sync {
     async fn fail_after_candidate(&self, step_id: &str) -> bool;
+
+    /// Test-only recovery checkpoint. Production implementations keep the default no-op.
+    async fn after_repair_candidate_persisted(&self) -> Result<(), PortError> {
+        Ok(())
+    }
 }
 
 pub struct NoFault;

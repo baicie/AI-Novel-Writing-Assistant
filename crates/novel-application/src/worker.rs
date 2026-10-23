@@ -632,6 +632,14 @@ impl Worker {
             })
             .await?;
         self.runs
+            .mark_attempt(
+                &attempt_id,
+                AttemptPhase::CandidateSaved.as_str(),
+                Some(&repaired_candidate_id),
+                self.clock.now_ms(),
+            )
+            .await?;
+        self.runs
             .record_invocation(invocation(
                 self,
                 claimed,
@@ -642,6 +650,7 @@ impl Worker {
                 &response.usage,
             ))
             .await?;
+        self.faults.after_repair_candidate_persisted().await?;
         // Finish the repair record before re-review so both the repair and the
         // review remain visible, then re-claim the control version for the review.
         self.finish_step(

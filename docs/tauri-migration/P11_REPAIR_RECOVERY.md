@@ -82,3 +82,43 @@ cargo test -p novel-application --test p11_repair_faults
 ## 5. Gate
 
 **PARTIAL**。未达到“中断/取消/失去 Lease/跨进程恢复全部有真实证据”的 VERIFIED 条件。
+
+
+## P11.1-H0 跨进程 SIGKILL 证据
+
+测试命令：
+
+```bash
+cargo test -p novel-storage-sqlite --features test-harness \
+  --test p11_recovery_process -- --nocapture
+```
+
+结果：
+
+```text
+P11 child_pid=91637 sigkill_status=ExitStatus(unix_wait_status(9)) repairs=1 reviews=1
+P11 recovery status=Paused repairs_after=1 reviews_after=1 candidates=2 commits=0 revisions=0 debt=1
+test ... ok
+```
+
+检查点 `after_repair_candidate_persisted`：
+
+- 独立 `recovery_worker` 进程。
+- 真实 HTTP/SSE Mock Server 在父进程存活。
+- Repair Candidate 已落库。
+- Step Attempt phase = `candidate_saved`。
+- Repair Invocation 已记录。
+- 父进程读取 SQLite 后对子进程执行 SIGKILL；`unix_wait_status(9)`。
+- 新进程使用同一 SQLite 与 owner 恢复。
+- 恢复为 `Paused`（HoldInterrupted）。
+- Repair 请求数 1 → 1。
+- Re-review 请求数 1 → 1（崩溃前未开始）。
+- Candidate 数量 2，内容/hash 一致。
+- chapter_commit=0，chapter_revision=0。
+- Quality Debt=1 保留。
+
+Feature 隔离：
+
+- `test-harness` 仅在显式启用时构建 `recovery_worker`。
+- 普通构建不包含 test-only binary。
+- Worker 的 checkpoint hook 默认 no-op。

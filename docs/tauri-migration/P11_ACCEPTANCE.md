@@ -6,7 +6,7 @@
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| P11.1 Repair fault/recovery | **PARTIAL** | 真实 HTTP SSE EOF、Cancel 迟到 token、Repair success 已测；跨进程 SIGKILL/Lease/timeout 未完成 |
+| P11.1 Repair fault/recovery | **PARTIAL** | 真实 HTTP SSE EOF/Cancel/成功 + **Repair Candidate SIGKILL 新进程恢复 PASS**；Lease/timeout/re-review crash 未完成 |
 | P11.2 Candidate edit journal | **NOT_STARTED** | 仅审计；sessionStorage 仍未升级为 SQLite Journal |
 | P11.3 Quality Debt lifecycle | **PARTIAL** | 现有质量债/重复 ID 保护；occurrence/accepted Command/UI 未完成 |
 
@@ -28,6 +28,19 @@ cargo test -p novel-application --test p11_repair_faults
 - lease 过期旧 Worker 迟到写入
 - repair timeout
 - 重复 Cancel
+
+## P11.1-H0（本轮唯一新增 Gate）
+
+**VERIFIED（仅 after_repair_candidate_persisted 检查点）**
+
+- 真实 SIGKILL 退出状态 9
+- 新进程恢复为 Paused
+- Repair 请求 1→1
+- Candidate 2，原/修复保留
+- 无 Commit/Revision
+- Quality Debt 保留
+
+不把其他故障点宣称为 VERIFIED。
 
 ## P11.2 / P11.3
 
