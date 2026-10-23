@@ -9,6 +9,7 @@ import {
   clearCandidateEditDraft,
   confirmCandidateAfterEdit,
   getCandidateEditDraft,
+  listCandidateEditDrafts,
   regenerateRun,
   saveCandidateEditDraft,
   rejectRun,
@@ -22,6 +23,7 @@ import {
   replayRunEvents,
   resumeRun,
   subscribeRunWithCleanup,
+  type CandidateEditDraftView,
   type GenerationEvent,
   type RunDetailView,
 } from "@/platform/desktopTransport";
@@ -87,12 +89,15 @@ export default function TauriDirectorPage() {
   const [editingCandidate, setEditingCandidate] = useState(false);
   const [candidateEdit, setCandidateEdit] = useState("");
   const [candidateDraftStatus, setCandidateDraftStatus] = useState<"idle" | "saving" | "saved" | "error" | "restored">("idle");
+  const [candidateDraftChoices, setCandidateDraftChoices] = useState<CandidateEditDraftView[]>([]);
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
+    // sessionStorage is per window and survives refresh; a new app process gets a
+    // new writer identity. Prior drafts are discovered through the run journal.
     try {
-      candidateClientId.current = localStorage.getItem("ai-novel:candidate-edit-client:v1")
-        ?? (() => { const id = crypto.randomUUID?.() ?? `candidate-${Date.now()}`; localStorage.setItem("ai-novel:candidate-edit-client:v1", id); return id; })();
+      candidateClientId.current = sessionStorage.getItem("ai-novel:candidate-edit-client:v1")
+        ?? (() => { const id = crypto.randomUUID?.() ?? `candidate-${Date.now()}`; sessionStorage.setItem("ai-novel:candidate-edit-client:v1", id); return id; })();
     } catch { candidateClientId.current = `candidate-${Date.now()}`; }
   }
   const mounted = useRef(true);
@@ -113,20 +118,24 @@ export default function TauriDirectorPage() {
   useEffect(() => {
     if (!editingCandidate || !latestCandidate || !runId || !detail?.gate?.id) return;
     let cancelled = false;
-    void getCandidateEditDraft({ runId, gateId: detail.gate.id, clientId: candidateClientId.current })
-      .then((stored) => {
-        if (cancelled) return;
-        if (stored) {
-          candidateDraftRevision.current = stored.localRevision;
-          setCandidateEdit(stored.content);
-          setCandidateDraftStatus("restored");
-        } else {
-          candidateDraftRevision.current = 0;
-          setCandidateEdit(latestCandidate.content);
-          setCandidateDraftStatus("idle");
-        }
-      })
-      .catch(() => { if (!cancelled) setCandidateDraftStatus("error"); });
+    void (async () => {
+      const own = await getCandidateEditDraft({ runId, gateId: detail.gate!.id, clientId: candidateClientId.current });
+      if (cancelled) return;
+      if (own) {
+        candidateDraftRevision.current = own.localRevision;
+        setCandidateEdit(own.content);
+        setCandidateDraftStatus("restored");
+        setCandidateDraftChoices([]);
+        return;
+      }
+      const all = await listCandidateEditDrafts({ novelId, runId });
+      if (cancelled) return;
+      const recoverable = all.filter(draft => draft.clientId !== candidateClientId.current && (draft.content !== latestCandidate.content || draft.baseCandidateId !== latestCandidate.id));
+      setCandidateDraftChoices(recoverable);
+      candidateDraftRevision.current = 0;
+      setCandidateEdit(latestCandidate.content);
+      setCandidateDraftStatus(recoverable.length ? "idle" : "idle");
+    })().catch(() => { if (!cancelled) setCandidateDraftStatus("error"); });
     return () => { cancelled = true; };
   }, [detail?.gate?.id, editingCandidate, latestCandidate?.id, runId]);
   useEffect(() => {
@@ -146,6 +155,18 @@ export default function TauriDirectorPage() {
     }, 500);
     return () => clearTimeout(timer);
   }, [candidateEdit, detail?.chapterId, detail?.controlVersion, detail?.gate?.id, editingCandidate, latestCandidate, novelId, runId]);
+  const restoreCandidateDraft = (draft: CandidateEditDraftView) => {
+    if (!latestCandidate || draft.gateId !== detail?.gate?.id || draft.baseCandidateId !== latestCandidate.id || draft.baseContentSha256 !== latestCandidate.contentSha256) {
+      setError("这份候选草稿对应的 Gate 或候选版本已变化，只能查看，不能直接确认。");
+      return;
+    }
+    candidateDraftRevision.current = 0;
+    setCandidateEdit(draft.content);
+    setCandidateDraftStatus("restored");
+    setCandidateDraftChoices([]);
+    setError(null);
+  };
+
   const candidateDiffLines = useMemo(
     () => latestCandidate ? candidateDiff(latestCandidate.content, candidateEdit) : [],
     [latestCandidate, candidateEdit],
@@ -375,6 +396,16 @@ export default function TauriDirectorPage() {
                 <h2 className="text-sm font-semibold">编辑候选正文</h2>
                 <span data-testid="director-candidate-draft-status" className="text-xs text-muted-foreground">{candidateDraftStatus === "saved" ? "候选编辑已本地保存" : candidateDraftStatus === "restored" ? "已恢复未确认的候选编辑" : candidateDraftStatus === "error" ? "候选编辑保存失败，请重试" : candidateDraftStatus === "saving" ? "正在保存候选编辑…" : "只修改候选，不会直接覆盖正式章节"}</span>
               </div>
+              {candidateDraftChoices.length ? <div data-testid="director-candidate-draft-recovery" className="space-y-2 rounded-md bg-background/60 p-3">
+                <p className="text-xs text-muted-foreground">发现尚未确认的候选编辑。选择一份恢复后会作为当前窗口的草稿继续保存，其他草稿不会被删除。</p>
+                {candidateDraftChoices.map((draft) => {
+                  const matchesGate = draft.gateId === detail?.gate?.id && draft.baseCandidateId === latestCandidate.id && draft.baseContentSha256 === latestCandidate.contentSha256;
+                  return <div key={`${draft.gateId}:${draft.clientId}`} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-muted-foreground">窗口 {draft.clientId.slice(-6)} · 修订 {draft.localRevision} · {new Date(draft.updatedAt).toLocaleTimeString()}{matchesGate ? "" : " · 版本已变化，只读"}</span>
+                    <Button data-testid="director-candidate-draft-choice" variant="outline" onClick={() => restoreCandidateDraft(draft)} disabled={!matchesGate}>{matchesGate ? "恢复此草稿" : "旧版本草稿已保留，不可确认"}</Button>
+                  </div>;
+                })}
+              </div> : null}
               <textarea
                 data-testid="director-candidate-edit-input"
                 className="min-h-56 w-full rounded-md border border-input bg-background p-3 text-sm leading-6"

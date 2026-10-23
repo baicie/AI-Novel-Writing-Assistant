@@ -37,6 +37,7 @@ fn main() {
         "get_candidate_edit_draft",
         "save_candidate_edit_draft",
         "clear_candidate_edit_draft",
+        "list_candidate_edit_drafts",
         "cancel_run",
         "cancel_generation",
         "smoke_channel_message",

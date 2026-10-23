@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-candidate-edit-drafts"
+description = "Enables the list_candidate_edit_drafts command without any pre-configured scope."
+commands.allow = ["list_candidate_edit_drafts"]
+
+[[permission]]
+identifier = "deny-list-candidate-edit-drafts"
+description = "Denies the list_candidate_edit_drafts command without any pre-configured scope."
+commands.deny = ["list_candidate_edit_drafts"]

@@ -938,6 +938,18 @@ impl DirectorService {
             .await?)
     }
 
+    pub async fn list_candidate_edit_drafts(
+        &self,
+        novel_id: &str,
+        run_id: &str,
+    ) -> Result<Vec<CandidateEditDraftView>, AppError> {
+        self.novels.get_novel(novel_id).await?;
+        Ok(self
+            .novels
+            .list_candidate_edit_drafts(novel_id, run_id)
+            .await?)
+    }
+
     pub async fn clear_candidate_edit_draft(
         &self,
         run_id: &str,

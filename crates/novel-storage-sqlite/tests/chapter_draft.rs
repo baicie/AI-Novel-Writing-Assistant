@@ -367,3 +367,131 @@ async fn candidate_edit_journal_is_isolated_and_revision_cas() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn candidate_edit_journal_isolates_windows_and_discovers_old_drafts() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("candidate-windows.sqlite"))
+        .await
+        .unwrap();
+    let record = |client: &str, gate: &str, content: &str, expected_revision: i64| {
+        novel_application::SaveCandidateEditDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            run_id: "r".into(),
+            gate_id: gate.into(),
+            client_id: client.into(),
+            base_candidate_id: "cand".into(),
+            base_content_sha256: "base".into(),
+            content: content.into(),
+            control_version: 7,
+            expected_revision,
+            now_ms: 10,
+        }
+    };
+    let a = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-a", "gate-1", "A 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    let b = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-b", "gate-1", "B 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    assert_eq!((a.local_revision, b.local_revision), (1, 1));
+    let a2 = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-a", "gate-1", "A 的新编辑", 1),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a2.local_revision, 2);
+    let b_after = NovelRepository::get_candidate_edit_draft(&kernel, "r", "gate-1", "window-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(b_after.local_revision, 1, "A must not advance B revision");
+    assert_eq!(b_after.content, "B 的编辑");
+    assert!(
+        NovelRepository::save_candidate_edit_draft(
+            &kernel,
+            record("window-a", "gate-1", "迟到的旧 A", 1)
+        )
+        .await
+        .is_err()
+    );
+    let listed = NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|draft| draft.client_id == "window-a")
+            .count(),
+        1
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|draft| draft.client_id == "window-b")
+            .count(),
+        1
+    );
+    assert!(
+        NovelRepository::clear_candidate_edit_draft(
+            &kernel,
+            "r",
+            "gate-1",
+            "window-a",
+            "A 的新编辑",
+            2
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "gate-1", "window-b")
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // A Gate change must not make an old draft disappear.
+    let old_gate = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-c", "gate-0", "旧 Gate 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    assert_eq!(old_gate.gate_id, "gate-0");
+    let all = NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+        .await
+        .unwrap();
+    assert!(
+        all.iter()
+            .any(|draft| draft.gate_id == "gate-1" && draft.client_id == "window-b")
+    );
+    assert!(
+        all.iter()
+            .any(|draft| draft.gate_id == "gate-0" && draft.client_id == "window-c")
+    );
+
+    // Legacy drafts written under the previous shared localStorage identity remain visible.
+    let legacy = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("localStorage-shared-id", "gate-1", "旧版共享身份草稿", 0),
+    )
+    .await
+    .unwrap();
+    assert!(
+        NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+            .await
+            .unwrap()
+            .iter()
+            .any(|draft| draft.client_id == legacy.client_id)
+    );
+}

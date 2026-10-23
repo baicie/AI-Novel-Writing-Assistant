@@ -8,6 +8,11 @@ describe("Candidate edit journal restart", () => {
     await browser.refresh();
     await (await $("[data-testid=director-edit-candidate-button]")).waitForDisplayed({ timeout: 30_000 });
     await (await $("[data-testid=director-edit-candidate-button]")).click();
+    const recovery = await $("[data-testid=director-candidate-draft-recovery]");
+    await recovery.waitForDisplayed({ timeout: 20_000 });
+    const choice = await $("[data-testid=director-candidate-draft-choice]");
+    await choice.waitForDisplayed({ timeout: 10_000 });
+    await choice.click();
     const input = await $("[data-testid=director-candidate-edit-input]");
     await input.waitForDisplayed({ timeout: 20_000 });
     await browser.waitUntil(async () => (await input.getValue()).includes("候选草稿跨进程恢复正文"), { timeout: 20_000, timeoutMsg: "candidate journal was not restored" });

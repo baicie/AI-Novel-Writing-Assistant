@@ -332,6 +332,19 @@ pub async fn save_candidate_edit_draft(
 }
 
 #[tauri::command]
+pub async fn list_candidate_edit_drafts(
+    state: State<'_, AppState>,
+    novel_id: String,
+    run_id: String,
+) -> Result<Vec<novel_application::CandidateEditDraftView>, AppError> {
+    state
+        .runtime
+        .director
+        .list_candidate_edit_drafts(&novel_id, &run_id)
+        .await
+}
+
+#[tauri::command]
 pub async fn clear_candidate_edit_draft(
     state: State<'_, AppState>,
     run_id: String,

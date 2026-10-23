@@ -849,6 +849,25 @@ impl NovelRepository for SqliteKernel {
         row.as_ref().map(candidate_edit_from_row).transpose()
     }
 
+    async fn list_candidate_edit_drafts(
+        &self,
+        novel_id: &str,
+        run_id: &str,
+    ) -> Result<Vec<CandidateEditDraftView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT novel_id, chapter_id, run_id, gate_id, client_id, base_candidate_id,
+                    base_content_sha256, content, local_revision, control_version, updated_at
+             FROM candidate_edit_draft WHERE novel_id = ? AND run_id = ?
+             ORDER BY updated_at DESC, rowid DESC",
+        )
+        .bind(novel_id)
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter().map(candidate_edit_from_row).collect()
+    }
+
     async fn clear_candidate_edit_draft(
         &self,
         run_id: &str,

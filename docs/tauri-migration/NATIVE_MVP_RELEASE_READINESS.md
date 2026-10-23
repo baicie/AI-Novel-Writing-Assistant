@@ -162,3 +162,9 @@ pnpm --filter @ai-novel/client test
 - Repair Candidate 落库后真实 SIGKILL + 新进程恢复已通过。
 - 仅证明该检查点；Repair 其余故障注入仍 PARTIAL。
 - P11.2 Candidate Edit Journal 未完成。
+
+## P11.2-W1
+
+- Candidate Journal writer identity 改为窗口级 sessionStorage。
+- Discovery 按 novel + run 列出旧草稿，用户选择恢复；旧 Gate 草稿保留。
+- SQLite 多 writer 隔离通过；Native 双窗口仍 PARTIAL。

@@ -107,3 +107,9 @@
 - Repair Candidate SIGKILL checkpoint 已验证；Re-review 完成后 SIGKILL、RemoteStarted 未知、Lease 过期旧 Worker、真实 timeout、持久化 Cancel 与 Candidate 竞争仍未完成。
 - P11.2 Candidate Edit Journal 未开始。
 - P11.3 Quality Debt 生命周期未开始。
+
+## B-017 Candidate Journal 双窗口
+
+- Data contract：不同 writer 独立记录、CAS、清理隔离、旧草稿发现已通过 SQLite 测试。
+- Native 双窗口同时编辑未完成：嵌入式 WebDriver 当前测试驱动只控制单窗口；标记 PARTIAL。
+- Gate 变化 UI 仅禁用恢复/确认，未做独立视觉验收。

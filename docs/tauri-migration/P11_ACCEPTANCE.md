@@ -42,6 +42,16 @@ cargo test -p novel-application --test p11_repair_faults
 
 不把其他故障点宣称为 VERIFIED。
 
+## P11.2-W1
+
+| Gate | 状态 | 证据 |
+| --- | --- | --- |
+| G1 两窗口 writer identity 不同 | **PARTIAL** | sessionStorage 窗口级身份；无 Native 双窗口驱动 |
+| G2 两份编辑独立持久化/清理 | **VERIFIED** | SQLite 多 writer 测试 |
+| G3 Gate 变化旧草稿保留/过期确认拒绝 | **VERIFIED** | list + 旧 Gate 不可恢复；Confirm CAS 回归 |
+| G4 新进程发现并恢复旧窗口草稿 | **VERIFIED** | WDIO SIGKILL + 新 writer 恢复 Commit |
+| G5 Director/Editor 回归 | **VERIFIED（回归）** | 现有 E2E |
+
 ## P11.2
 
 **PARTIAL / core VERIFIED**

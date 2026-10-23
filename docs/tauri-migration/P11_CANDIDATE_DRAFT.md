@@ -77,3 +77,62 @@ test:candidate-journal-restart 1 passing
 ## Gate
 
 **PARTIAL**：核心跨进程恢复已验证；两窗口/Gate 变化/失败注入未完成。
+
+
+## P11.2-W1 窗口隔离与发现
+
+### Writer Identity
+
+- 旧实现：localStorage 共享 writer id，多窗口可能共用同一草稿记录。
+- 新实现：`sessionStorage` 窗口级 writer id。
+  - 同一窗口刷新保持。
+  - 新 App 进程生成新 writer id。
+  - 不依赖 writer id 作为授权凭据。
+
+### 恢复规则
+
+- 先按 run/gate/当前 writer 读取自己的草稿。
+- 未找到时，按 `novel_id + run_id` 列出所有可恢复草稿。
+- 当前 Gate/Candidate/Hash 匹配的草稿可由用户选择恢复。
+- 恢复后作为当前窗口的新草稿记录保存，不修改其他 writer 记录。
+- Gate/Candidate 不匹配的旧草稿保留，不允许 Confirm，不做自动覆盖。
+- 多个草稿全部展示，不按 updatedAt 自动选择，不自动合并。
+- Confirm 成功后只清理当前 writer/gate/content/revision 匹配记录。
+- Reject/Regenerate/Cancel 不清理其他窗口草稿。
+
+### Discovery API
+
+`list_candidate_edit_drafts(novel_id, run_id)`：
+
+- 查询受 novel + run 双重范围限制。
+- 返回 writer、gate、candidate/hash、revision、updatedAt。
+- 不返回跨小说草稿。
+
+### SQLite 验证
+
+`cargo test -p novel-storage-sqlite --test chapter_draft`
+
+新增覆盖：
+
+1. Window A/B 独立保存。
+2. 各自 revision 独立（A 更新不影响 B）。
+3. 旧 revision A 写入被拒绝。
+4. A 清理后 B 草稿仍在。
+5. Gate 变化后旧草稿仍可列出。
+6. 旧共享 localStorage 身份记录仍可发现。
+7. Discovery 按 novel/run 隔离。
+
+### Native E2E
+
+```text
+test:candidate-journal-crash    SIGKILL 预期非零
+test:candidate-journal-restart  1 passing
+```
+
+新进程使用不同 writer identity，仍能发现旧草稿；用户选择恢复后 Confirm Edit 并 Commit。
+
+### 未完成
+
+- 嵌入式 WebDriver 当前只提供单窗口控制，未建立真实双 Window 同时操作 E2E。
+- 双窗口数据合同由 SQLite 集成测试验证；Native 双窗口标记 PARTIAL。
+- Gate 变化 UI 冲突 banner 仅通过草稿列表文案/禁用确认表达，未做独立视觉验收。

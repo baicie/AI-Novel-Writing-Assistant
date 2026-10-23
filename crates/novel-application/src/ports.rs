@@ -392,6 +392,11 @@ pub trait NovelRepository: Send + Sync {
         gate_id: &str,
         client_id: &str,
     ) -> Result<Option<CandidateEditDraftView>, PortError>;
+    async fn list_candidate_edit_drafts(
+        &self,
+        novel_id: &str,
+        run_id: &str,
+    ) -> Result<Vec<CandidateEditDraftView>, PortError>;
     async fn clear_candidate_edit_draft(
         &self,
         run_id: &str,
