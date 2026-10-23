@@ -69,7 +69,7 @@ cargo test -p novel-application --test p11_repair_faults
 
 ## 回归
 
-- Rust workspace：240 passed
+- Rust workspace：247 passed
 - 干净 Worktree all-targets（HEAD e6ee266d）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
@@ -167,3 +167,21 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 - accepted 不改变 resolved/历史
 - Native 接受按钮
 - 跨两轮审校的端到端 fixture 与完整详情 UI 未完成
+
+## P11.4-A / B / C
+
+- A Lease 自动续约、长时间请求、重复 Claim：**VERIFIED**
+- B 持久化 Cancel 竞争、Re-review 完成后 SIGKILL：**VERIFIED**
+- C Candidate/Attempt/Invocation 原子落库：**VERIFIED**
+
+## P11.3
+
+- Review Occurrence、稳定 key、accepted CAS、Native 接受按钮：**IMPLEMENTED**
+- 跨两轮审校端到端 fixture、完整历史 UI：**PARTIAL**
+
+## P12.1 / P12.2
+
+- Local RAG / Chinese tokenizer / Context Policy baseline：**PARTIAL**
+- 中文孤立 CJK token 已修复；未来章节/Candidate 排除 benchmark 通过。
+- Long-form 10/50/100 章质量 benchmark：**NOT_STARTED**
+- 生产 `.app` 20.40 MiB。

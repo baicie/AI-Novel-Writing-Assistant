@@ -377,7 +377,7 @@ async fn delayed_story_server(delay_ms: u64) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn auto_renewal_keeps_long_model_request_owned() {
-    let endpoint = delayed_story_server(400).await;
+    let endpoint = delayed_story_server(1_600).await;
     let dir = tempfile::tempdir().unwrap();
     let kernel = Arc::new(
         SqliteKernel::open(&dir.path().join("renew.sqlite"))
@@ -385,8 +385,8 @@ async fn auto_renewal_keeps_long_model_request_owned() {
             .unwrap(),
     );
     let clock = Arc::new(novel_application::SystemClock);
-    let a = runtime(kernel.clone(), clock.clone(), "worker-a", 100).await;
-    let b = runtime(kernel.clone(), clock.clone(), "worker-b", 100).await;
+    let a = runtime(kernel.clone(), clock.clone(), "worker-a", 400).await;
+    let b = runtime(kernel.clone(), clock.clone(), "worker-b", 400).await;
     let novel = a.director.create_novel("续约测试书", "").await.unwrap();
     let chapter = a
         .director
@@ -415,7 +415,7 @@ async fn auto_renewal_keeps_long_model_request_owned() {
         .unwrap();
     let worker = a.worker.clone();
     let long = tokio::spawn(async move { worker.tick().await });
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
     let takeover = b.worker.tick().await.unwrap();
     assert!(
         matches!(takeover, TickOutcome::Idle),
