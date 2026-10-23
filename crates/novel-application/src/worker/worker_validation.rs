@@ -151,6 +151,10 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                     required_string(member, key)?;
                 }
             }
+            let member_names: std::collections::BTreeSet<&str> = members
+                .iter()
+                .filter_map(|member| member.get("name").and_then(serde_json::Value::as_str))
+                .collect();
             let relations = value
                 .get("relations")
                 .and_then(serde_json::Value::as_array)
@@ -161,6 +165,15 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
             for relation in relations {
                 for key in ["sourceName", "targetName", "surfaceRelation"] {
                     required_string(relation, key)?;
+                }
+                for key in ["sourceName", "targetName"] {
+                    let name = relation
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    if !member_names.contains(name) {
+                        return Err("人物关系引用了不存在的人物".into());
+                    }
                 }
             }
         }
