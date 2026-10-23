@@ -388,6 +388,14 @@ export default function TauriDirectorPage() {
                   <span className="flex items-center gap-2 text-muted-foreground">{String(item.status)}
                     {String(item.status) === "open" ? <Button data-testid="director-accept-quality-debt" variant="outline" onClick={() => acceptDebt.mutate({ id: String(item.id), version: Number(item.decisionVersion ?? 0) })} disabled={acceptDebt.isPending}>接受并保留</Button> : null}
                   </span>
+                  <details className="basis-full text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">查看来源、证据与处理记录</summary>
+                    <p className="mt-2">审校轮次：v{String(item.reviewVersion)} · 来源：{String(item.sourceRef ?? "未标注")}</p>
+                    <p className="mt-1">证据：{String(item.evidence)}</p>
+                    <p className="mt-1">建议：{String(item.suggestion)}</p>
+                    {item.resolutionEvidence ? <p className="mt-1">处理记录：{String(item.resolutionEvidence)}</p> : null}
+                    {item.acceptedReason ? <p className="mt-1">接受原因：{String(item.acceptedReason)}</p> : null}
+                  </details>
                 </li>)}
               </ul>
             </section> : null}

@@ -34,7 +34,7 @@
 
 ## 最终状态
 
-**PARTIAL**：确定性 Context Policy benchmark 通过；长篇小说连续生成与质量基线未实现。
+**PARTIAL**：100 章 Context Continuity baseline 与确定性 clean/repair/residual 质量 baseline 通过；真实长篇生成质量与阈值仍未实现。
 
 
 ## 100 章 Context Continuity Benchmark（本轮新增）
@@ -64,3 +64,23 @@ trace=director-context-v1
 - 87 章早期事实被省略，证明长篇早期事实缺口；
 - 未来章节与 Candidate 不泄漏；
 - 仍需 recent summary / arc summary / 事实检索来覆盖长篇连续性。
+
+
+## 确定性质量 Baseline（本轮新增）
+
+`p9_repair_flow::deterministic_quality_benchmark_clean_repair_and_residual`：
+
+```text
+P12 quality benchmark:
+clean_commit=1
+repaired_commit=1
+residual_open_debt=2
+```
+
+覆盖：
+
+- 干净 Review：正常 Commit；
+- 可修复 Review：Repair 后二次 Review clean 并 Commit；
+- 残留问题：不 Commit，质量债保持 open。
+
+这是确定性 Mock 质量基线，不替代真实长篇生成质量评估。

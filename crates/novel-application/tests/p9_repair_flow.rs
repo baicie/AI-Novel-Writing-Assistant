@@ -287,3 +287,77 @@ async fn remote_retry_budget_does_not_authorize_quality_repair() {
             .any(|artifact| artifact.artifact_type == "repair_notes")
     );
 }
+
+#[tokio::test]
+async fn deterministic_quality_benchmark_clean_repair_and_residual() {
+    let clean = run_with(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            (
+                "STEP:consistency_review",
+                serde_json::json!({"issues":[]}).to_string(),
+            ),
+            ("STEP:chapter_draft", "干净候选正文".into()),
+        ],
+        0,
+        Some(0),
+    )
+    .await;
+    let clean_commits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workflow_artifact WHERE run_id = (SELECT id FROM workflow_run LIMIT 1) AND type = 'chapter_commit'").fetch_one(clean.0.as_ref().pool()).await.unwrap();
+
+    let repaired = run_with(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "基准修复候选正文".into()),
+            (
+                "STEP:consistency_review",
+                serde_json::json!({"issues":[]}).to_string(),
+            ),
+            ("STEP:chapter_draft", "基准原始候选正文".into()),
+        ],
+        1,
+        Some(1),
+    )
+    .await;
+    let repaired_notes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workflow_artifact WHERE run_id = (SELECT id FROM workflow_run LIMIT 1) AND type = 'repair_notes'").fetch_one(repaired.0.as_ref().pool()).await.unwrap();
+
+    let residual = run_with(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "基准残留候选正文".into()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_draft", "基准残留原始正文".into()),
+        ],
+        1,
+        Some(1),
+    )
+    .await;
+    let residual_debt =
+        WorkflowRepository::list_quality_debt(residual.0.as_ref(), &residual.1, &residual.2)
+            .await
+            .unwrap();
+    assert_eq!(clean_commits, 1, "clean review should commit");
+    assert_eq!(repaired_notes, 1, "repairable review should repair");
+    assert!(
+        residual_debt.iter().any(|item| item.status == "open"),
+        "residual issues must stay as open debt"
+    );
+    println!(
+        "P12 quality benchmark: clean_commit={clean_commits} repaired_commit={repaired_notes} residual_open_debt={}",
+        residual_debt
+            .iter()
+            .filter(|item| item.status == "open")
+            .count()
+    );
+}

@@ -69,7 +69,7 @@ cargo test -p novel-application --test p11_repair_faults
 
 ## 回归
 
-- Rust workspace：248 passed
+- Rust workspace：249 passed
 - 干净 Worktree all-targets（HEAD 7c4b213b）：PASS
 - 已跟踪 HTTP：55 passed
 - frontend tests：186 passed
@@ -178,7 +178,8 @@ Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更
 
 - Review Occurrence、稳定 key、accepted CAS、Native 接受按钮：**VERIFIED（核心）**
 - 跨两轮审校端到端 fixture：**VERIFIED**
-- 完整历史详情 UI：**PARTIAL**
+- 详情 UI（来源/证据/建议/处理记录/接受原因）：**IMPLEMENTED**
+- 完整时间轴历史 UI：**PARTIAL**
 
 ## P12.1 / P12.2
 
