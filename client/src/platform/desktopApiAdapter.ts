@@ -300,12 +300,12 @@ function runToTaskSummary(run: transport.RunSummary) {
   } as const;
 }
 
-async function listTaskRuns(config: AxiosRequestConfig): Promise<ApiResponse<unknown>> {
+async function listTaskRuns(config: InternalAxiosRequestConfig): Promise<ApiResponse<unknown>> {
   const query = queryOf(config);
   const kind = query.get("kind");
   const status = query.get("status");
   const keyword = (query.get("keyword") ?? "").trim().toLocaleLowerCase();
-  if (kind && kind !== "novel_workflow") return ok({ items: [] });
+  if (kind && kind !== "novel_workflow") return unsupported(config);
   const runs = await transport.listAllRuns();
   const items = runs
     .filter((run) => !status || taskStatusForRun(run.state) === status)

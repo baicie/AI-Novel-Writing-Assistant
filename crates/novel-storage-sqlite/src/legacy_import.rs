@@ -126,6 +126,8 @@ async fn collect_gaps(source: &SqlitePool, report: &mut MigrationReport) -> Resu
         if matches!(
             table.as_str(),
             "Novel"
+                | "World"
+                | "Character"
                 | "VolumePlan"
                 | "VolumeChapterPlan"
                 | "Chapter"
@@ -390,6 +392,10 @@ async fn import_chapters(
     {
         return Ok(());
     }
+    let has_volume_chapter_plan = table_names(source)
+        .await?
+        .iter()
+        .any(|table| table == "VolumeChapterPlan");
     let rows =
         sqlx::query("SELECT id, novelId, title, content, \"order\" AS sort_order FROM Chapter")
             .fetch_all(source)
@@ -405,13 +411,17 @@ async fn import_chapters(
         let title: String = row.try_get("title").map_err(map_sql)?;
         let content: Option<String> = row.try_get("content").map_err(map_sql)?;
         let sort_order: i64 = row.try_get("sort_order").map_err(map_sql)?;
-        let volume_id: Option<String> = sqlx::query_scalar(
-            "SELECT volumeId FROM VolumeChapterPlan WHERE chapterId = ? ORDER BY chapterOrder LIMIT 1",
-        )
-        .bind(&id)
-        .fetch_optional(source)
-        .await
-        .unwrap_or(None);
+        let volume_id: Option<String> = if has_volume_chapter_plan {
+            sqlx::query_scalar(
+                "SELECT volumeId FROM VolumeChapterPlan WHERE chapterId = ? ORDER BY chapterOrder LIMIT 1",
+            )
+            .bind(&id)
+            .fetch_optional(source)
+            .await
+            .map_err(map_sql)?
+        } else {
+            None
+        };
         let content = content.unwrap_or_default();
         let hash = hex_sha256(content.as_bytes());
         let protection = if content.is_empty() {

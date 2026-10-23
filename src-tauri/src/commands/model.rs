@@ -96,8 +96,8 @@ async fn read_model_setup(
             let has_api_key = secrets
                 .get(&stored.secret_ref)
                 .await
-                .map(|value| value.is_some())
-                .unwrap_or(false);
+                .map_err(|_| AppError::from(PortError::Storage("系统凭据暂时不可用".into())))?
+                .is_some();
             Some(ModelSetupView {
                 endpoint: stored.endpoint,
                 model: stored.model,
@@ -139,6 +139,9 @@ async fn write_model_setup(
 async fn check_has_api_key(secrets: &OsSecretStore) -> Result<bool, AppError> {
     use novel_platform::SecretStore;
     let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF;
-    let value = secrets.get(secret_ref).await.unwrap_or(None);
+    let value = secrets
+        .get(secret_ref)
+        .await
+        .map_err(|_| AppError::from(PortError::Storage("系统凭据暂时不可用".into())))?;
     Ok(value.is_some())
 }

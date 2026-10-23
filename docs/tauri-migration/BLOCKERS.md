@@ -1,12 +1,12 @@
 # 阻塞清单
 
-## B-001 工作树中的未跟踪测试文件
+## B-001 工作树中的未跟踪旧版运行测试
 
-- 现象：`crates/novel-http/tests/integration_runs.rs` 引用了 `TestContext` 不存在的方法，导致 `cargo test --workspace --all-targets` 编译失败。
-- 分类：用户未提交工作与当前测试辅助代码不匹配；该测试的 HTTP 契约也与 Rust 新 Run API 不一致。
-- 处理：没有修改、删除或暂存该文件。全量测试使用分 crate 方式验证；最终报告会单独列明。
-- 下一动作：用户决定是否保留该实验测试；确认后再补齐/重写测试辅助方法。
-
+- 文件：`crates/novel-http/tests/integration_runs.rs`。
+- 来源：Git 没有任何跟踪历史，属于用户工作树中的未提交文件；本次没有修改、移动、暂存或删除。
+- 内容：9 个旧版 Run 生命周期测试，使用旧 HTTP 契约（`run_type`、`approved`、`resumed`、`confirm-event`）和旧 `TestContext` 方法（`create_test_novel`、`query_run_by_id`、`query_all_runs`、`query_confirmed_event`、带 novel_id 的 `count_runs`）。
+- 阻塞：`cargo test --workspace --all-targets` 编译该测试目标时产生 22 个错误；当前新 Run API 已改为 commandId/contract/approval 语义，不能仅补辅助方法安全修复。
+- 处理：保留原文件不动；已用分 crate + 已跟踪 HTTP 测试目标验证，当前通过 205 + 57 个测试。下一动作需用户决定保留、重写或删除该实验测试。
 ## B-002 真实模型调用未验证
 
 - 现象：默认使用 Mock/本地 HTTP SSE 测试；没有可用的付费凭据，也不允许自行发起真实付费请求。

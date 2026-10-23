@@ -60,7 +60,8 @@
 - migrations 由 Rust 内嵌加载，事务逐条执行并记录 `schema_migration`。
 - 长正文验证：>1MB 中文正文写入、版本冲突、关闭并重开读取、用户保护正文阻止 AI promotion。
 - 旧库导入：源库只读；导入前分别生成源库/目标库 `VACUUM INTO` 备份；保留旧 ID 映射；校验小说/世界/角色/卷/章节数量、小说世界归属、章节归属、正文 SHA-256 和正文内容；未支持表/列写入报告。
-- 旧 running Run 转为 `paused + migration_review_required`，不自动重放。
+- 旧 running Run 转为 `paused + migration_review_required`，不自动重放；新增测试验证旧 Run 的远端调用次数为 0。
+- 失败导入测试验证事务回滚后目标库无残留小说/章节/映射/迁移记录，源文件字节保持不变。
 
 ## 6. LLM / Workflow / RAG 状态
 
@@ -68,18 +69,27 @@
 - Workflow：最小章节生产链已可 create → tick → draft checkpoint → approval → commit；中断后保留候选、人工编辑保护和恢复测试通过。不是 LangGraph 逐行翻译。
 - RAG：SQLite FTS5 + 本地向量 BLOB/余弦适配层，提供 `index_knowledge`、`search_knowledge`、`search_knowledge_vector` Commands。未接 Qdrant，也没有完整知识库管理 UI。
 
-## 7. 已执行的测试与实际结果
+## 7. 最终质量审计与修复
+
+- 修复 `collect_gaps` 把已支持的 `World`/`Character` 误报为整表 unsupported 的问题。
+- 修复旧库导入的可选 `VolumeChapterPlan` 查询吞掉数据库错误的问题；现在数据库异常会向上返回。
+- 修复模型密钥状态查询吞掉系统凭据错误的问题；凭据不可用时返回明确错误，不再静默当成“没有密钥”。
+- 任务中心筛选未迁移任务类型时返回显式 501，不再返回空的成功列表。
+- IPC 审计：`build.rs` 注册 51 个 Command，`generate_handler!` 51 个，capabilities 51 个 `allow-*`，三者一致。
+- Release bundle 审计：无 Node/Electron/sidecar 文件或链接库；未发现日志中的 API Key 输出。
+
+## 8. 已执行的测试与实际结果
 
 | 命令 | 结果 |
 | --- | --- |
 | `cargo check --workspace` | PASS |
 | `cargo fmt --check -p ...`（迁移 crate） | PASS |
-| `cargo test --workspace --exclude novel-http` | PASS：204 tests |
+| `cargo test --workspace --exclude novel-http` | PASS：205 tests |
 | `cargo test -p novel-application` | PASS：152 unit + 6 recovery |
-| `cargo test -p novel-storage-sqlite` | PASS：4 + 4 tests |
+| `cargo test -p novel-storage-sqlite` | PASS：4 + 5 tests；覆盖源库只读、源备份、世界/角色/卷/章节关系、正文 hash、重复导入事务回滚、旧 Run 不重放 |
 | `cargo test -p novel-llm` | PASS：8 + 3 tests |
 | `cargo test -p novel-domain -p novel-workflow` | PASS：13 + 6 tests |
-| `cargo test -p novel-http --test integration_novels/integration_chapters/endpoint_tests/integration` | PASS：12 + 9 + 25 + 9 tests（已跟踪测试目标） |
+| `cargo test -p novel-http --test common_setup --test endpoint_tests --test integration --test integration_chapters --test integration_novels` | PASS：2 + 25 + 9 + 9 + 12 tests（已跟踪测试目标） |
 | `pnpm --filter @ai-novel/client typecheck` | PASS |
 | `pnpm typecheck`（根级） | PASS；根脚本已设置 `NODE_OPTIONS=--max-old-space-size=8192` |
 | `pnpm --filter @ai-novel/client build` | PASS（有既有大 chunk 警告） |
@@ -102,11 +112,11 @@
 | Release 路由 smoke（知识库） | PASS：预置 1 个知识文档后，`/knowledge` 实际调用 `list_knowledge_documents` 并返回 count=1，无未捕获异常 |
 | Release 路由巡检（扩展页面） | PASS（仅渲染/不崩溃）：`/tasks`、`/settings/models`、`/worlds`、`/knowledge`、`/genres`、`/story-modes`、`/base-characters` 加载无未捕获异常；未迁移 API 仍返回 501 |
 | 迁移 CLI 隔离数据库 | PASS：备份、ID 映射、正文校验、unsupported 报告、旧 running → paused |
-| `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪测试文件 `crates/novel-http/tests/integration_runs.rs` 与当前 TestContext API 不匹配 |
+| `cargo test --workspace --all-targets` | BLOCKED：用户未跟踪的旧版 `crates/novel-http/tests/integration_runs.rs` 引用已不存在的 TestContext 方法和旧 Run API；未修改该文件 |
 
-已跟踪 Rust 测试合计 259 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
+已跟踪 Rust 测试合计 262 个通过；前端 180 个测试通过；真实模型调用、macOS 输入法/粘贴/撤销/长文滚动和完整 GUI 交互未执行，需用户验收。
 
-## 8. 构建产物及路径
+## 9. 构建产物及路径
 
 - macOS arm64 application bundle：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app`（19.32 MiB）
 - Release executable：`target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop`
@@ -118,7 +128,7 @@
 - Release bundle 审计脚本：`scripts/audit-tauri-release.sh`
 - 隔离 smoke 数据目录在 `/tmp/biz-novel-tauri-*`，不是用户生产数据。
 
-## 9. 剩余阻塞和已知风险
+## 10. 剩余阻塞和已知风险
 
 - 未跟踪测试文件阻塞全工作区 `--all-targets` 编译；没有修改或删除用户文件。
 - Tauri DMG 脚本失败；手动 `hdiutil` DMG 已生成并校验，但 `.app`/DMG 未签名、未公证，不能作为公开分发包。
@@ -128,7 +138,7 @@
 - Tauri release 的 WKWebView 输入法、粘贴、撤销、长文本滚动和选择行为需人工验收。
 - 续写来源字段等旧模型字段在桌面适配器中未完整持久化，已由 501 边界或兼容矩阵限制，不能宣称全量等价；`postGenerationStyleReviewEnabled` 已补入 SQLite migration 0004。
 
-## 10. 后续继续执行的具体任务
+## 11. 后续继续执行的具体任务
 
 1. 由用户确认并处理 `crates/novel-http/tests/integration_runs.rs`；恢复全 workspace `--all-targets`。
 2. 在用户批准的测试凭据/预算下验证真实 OpenAI-compatible 流式调用与取消。

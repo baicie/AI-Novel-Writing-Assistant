@@ -32,7 +32,7 @@
 - 修订：`chapter_revision` 追加写入，`list_chapter_revisions` 可读取。
 - 手工编辑后 `protection=user_edited`；AI `promote_candidate` 在保护状态下返回 `Blocked`。
 - 前端统一 `desktopTransport` + 核心 REST 兼容适配器，`NovelList`/创建页/章节编辑器核心读写改走 Tauri Commands；Adapter 的创建/保存/重开、小说更新和 TXT 导出全链路 smoke 已通过。
-- 证据：`cargo test -p novel-storage-sqlite` 8 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书；`scripts/smoke-tauri-save.sh` 已验证 Renderer → Tauri `save_chapter` → SQLite 的真实保存/重开链路。
+- 证据：`cargo test -p novel-storage-sqlite` 9 个测试通过，包含 >1MB 中文正文写读、关闭重开、版本冲突、保护正文、卷关联、章节删除、设定建书；`scripts/smoke-tauri-save.sh` 已验证 Renderer → Tauri `save_chapter` → SQLite 的真实保存/重开链路。
 
 ### P2 LLM 网关
 
@@ -47,7 +47,7 @@
 - 旧库只读打开（`query_only=ON`）；导入前对源库和目标库分别做 `VACUUM INTO` 一致性备份。
 - 旧 ID 保留并写 `legacy_id_map`；`World`、`Character`、`VolumePlan`/`VolumeChapterPlan` 导入为世界、角色、卷及章节归属；旧 `Novel.worldId` 映射到新 `novel.world_id`；running/waiting 旧 Run 不自动重放，转 `paused + migration_review_required`。
 - 校验小说/章节数量、章节关系、正文 SHA-256 与正文内容；未支持字段/表写入报告。
-- 证据：`cargo test -p novel-storage-sqlite --test invariants` 通过，含 >1MB 旧正文、世界/角色、卷/章节归属、备份文件存在、原库字节不变、重复导入。
+- 证据：`cargo test -p novel-storage-sqlite --test invariants` 通过，含 >1MB 旧正文、世界/角色、卷/章节归属、源库只读、备份文件、正文 hash、重复导入、失败回滚、旧 Run 不重放。
 
 ### P5 Durable Workflow
 
