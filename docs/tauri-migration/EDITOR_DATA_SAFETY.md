@@ -1,6 +1,6 @@
 # Editor Data Safety
 
-基线：`7f7b7e60`。本轮增加独立 SQLite 本地草稿 Journal，不再仅依赖 `sessionStorage`。
+基线：`faeae3c7`。本轮增加独立 SQLite 本地草稿 Journal，不再仅依赖 `sessionStorage`。
 
 ## 1. 数据合同
 
