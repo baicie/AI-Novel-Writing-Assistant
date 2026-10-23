@@ -1,6 +1,6 @@
 # Native MVP Release Readiness
 
-基线：`ca0b8cea`。本文件区分“开发者可用技术预览版”和“正式生产发布版本”。
+基线：`340c8b01`。本文件区分“开发者可用技术预览版”和“正式生产发布版本”。
 
 ## 1. 验收状态
 
@@ -30,7 +30,7 @@ CARGO_TARGET_DIR=<repo>/target cargo test --workspace --all-targets
 # PASS
 ```
 
-原工作树 `--all-targets` 仍被用户旧文件阻塞；这是独立阻塞，不是已提交代码失败。
+原工作树 `--all-targets` 仍被用户旧文件阻塞；独立干净 Worktree 在最终 HEAD `340c8b01` 的 `cargo test --workspace --all-targets` 再次 PASS，这是独立阻塞，不是已提交代码失败。
 
 ### Native UI E2E
 

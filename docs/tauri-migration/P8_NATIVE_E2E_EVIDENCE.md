@@ -141,7 +141,7 @@ structured_director_loop_reaches_committed_chapter_and_survives_reopen
 - `cargo fmt --check`：PASS
 - `cargo clippy --workspace --exclude novel-http --all-targets`：PASS（既有 warning）
 - Rust workspace（排除用户未跟踪阻塞文件）：221 tests PASS
-- 独立干净 Worktree：`cargo test --workspace --all-targets` PASS（HEAD `ca0b8cea`，不包含用户未跟踪文件）
+- 独立干净 Worktree：`cargo test --workspace --all-targets` PASS（HEAD `340c8b01`，不包含用户未跟踪文件）
 - HTTP 追踪测试：57 PASS
 - `pnpm typecheck`：PASS
 - `pnpm build`：PASS
