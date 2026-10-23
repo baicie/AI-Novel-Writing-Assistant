@@ -22,6 +22,11 @@ import {
   smokeChannelMessage,
 } from "./platform/desktopTransport";
 
+// The WDIO guest plugin is only compiled into the dedicated E2E frontend build.
+if ((import.meta.env as Record<string, string | undefined>).VITE_TAURI_E2E === "1") {
+  await import("@wdio/tauri-plugin");
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

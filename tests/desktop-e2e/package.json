@@ -1,0 +1,12 @@
+{
+  "name": "@ai-novel/desktop-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "wdio run wdio.conf.mjs",
+    "test:director": "wdio run wdio.conf.mjs --spec specs/director.spec.mjs",
+    "test:cancel": "wdio run wdio.conf.mjs --spec specs/cancel.spec.mjs",
+    "test:safety": "BIZ_NOVEL_E2E_SCENARIO=issues wdio run wdio.conf.mjs --spec specs/safety.spec.mjs",
+    "test:restart": "wdio run wdio.conf.mjs --spec specs/restart.spec.mjs"
+  }
+}

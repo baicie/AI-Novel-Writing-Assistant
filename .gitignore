@@ -47,3 +47,8 @@ site/public/architecture/
 # Rust workspace and Tauri build output
 /target/
 src-tauri/gen/
+tests/desktop-e2e/logs/
+tests/desktop-e2e/artifacts/
+
+# Dedicated E2E frontend build
+client/dist-e2e/

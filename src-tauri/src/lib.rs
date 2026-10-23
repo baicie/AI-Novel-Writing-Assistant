@@ -6,6 +6,20 @@ use std::sync::Arc;
 use novel_application::{Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds};
 use novel_llm::OpenAiCompatibleProvider;
 
+#[cfg(feature = "e2e")]
+struct E2eModelSecrets;
+
+#[cfg(feature = "e2e")]
+#[async_trait::async_trait]
+impl novel_application::ModelSecrets for E2eModelSecrets {
+    async fn api_key(
+        &self,
+        _provider: &str,
+    ) -> Result<Option<String>, novel_application::PortError> {
+        Ok(Some("e2e-local-key".into()))
+    }
+}
+
 /// The Release composition root uses the real OpenAI-compatible HTTP/SSE provider.
 pub fn llm_provider() -> Arc<dyn novel_llm::LlmProvider> {
     Arc::new(OpenAiCompatibleProvider::new())
@@ -18,7 +32,12 @@ use tauri::Manager;
 pub fn run() {
     novel_platform::init_logging();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+    builder
         .setup(|app| {
             let data_dir = std::env::var_os("BIZ_NOVEL_DATA_DIR")
                 .map(std::path::PathBuf::from)
@@ -35,10 +54,18 @@ pub fn run() {
 
             let db_path = data_dir.join("novel.sqlite");
             let secrets: Arc<OsSecretStore> = Arc::new(OsSecretStore);
-            let model_secrets: Arc<dyn novel_application::ModelSecrets> =
-                Arc::new(commands::model::OsModelSecrets {
-                    store: secrets.clone(),
-                });
+            let model_secrets: Arc<dyn novel_application::ModelSecrets> = {
+                #[cfg(feature = "e2e")]
+                {
+                    Arc::new(E2eModelSecrets)
+                }
+                #[cfg(not(feature = "e2e"))]
+                {
+                    Arc::new(commands::model::OsModelSecrets {
+                        store: secrets.clone(),
+                    })
+                }
+            };
             let llm: Arc<dyn novel_llm::LlmProvider> = llm_provider();
             let (kernel, runtime) = tauri::async_runtime::block_on(async {
                 let kernel = Arc::new(
@@ -46,6 +73,13 @@ pub fn run() {
                         .await
                         .map_err(|error| error.to_string())?,
                 );
+                #[cfg(feature = "e2e")]
+                if let Ok(endpoint) = std::env::var("BIZ_NOVEL_E2E_ENDPOINT") {
+                    kernel
+                        .save_model_setup(&endpoint, "e2e-mock-model", true, novel_platform::now_ms())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
                 let runtime = Arc::new(Runtime::new(RuntimeDeps {
                     novels: kernel.clone(),
                     runs: kernel.clone(),

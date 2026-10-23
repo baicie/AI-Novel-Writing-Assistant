@@ -1,0 +1,12 @@
+{
+  "identifier": "e2e",
+  "description": "WebDriverIO test-only capability",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "wdio:default",
+    "wdio-webdriver:default"
+  ]
+}

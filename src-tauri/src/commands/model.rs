@@ -93,11 +93,15 @@ async fn read_model_setup(
     let stored = kernel.load_model_setup().await.map_err(AppError::from)?;
     Ok(match stored {
         Some(stored) => {
-            let has_api_key = secrets
+            let mut has_api_key = secrets
                 .get(&stored.secret_ref)
                 .await
                 .map_err(|_| AppError::from(PortError::Storage("系统凭据暂时不可用".into())))?
                 .is_some();
+            #[cfg(feature = "e2e")]
+            {
+                has_api_key = has_api_key || std::env::var("BIZ_NOVEL_E2E_ENDPOINT").is_ok();
+            }
             Some(ModelSetupView {
                 endpoint: stored.endpoint,
                 model: stored.model,

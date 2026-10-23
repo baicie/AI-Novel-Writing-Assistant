@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "node --experimental-strip-types --test tests/*.test.js src/**/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "build:e2e": "tsc -p tsconfig.json --noEmit && VITE_TAURI_E2E=1 vite build --config vite.e2e.config.ts"
   },
   "dependencies": {
     "@ai-novel/shared": "workspace:*",

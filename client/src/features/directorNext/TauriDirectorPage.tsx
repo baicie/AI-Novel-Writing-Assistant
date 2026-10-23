@@ -83,8 +83,14 @@ export default function TauriDirectorPage() {
   }, [chapterId, chapters]);
 
   useEffect(() => {
-    if (activeQuery.data?.id) setSelectedRunId(activeQuery.data.id);
-  }, [activeQuery.data?.id]);
+    if (activeQuery.data?.id) {
+      setSelectedRunId(activeQuery.data.id);
+      return;
+    }
+    if (!selectedRunId && historyQuery.data?.[0]) {
+      setSelectedRunId(historyQuery.data[0].id);
+    }
+  }, [activeQuery.data?.id, historyQuery.data, selectedRunId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -195,7 +201,7 @@ export default function TauriDirectorPage() {
           <div className="text-xs leading-5 text-muted-foreground">
             {model ? <>模型：{model.model} · {model.endpoint}{model.hasApiKey ? "" : " · 缺少 API Key"}</> : "尚未配置模型。请先在桌面模型设置中填写服务地址、模型和 API Key。"}
           </div>
-          <Button className="w-full" disabled={!currentChapter || !model?.hasApiKey || start.isPending} onClick={() => start.mutate()}>
+          <Button data-testid="director-start-button" className="w-full" disabled={!currentChapter || !model?.hasApiKey || start.isPending} onClick={() => start.mutate()}>
             {start.isPending ? "正在创建…" : "提交并开始创作"}
           </Button>
         </section>
@@ -204,8 +210,8 @@ export default function TauriDirectorPage() {
           <section className="min-h-0 space-y-4 overflow-y-auto">
             <div className="rounded-md bg-muted/20 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">运行状态：{statusLabel(detail?.status ?? activeQuery.data?.state ?? "queued")}</h2>
-                <span className="text-xs text-muted-foreground">状态版本 {detail?.controlVersion ?? "—"}</span>
+                <h2 data-testid="director-status" className="text-sm font-semibold">运行状态：{statusLabel(detail?.status ?? activeQuery.data?.state ?? "queued")}</h2>
+                <span data-testid="director-run-meta" className="text-xs text-muted-foreground">Run {detail?.id ?? runId} · 状态版本 {detail?.controlVersion ?? "—"}</span>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">章节：{detail?.chapterTitle ?? activeQuery.data?.chapterTitle ?? "—"} · 当前阶段：{detail?.cursorStepId ? (STEPS.find(step => step[0] === detail.cursorStepId)?.[1] ?? detail.cursorStepId) : "等待调度"}</p>
               {detail?.pauseReason ? <p className="mt-2 text-sm text-destructive">暂停原因：{detail.pauseReason}</p> : null}
@@ -216,9 +222,9 @@ export default function TauriDirectorPage() {
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.completionTokens ?? 0} 输出 tokens</span>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {detail?.status === "waiting_approval" && gate ? <Button disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
-                {detail?.status === "paused" && detail.latestCandidate && detail.pauseKind !== "safety" ? <Button variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
-                {detail && !["succeeded", "failed", "cancelled"].includes(detail.status) ? <Button variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
+                {detail?.status === "waiting_approval" && gate ? <Button data-testid="director-approve-button" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}
+                {detail?.status === "paused" && detail.latestCandidate && detail.pauseKind !== "safety" ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
+                {detail && !["succeeded", "failed", "cancelled"].includes(detail.status) ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
                 {completed ? <Button variant="ghost" onClick={() => { setSelectedRunId(""); setChapterId(""); }}>再创建一次</Button> : null}
               </div>
@@ -251,7 +257,7 @@ export default function TauriDirectorPage() {
           <aside className="space-y-4">
             <section className="rounded-md bg-muted/20 p-4">
               <h2 className="text-sm font-semibold">最近事件</h2>
-              <ol className="mt-3 space-y-2 text-xs">{events.length ? events.slice(-12).reverse().map(event => <li key={`${event.kind}-${event.kind === "token_delta" ? Math.random() : event.seq}`} className="flex justify-between gap-2"><span>{eventLabel(event)}</span><span className="text-muted-foreground">{event.kind === "token_delta" ? "流式" : `#${event.seq}`}</span></li>) : <li className="text-muted-foreground">等待首个事件。</li>}</ol>
+              <ol className="mt-3 space-y-2 text-xs">{events.length ? events.slice(-12).reverse().map(event => <li key={`${event.kind}-${event.kind === "token_delta" ? Math.random() : event.seq}`} data-testid="director-event" className="flex justify-between gap-2"><span>{eventLabel(event)}</span><span className="text-muted-foreground">{event.kind === "token_delta" ? "流式" : `#${event.seq}`}</span></li>) : <li className="text-muted-foreground">等待首个事件。</li>}</ol>
             </section>
             <section className="rounded-md bg-muted/20 p-4">
               <h2 className="text-sm font-semibold">运行历史</h2>

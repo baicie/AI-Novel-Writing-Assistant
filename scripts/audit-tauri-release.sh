@@ -21,4 +21,11 @@ if otool -L "$BIN" | grep -Ei 'node|electron' >/dev/null; then
   exit 1
 fi
 
-echo "Tauri release audit passed: no Node/Electron/sidecar files or linked libraries."
+for marker in tauri_plugin_wdio tauri-plugin-wdio wdio-webdriver TAURI_WEBDRIVER_PORT; do
+  if strings "$BIN" | grep -Fq "$marker"; then
+    echo "Production binary contains E2E WebDriver marker: $marker" >&2
+    exit 1
+  fi
+done
+
+echo "Tauri release audit passed: no Node/Electron/sidecar, no E2E WebDriver markers."
