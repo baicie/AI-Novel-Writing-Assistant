@@ -10,7 +10,7 @@
     "beforeBuildCommand": "AI_NOVEL_CLIENT_BASE=relative pnpm --filter @ai-novel/client build"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
       "devCsp": "default-src 'self' 'unsafe-inline' http://127.0.0.1:5173 ws://127.0.0.1:5173; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:5173 ws://127.0.0.1:5173; img-src 'self' asset: http://asset: data: blob: http://127.0.0.1:5173; style-src 'self' 'unsafe-inline' http://127.0.0.1:5173; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:5173"

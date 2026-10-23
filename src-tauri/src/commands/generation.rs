@@ -81,7 +81,7 @@ pub async fn generate_text(
         .model
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(setup.model);
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
     let event_request_id = request_id.clone();
     let forward_channel = channel.clone();
     let forward = tokio::spawn(async move {

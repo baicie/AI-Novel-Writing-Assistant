@@ -33,6 +33,7 @@
     "allow-approve-run",
     "allow-cancel-run",
     "allow-cancel-generation",
+    "allow-smoke-channel-message",
     "allow-resume-run",
     "allow-replay-run",
     "allow-subscribe-run",

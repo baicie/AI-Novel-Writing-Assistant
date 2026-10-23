@@ -87,14 +87,14 @@ impl LlmProvider for MockLlm {
     async fn generate(
         &self,
         _request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, novel_llm::LlmError> {
         if cancel.is_cancelled() {
             return Err(novel_llm::LlmError::Cancelled);
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
-        let _ = tokens.send(self.text.clone());
+        let _ = tokens.send(self.text.clone()).await;
         Ok(LlmResponse {
             text: self.text.clone(),
             usage: self.usage.clone(),
@@ -135,14 +135,14 @@ impl LlmProvider for BlockingMockLlm {
     async fn generate(
         &self,
         _request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, novel_llm::LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         tokio::select! {
             _ = cancel.cancelled() => Err(novel_llm::LlmError::Cancelled),
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                let _ = tokens.send(self.text.clone());
+                let _ = tokens.send(self.text.clone()).await;
                 Ok(LlmResponse {
                     text: self.text.clone(),
                     usage: TokenUsage::unknown(),

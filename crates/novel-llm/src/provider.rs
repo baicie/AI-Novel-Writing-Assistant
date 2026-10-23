@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::BufReader;
 use tokio_util::sync::CancellationToken;
 
-use crate::endpoint::authorize_endpoint;
+use crate::endpoint::{authorize_endpoint, authorize_resolved_endpoint};
 use crate::error::{LlmError, classify_http};
 use crate::sse::consume_sse;
 
@@ -60,7 +60,7 @@ pub trait LlmProvider: Send + Sync {
     async fn generate(
         &self,
         request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError>;
 }
@@ -82,7 +82,7 @@ impl LlmProvider for UnconfiguredProvider {
     async fn generate(
         &self,
         _request: LlmRequest,
-        _tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        _tokens: tokio::sync::mpsc::Sender<String>,
         _cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
         Err(LlmError::Unavailable {
@@ -128,6 +128,8 @@ impl OpenAiCompatibleProvider {
     pub fn with_policy(policy: ProviderPolicy) -> Self {
         let client = reqwest::Client::builder()
             .timeout(policy.timeout)
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
             .build()
             .unwrap_or_default();
         Self { client, policy }
@@ -155,7 +157,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
     async fn generate(
         &self,
         request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
         if request.api_key.trim().is_empty() {
@@ -165,6 +167,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             });
         }
         authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
+        authorize_resolved_endpoint(&request.endpoint, request.allow_localhost_http).await?;
         let requested_tokens = request
             .max_output_tokens
             .unwrap_or(self.policy.default_max_output_tokens);
@@ -196,19 +199,18 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 result = tokio::time::timeout(self.policy.timeout, pending) => match result {
                     Ok(Ok(response)) => response,
                     Ok(Err(_)) => {
-                        last_error = Some(LlmError::Unavailable { billed: false, reason: "模型服务没有连上".into() });
-                        if attempt + 1 < self.policy.max_attempts {
-                            sleep_or_cancel(self.policy.retry_backoff, &cancel).await?;
-                            continue;
-                        }
+                        // The request may have reached the provider even though no
+                        // response arrived; do not retry a non-idempotent generation.
+                        last_error = Some(LlmError::Unavailable {
+                            billed: true,
+                            reason: "模型服务连接中断，无法确认是否已计费".into(),
+                        });
                         break;
                     }
                     Err(_) => {
+                        // Timeout is deliberately non-retryable for the same billing
+                        // uncertainty reason.
                         last_error = Some(LlmError::Timeout);
-                        if attempt + 1 < self.policy.max_attempts {
-                            sleep_or_cancel(self.policy.retry_backoff, &cancel).await?;
-                            continue;
-                        }
                         break;
                     }
                 },
@@ -290,7 +292,7 @@ mod tests {
     #[tokio::test]
     async fn openai_compatible_rejects_empty_api_key_before_hitting_the_endpoint() {
         let provider = OpenAiCompatibleProvider::new();
-        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, _receiver) = tokio::sync::mpsc::channel(64);
         let result = provider
             .generate(
                 LlmRequest {

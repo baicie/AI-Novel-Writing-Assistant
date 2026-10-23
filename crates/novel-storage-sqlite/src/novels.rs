@@ -50,20 +50,20 @@ impl NovelRepository for SqliteKernel {
             .filter(|value| !value.is_empty());
 
         // 简单实现：用条件分支拼 SQL，避免引入动态 binding 框架。
-        let total: i64 = if let Some(like) = &like {
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM novel WHERE title LIKE ?1 OR description LIKE ?1",
-            )
-            .bind(like)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(map_sql)?
-        } else {
-            sqlx::query_scalar("SELECT COUNT(*) FROM novel")
-                .fetch_one(&self.pool)
-                .await
-                .map_err(map_sql)?
-        };
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM novel
+             WHERE (?1 IS NULL OR title LIKE ?1 OR description LIKE ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR narrative_form = ?3)
+               AND (?4 IS NULL OR writing_mode = ?4)",
+        )
+        .bind(&like)
+        .bind(status)
+        .bind(narrative_form)
+        .bind(writing_mode)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
 
         let rows = sqlx::query(
             "SELECT id, title, description, status, creation_experience, narrative_form, writing_mode, project_mode, updated_at

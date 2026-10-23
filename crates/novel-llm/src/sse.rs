@@ -27,6 +27,13 @@ pub fn parse_sse_line(line: &str) -> Result<SsePiece, LlmError> {
     }
     let value: Value = serde_json::from_str(data)
         .map_err(|_| LlmError::InvalidResponse("模型流不是 JSON".into()))?;
+    if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("模型服务返回错误事件");
+        return Err(LlmError::InvalidResponse(message.to_string()));
+    }
     if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
         return Ok(SsePiece::Usage(read_usage(usage)));
     }
@@ -54,7 +61,7 @@ fn optional_u64(value: &Value, key: &str) -> Option<u64> {
 
 pub async fn consume_sse<R>(
     reader: R,
-    tokens: &tokio::sync::mpsc::UnboundedSender<String>,
+    tokens: &tokio::sync::mpsc::Sender<String>,
     cancel: &CancellationToken,
 ) -> Result<(String, TokenUsage), LlmError>
 where
@@ -64,11 +71,16 @@ where
     let mut text = String::new();
     let mut usage = TokenUsage::unknown();
     let mut started = false;
+    let mut completed = false;
     loop {
         if cancel.is_cancelled() {
             return Err(LlmError::Cancelled);
         }
-        let line = match lines.next_line().await {
+        let line_result = tokio::select! {
+            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+            line = lines.next_line() => line,
+        };
+        let line = match line_result {
             Ok(Some(line)) => line,
             Ok(None) => break,
             Err(_) if started => {
@@ -88,7 +100,9 @@ where
             SsePiece::Delta(delta) => {
                 started = true;
                 text.push_str(&delta);
-                let _ = tokens.send(delta);
+                if tokens.send(delta).await.is_err() {
+                    return Err(LlmError::Cancelled);
+                }
             }
             SsePiece::Usage(next) => {
                 if next.prompt_tokens.is_some() {
@@ -98,9 +112,18 @@ where
                     usage.completion_tokens = next.completion_tokens;
                 }
             }
-            SsePiece::Done => break,
+            SsePiece::Done => {
+                completed = true;
+                break;
+            }
             SsePiece::Ignore => {}
         }
+    }
+    if !completed {
+        return Err(LlmError::Unavailable {
+            billed: started,
+            reason: "模型流在结束标记前断开".into(),
+        });
     }
     Ok((text, usage))
 }
@@ -126,10 +149,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn eof_without_done_is_not_success() {
+        let payload = "data: {\"choices\":[{\"delta\":{\"content\":\"截断\"}}]}\n\n";
+        let reader = BufReader::new(payload.as_bytes());
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let error = consume_sse(reader, &tx, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        match error {
+            LlmError::Unavailable { billed, .. } => assert!(billed),
+            other => panic!("expected incomplete stream error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_error_event_is_not_ignored() {
+        let error = parse_sse_line(r#"data: {"error":{"message":"upstream failed"}}"#).unwrap_err();
+        assert!(matches!(error, LlmError::InvalidResponse(_)));
+    }
+
+    #[tokio::test]
     async fn cancel_stops_before_reading_the_rest() {
         let payload = "data: {\"choices\":[{\"delta\":{\"content\":\"甲\"}}]}\n\ndata: [DONE]\n";
         let reader = BufReader::new(payload.as_bytes());
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
         let cancel = CancellationToken::new();
         cancel.cancel();
         let err = consume_sse(reader, &tx, &cancel).await.unwrap_err();
@@ -145,7 +188,7 @@ mod tests {
             "data: [DONE]\n"
         );
         let reader = BufReader::new(payload.as_bytes());
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
         let (text, usage) = consume_sse(reader, &tx, &CancellationToken::new())
             .await
             .unwrap();

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-smoke-channel-message"
+description = "Enables the smoke_channel_message command without any pre-configured scope."
+commands.allow = ["smoke_channel_message"]
+
+[[permission]]
+identifier = "deny-smoke-channel-message"
+description = "Denies the smoke_channel_message command without any pre-configured scope."
+commands.deny = ["smoke_channel_message"]

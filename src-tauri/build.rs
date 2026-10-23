@@ -26,6 +26,7 @@ fn main() {
         "approve_run",
         "cancel_run",
         "cancel_generation",
+        "smoke_channel_message",
         "resume_run",
         "replay_run",
         "subscribe_run",

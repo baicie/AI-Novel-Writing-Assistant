@@ -12,7 +12,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net"] }
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 url = "2"
 

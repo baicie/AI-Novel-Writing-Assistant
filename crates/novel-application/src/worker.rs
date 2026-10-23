@@ -298,7 +298,7 @@ impl Worker {
             run_id: claimed.run_id.clone(),
             cancels: self.cancels.clone(),
         };
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
         let hub = self.hub.clone();
         let run_for_tokens = claimed.run_id.clone();
         let forward = tokio::spawn(async move {

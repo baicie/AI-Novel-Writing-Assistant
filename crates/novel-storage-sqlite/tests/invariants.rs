@@ -135,6 +135,10 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::query("PRAGMA journal_mode = WAL")
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
     let before = fs::read(&source).unwrap();
     let report = import_legacy(&source, &target, 10).await.unwrap();
@@ -417,4 +421,14 @@ async fn failed_legacy_import_rolls_back_target_and_preserves_source() {
             .unwrap();
         assert_eq!(count, 0, "failed import left rows in {table}");
     }
+}
+
+#[tokio::test]
+async fn import_rejects_source_used_as_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("same.sqlite");
+    let pool = connect(&source, true).await;
+    pool.close().await;
+    let result = import_legacy(&source, &source, 30).await;
+    assert!(result.is_err(), "same source/target path must be rejected");
 }

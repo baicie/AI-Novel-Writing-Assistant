@@ -19,6 +19,7 @@ import {
   hasDesktopShell,
   reportClientRuntime,
   saveChapter,
+  smokeChannelMessage,
 } from "./platform/desktopTransport";
 
 const queryClient = new QueryClient({
@@ -81,6 +82,17 @@ if (hasDesktopShell()) {
         message: `save smoke ok version=${saved.officialVersion} chars=${reopened.content.length}`,
       }).catch(() => undefined);
     })().catch((error: unknown) => reportError(`save smoke failed: ${String(error)}`));
+  }
+
+  if ((window as Window & { __AI_NOVEL_SMOKE_CHANNEL__?: unknown }).__AI_NOVEL_SMOKE_CHANNEL__ === true) {
+    void smokeChannelMessage((event) => {
+      reportClientRuntime({
+        config: runtimeConfig ?? null,
+        locationHash: window.location.hash,
+        runtimeMode: APP_RUNTIME,
+        message: `channel smoke ok kind=${event.kind} seq=${"seq" in event ? event.seq : "n/a"}`,
+      }).catch(() => undefined);
+    }).catch((error: unknown) => reportError(`channel smoke failed: ${String(error)}`));
   }
 
   if ((window as Window & { __AI_NOVEL_SMOKE_ADAPTER__?: unknown }).__AI_NOVEL_SMOKE_ADAPTER__ === true) {

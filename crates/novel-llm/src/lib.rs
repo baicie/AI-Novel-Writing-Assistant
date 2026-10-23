@@ -4,7 +4,7 @@ mod provider;
 mod sse;
 mod structured;
 
-pub use endpoint::authorize_endpoint;
+pub use endpoint::{authorize_endpoint, authorize_resolved_endpoint};
 pub use error::LlmError;
 pub use provider::{
     LlmProvider, LlmRequest, LlmResponse, OpenAiCompatibleProvider, ProviderCapabilities,

@@ -38,6 +38,18 @@ pub async fn list_runs(
 }
 
 #[tauri::command]
+pub async fn smoke_channel_message(channel: Channel<GenerationEvent>) -> Result<(), AppError> {
+    let event = GenerationEvent::RunStarted {
+        run_id: "smoke-run".into(),
+        seq: 1,
+        occurred_at: novel_platform::now_ms(),
+    };
+    channel
+        .send(event)
+        .map_err(|_| AppError::integrity("测试 Channel 消息发送失败。"))
+}
+
+#[tauri::command]
 pub async fn cancel_generation(state: State<'_, AppState>, run_id: String) -> Result<(), AppError> {
     state.runtime.worker.cancel_generation(&run_id);
     Ok(())
@@ -113,17 +125,43 @@ pub async fn subscribe_run(
     run_id: String,
     channel: Channel<GenerationEvent>,
 ) -> Result<(), AppError> {
+    let runtime = state.runtime.clone();
     let mut receiver = state.runtime.hub.subscribe();
     tauri::async_runtime::spawn(async move {
+        let mut last_seq = 0_i64;
         loop {
             match receiver.recv().await {
                 Ok(event) if event.run_id() == run_id => {
+                    if let Some(seq) = event.seq() {
+                        last_seq = last_seq.max(seq);
+                    }
                     if channel.send(event).is_err() {
                         break;
                     }
                 }
                 Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    // The in-memory broadcast is allowed to drop messages. Recover the
+                    // authoritative suffix from SQLite instead of silently losing a
+                    // checkpoint/terminal event in the WebView.
+                    tracing::warn!(run_id = %run_id, skipped, from_seq = last_seq, "run event channel lagged; replaying persisted events");
+                    match runtime.director.replay(&run_id, last_seq).await {
+                        Ok(events) => {
+                            for event in events {
+                                if let Some(seq) = event.seq() {
+                                    last_seq = last_seq.max(seq);
+                                }
+                                if channel.send(event).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            tracing::error!(run_id = %run_id, %error, "failed to recover lagged run events");
+                            break;
+                        }
+                    }
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }

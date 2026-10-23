@@ -591,6 +591,12 @@ export function generateText(
   });
 }
 
+export function smokeChannelMessage(onEvent: (event: GenerationEvent) => void): Promise<void> {
+  const channel = new Channel<GenerationEvent>();
+  channel.onmessage = onEvent;
+  return invoke("smoke_channel_message", { channel });
+}
+
 export function cancelTextGeneration(requestId: string): Promise<void> {
   return invoke("cancel_text_generation", { requestId });
 }

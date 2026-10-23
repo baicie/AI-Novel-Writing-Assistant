@@ -69,7 +69,7 @@ async fn streams_openai_compatible_sse_chunks() {
         retry_backoff: Duration::ZERO,
         ..ProviderPolicy::default()
     });
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
     let response = provider
         .generate(request(&endpoint, 128), sender, CancellationToken::new())
         .await
@@ -91,7 +91,7 @@ async fn retries_5xx_once_then_streams() {
         retry_backoff: Duration::ZERO,
         ..ProviderPolicy::default()
     });
-    let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, _receiver) = tokio::sync::mpsc::channel(64);
     let response = provider
         .generate(request(&endpoint, 128), sender, CancellationToken::new())
         .await
@@ -101,9 +101,35 @@ async fn retries_5xx_once_then_streams() {
 }
 
 #[tokio::test]
+async fn incomplete_stream_is_rejected_without_retry() {
+    let body = "data: {\"choices\":[{\"delta\":{\"content\":\"截断\"}}]}\n\n";
+    let (endpoint, calls) = serve_statuses(vec![200], body).await;
+    let provider = OpenAiCompatibleProvider::with_policy(ProviderPolicy {
+        timeout: Duration::from_secs(2),
+        max_attempts: 2,
+        retry_backoff: Duration::ZERO,
+        ..ProviderPolicy::default()
+    });
+    let (sender, _receiver) = tokio::sync::mpsc::channel(8);
+    let error = provider
+        .generate(request(&endpoint, 128), sender, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        novel_llm::LlmError::Unavailable { billed: true, .. }
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "truncated stream must not be retried"
+    );
+}
+
+#[tokio::test]
 async fn rejects_unbounded_or_zero_output_budget_before_network() {
     let provider = OpenAiCompatibleProvider::with_policy(ProviderPolicy::default());
-    let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, _receiver) = tokio::sync::mpsc::channel(64);
     let error = provider
         .generate(
             request("https://api.example.com/v1/chat/completions", 0),

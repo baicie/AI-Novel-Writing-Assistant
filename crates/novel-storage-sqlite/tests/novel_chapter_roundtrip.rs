@@ -309,3 +309,86 @@ async fn character_list_projection_reads_only_the_requested_novel() {
     assert_eq!(characters[0].personality.as_deref(), Some("坚韧"));
     assert_eq!(characters[0].arc.as_deref(), Some("由弱到强"));
 }
+
+#[tokio::test]
+async fn paginated_novel_total_honors_all_filters() {
+    let dir = TempDir::new().unwrap();
+    let kernel = SqliteKernel::open(&db_path(&dir)).await.unwrap();
+    for (id, title, narrative_form, writing_mode) in [
+        ("page-1", "Alpha", "third_person", "original"),
+        ("page-2", "Beta", "third_person", "original"),
+        ("page-3", "Gamma", "first_person", "original"),
+    ] {
+        kernel
+            .create_novel(NewNovel {
+                id: id.into(),
+                title: title.into(),
+                description: String::new(),
+                now_ms: 1,
+            })
+            .await
+            .unwrap();
+        sqlx::query("UPDATE novel SET narrative_form = ?, writing_mode = ? WHERE id = ?")
+            .bind(narrative_form)
+            .bind(writing_mode)
+            .bind(id)
+            .execute(kernel.pool())
+            .await
+            .unwrap();
+    }
+    let page_one = kernel
+        .list_novels_paginated(&novel_application::ListNovelsQuery {
+            page: Some(1),
+            limit: Some(1),
+            search: None,
+            status: Some("draft".into()),
+            narrative_form: Some("third_person".into()),
+            writing_mode: Some("original".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page_one.total, 2);
+    assert_eq!(page_one.items.len(), 1);
+
+    let page_two = kernel
+        .list_novels_paginated(&novel_application::ListNovelsQuery {
+            page: Some(2),
+            limit: Some(1),
+            search: None,
+            status: Some("draft".into()),
+            narrative_form: Some("third_person".into()),
+            writing_mode: Some("original".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page_two.total, 2);
+    assert_eq!(page_two.items.len(), 1);
+
+    let search = kernel
+        .list_novels_paginated(&novel_application::ListNovelsQuery {
+            page: Some(1),
+            limit: Some(20),
+            search: Some("Beta".into()),
+            status: Some("draft".into()),
+            narrative_form: Some("third_person".into()),
+            writing_mode: Some("original".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(search.total, 1);
+    assert_eq!(search.items[0].title, "Beta");
+
+    let empty = kernel
+        .list_novels_paginated(&novel_application::ListNovelsQuery {
+            page: Some(1),
+            limit: Some(20),
+            search: None,
+            status: Some("published".into()),
+            narrative_form: None,
+            writing_mode: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(empty.total, 0);
+    assert!(empty.items.is_empty());
+}
