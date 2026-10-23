@@ -109,3 +109,28 @@ approve_run { commandId, runId, expectedVersion? }
 - 旧 Workspace/角色/审阅空间、多章节、driver、world、quality policy
 - 拒绝/重新生成/编辑确认
 - 真实 Provider 联调
+
+## 6. macOS Native UI E2E 结果
+
+- WebdriverIO 9.31.9
+- `@wdio/tauri-service` 1.5.0
+- `@wdio/tauri-plugin` 1.5.0
+- `tauri-plugin-wdio` 1.5.0
+- `tauri-plugin-wdio-webdriver` 1.5.0
+- embedded WebDriver，macOS WKWebView
+
+真实按钮通过：
+
+- 启动 Run
+- Character Cast Gate 确认
+- Volume Strategy Gate 确认
+- Chapter Approval 确认
+- Commit 后读取正式正文
+- Cancel 后正文为空
+- Safety 暂停后无普通 Resume 按钮
+- 页面刷新恢复
+- 独立 App 进程重启后正文/Revision/Run/Artifact 恢复
+
+未覆盖：双击、双窗口、Channel 断线、过期版本 UI、中文拼音输入法、撤销/重做。
+
+证据：`tests/desktop-e2e/`、`P8_MACOS_UI_E2E.md`、`P8_NATIVE_E2E_EVIDENCE.md`。

@@ -60,8 +60,8 @@
 
 ## B-009 Native Director 真实按钮点击自动化
 
-- 状态：**BLOCKED**。
-- 环境限制：当前只有 Release WebView 启动、路由、表单/Channel smoke，没有可靠的 Tauri WebView 鼠标/键盘点击自动化驱动。
-- 已完成：页面、启动表单、typed transport、read model、审批/取消/恢复代码路径、Provider HTTP/SSE 测试。
-- 未完成：通过实际点击启动、确认两个 Gate、取消、恢复、关闭重开的自动化或人工验收。
-- 处理：不得用 DOM 存在或函数单测冒充点击测试；交付人工 GUI 验收清单。
+- 状态：**VERIFIED（核心操作）；边缘用例 PARTIAL**。
+- 已建立 macOS WDIO embedded WebDriver：WebdriverIO 9.31.9、`@wdio/tauri-service` 1.5.0、`tauri-plugin-wdio` 1.5.0、`tauri-plugin-wdio-webdriver` 1.5.0。
+- 已通过真实按钮：启动、Character Cast Gate、Volume Strategy Gate、Chapter Approval、Commit、Cancel、Safety、页面刷新、独立进程重启。
+- 未覆盖：双击/双窗口、Channel 断线重连、过期版本 UI、中文拼音输入法 composition、撤销/重做。
+- E2E 使用隔离临时数据目录与本机 HTTP/SSE Mock Provider，不使用真实付费模型。

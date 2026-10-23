@@ -2,7 +2,7 @@
 
 ## 总体状态
 
-**P8：PARTIAL。P8.1 后端纵向切片 IMPLEMENTED，P8.2/P8.3 最小结构化合同 IMPLEMENTED，P8.4 Tauri Director MVP PARTIAL，P8.5 异常覆盖 PARTIAL；P8.4.1 Runtime Provider 装配已补测。**
+**P8：PARTIAL（P8.4 核心 Native UI 自动化 VERIFIED）。P8.1 后端纵向切片 IMPLEMENTED，P8.2/P8.3 最小结构化合同 IMPLEMENTED，P8.4 Tauri Director Native UI 已完成真实按钮闭环，P8.5 异常覆盖 PARTIAL；P8.4.1 Runtime Provider 装配已补测。**
 
 不得把本地 Mock/结构化 E2E 说成真实 Provider 或真实 GUI 已验收。
 
@@ -17,7 +17,7 @@
 | P8.3 Context | PARTIAL | artifact 级上下文组装，记录 tokenBudget | 世界/角色状态/历史正文/知识库/完整预算裁剪/脱敏 trace |
 | P8.3 Consistency Review | IMPLEMENTED（最小合同） | 结构化 issues、空 clean、malformed/失败 pause；E2E clean 路径 | 旧版完整审校 Prompt、真实问题样本、质量债 |
 | P8.3 Bounded Repair | FAIL_CLOSED（安全暂停）/ NOT_IMPLEMENTED（自动修复） | `consistency_review` 有问题时 `bounded_repair` 直接 pause，不生成 repair artifact、不提交正文；有 P8 测试 | 修复预算、原始候选、修订历史、人工审批后的自动修复 |
-| P8.4 Tauri UI | PARTIAL（MVP） | 新增 `TauriDirectorPage`/历史页/typed transport/read model；Release WebView director route smoke 验证页面和启动表单渲染 | 真实 UI 启动 Run、审批、取消、恢复的自动化/人工验收未完成；完整 Workspace、拒绝/重生成未实现 |
+| P8.4 Tauri UI | VERIFIED（Native UI 核心）；边缘用例 PARTIAL | macOS WDIO embedded WebDriver：真实按钮启动、Character Cast Gate、Volume Strategy Gate、Chapter Approval、Commit、Cancel、Safety、页面刷新、独立进程重启；`tests/desktop-e2e` | 双击/双窗口/Channel 断线/中文拼音输入法未覆盖；拒绝/重生成未实现 |
 | P8.5 E2E happy path | VERIFIED（Scripted Mock） | `structured_director_loop...` + `malformed_story_macro...` 2 tests | 真实 Provider、审批竞态等 |
 | P8.5 异常覆盖 | PARTIAL | 已有取消、SSE 中断、非法 JSON/schema E2E/单测、审批等待、恢复测试 | 审批与取消竞态、连续确认、重规划编辑冲突、真实进程崩溃、预算耗尽全链路 |
 

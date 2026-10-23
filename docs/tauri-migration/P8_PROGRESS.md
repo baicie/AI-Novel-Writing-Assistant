@@ -2,7 +2,7 @@
 
 ## 当前阶段
 
-P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已交付 Tauri Director MVP（页面、读模型、transport、路由 smoke）；P8.5 完成 Scripted Mock 正常链、fail-closed 和部分异常测试。
+P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已通过 macOS WDIO 真实按钮闭环（启动、Gate 确认、Commit、Cancel、Safety、刷新、独立进程重启）；P8.5 完成 Scripted Mock 正常链、fail-closed 和部分异常测试。
 
 ## 已完成代码
 
@@ -52,11 +52,14 @@ cargo test -p novel-application --test recovery
 
 - `bounded_repair`：已改为 fail-closed 安全暂停；没有真实自动修复循环/质量债修复。
 - `approval`：Gate 产物仍是 plumbing payload；真正审批由 storage approve 完成。
-- P8 UI：新增 Tauri MVP 页面/历史页；真实 UI 启动 Run、审批、取消、恢复的自动化点击未完成；旧 Workspace/角色/质量详情未迁移。旧 API 路径在桌面模式下返回 NOT_MIGRATED。
+- P8 UI：Tauri Director 页面/历史页已通过 macOS WDIO embedded WebDriver 真实按钮操作；旧 Workspace/角色/质量详情未迁移。旧 API 路径在桌面模式下返回 NOT_MIGRATED。
+- 新增 `tests/desktop-e2e/`：WDIO 9.31.9 + `@wdio/tauri-service` 1.5.0 + `tauri-plugin-wdio` 1.5.0；真实 HTTP/SSE Mock Provider；真实 Rust Runtime/SQLite/Tauri Commands。
+- Native UI E2E 结果：director 6 passing、cancel 1 passing、safety 1 passing、独立进程 restart 1 passing。
+- 边缘 UI：双击/双窗口/Channel 断线/中文拼音输入法仍未覆盖。
 - P8.4.1：Tauri `llm_provider()` 真实 OpenAI-compatible Provider 装配测试、真实 HTTP/SSE 流取消测试、Safety 暂停禁止普通 resume、取消后不提交正文。
 - World/State/History/Knowledge Context：未进入 context payload。
 - 旧版 User Edited / Replan / Reject / Regenerate 语义未完成。
 
 ## 真实 Provider 边界
 
-本轮没有调用真实付费模型。`ScriptedLlm` 用于结构化合同/数据库/工作流测试；`runtime_provider_http` 与 `src-tauri/tests/runtime_provider` 使用真实 `OpenAiCompatibleProvider` + 本地 Mock HTTP/SSE Server，验证了 Provider/Runtime/取消网络路径，但仍不是真实付费 Provider 验收。
+本轮没有调用真实付费模型。`ScriptedLlm` 用于结构化合同/数据库/工作流测试；`runtime_provider_http` 与 `src-tauri/tests/runtime_provider` 使用真实 `OpenAiCompatibleProvider` + 本地 Mock HTTP/SSE Server；WDIO Native UI E2E 也经过真实 Runtime/Provider HTTP/SQLite，但仍是本地 Mock，不是真实付费 Provider 验收。

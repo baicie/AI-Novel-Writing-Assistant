@@ -62,33 +62,62 @@ cargo test -p novel-application --test recovery
 6 passed
 ```
 
-## G3 Tauri UI 操作：PARTIAL / BLOCKED
+## G3 Tauri UI 操作：VERIFIED（核心操作）
 
-已执行：
+已执行真实 macOS Tauri WebDriver（embedded provider）：
+
+- WebdriverIO 9.31.9
+- `@wdio/tauri-service` 1.5.0
+- `@wdio/tauri-plugin` 1.5.0
+- Rust `tauri-plugin-wdio` 1.5.0
+- Rust `tauri-plugin-wdio-webdriver` 1.5.0
+- 隔离临时 SQLite/应用数据目录
+- 本机 HTTP/SSE Mock Provider
+
+通过的真实按钮测试：
 
 ```text
-scripts/smoke-tauri-director.sh
-Tauri Director UI smoke passed
-director ui smoke ok page=true start=true
+pnpm --filter @ai-novel/desktop-e2e test:director
+6 passing
 ```
 
-该 smoke 证明：
+- 页面/启动表单
+- 点击启动真实 Rust Run
+- Character Cast Gate 确认
+- Volume Strategy Gate 确认
+- Chapter Approval Gate 确认
+- Run succeeded + 正文/revision 持久化
+- 页面刷新恢复
 
-- Release Tauri WebView 可打开 `#/lab/director/<novel>`
-- 新 `TauriDirectorPage` 渲染
-- 启动表单可见
-- 不是旧 Express 页面
+```text
+pnpm --filter @ai-novel/desktop-e2e test:cancel
+1 passing
+```
 
-未执行：
+- 真实点击取消
+- cancelled
+- 正文为空
 
-- 通过真实鼠标/键盘点击“启动导演”
-- 通过真实点击完成 Character Cast / Volume Strategy / Chapter Approval Gate
-- 通过真实点击取消和恢复
-- 关闭重开 GUI 后的正文/历史恢复
+```text
+BIZ_NOVEL_E2E_SCENARIO=issues pnpm ... test:safety
+1 passing
+```
 
-当前环境没有可用的 Tauri WebView 点击自动化驱动；不以 DOM 存在冒充点击测试。G3 标记 **PARTIAL / GUI 人工验收 BLOCKED**。
+- Safety pause
+- 无 repair_notes/chapter_commit
+- 无普通 resume 按钮
+- 正文为空
 
-## G4 持久化：VERIFIED（后端）
+```text
+BIZ_NOVEL_E2E_DATA_DIR=<kept> pnpm ... test:restart
+1 passing
+```
+
+- 独立 App 进程重启后正文、Revision、Run 历史、Artifact 恢复
+
+未覆盖：双击、双窗口、Channel 断线重连、过期版本 UI、中文拼音输入法。G3 核心操作 **VERIFIED**，边缘用例 PARTIAL。
+
+## G4 持久化：VERIFIED（Native UI）
 
 测试：
 
@@ -128,8 +157,8 @@ structured_director_loop_reaches_committed_chapter_and_survives_reopen
 | --- | --- | --- |
 | G1 Provider runtime | VERIFIED | 真实 HTTP/SSE Provider 测试通过 |
 | G2 Cancel / resume safety | VERIFIED（后端） | 取消不提交、Safety 暂停不可绕过 |
-| G3 UI 操作 | PARTIAL / BLOCKED | 路由/表单 smoke；真实点击自动化不可用 |
-| G4 持久化 | VERIFIED（后端） | SQLite 重开、RunDetail、正文/revision 测试 |
+| G3 UI 操作 | VERIFIED（核心）/ PARTIAL（边缘） | macOS WDIO 真实按钮启动/三 Gate/Commit/Cancel/Safety/刷新 |
+| G4 持久化 | VERIFIED（Native UI） | 独立进程重启后正文、Revision、Run、Artifact 恢复 |
 | G5 质量 | PARTIAL | 相关检查通过；all-targets 被用户文件阻塞；GUI 未验收 |
 
-Native Director MVP 自动化闭环不能整体标记 VERIFIED，因为 G3 缺少真实按钮点击证据，且真实 GUI 人工验收未完成。
+G1–G4 已有实际自动化证据；G5 仍 PARTIAL（all-targets 被用户文件阻塞、中文拼音输入法人工验收未做、边缘 UI 未覆盖）。Native Director 核心自动化闭环 VERIFIED，整体 P8 仍不宣布完成。
