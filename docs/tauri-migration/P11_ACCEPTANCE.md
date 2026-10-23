@@ -35,12 +35,15 @@ cargo test -p novel-application --test p11_repair_faults
 
 ## 回归
 
-待最终运行：
+- Rust workspace：236 passed
+- 干净 Worktree all-targets（HEAD 065f7fa1）：PASS
+- 已跟踪 HTTP：55 passed
+- frontend tests：186 passed
+- typecheck：PASS
+- build：PASS
+- fmt：PASS
+- clippy：PASS（既有 warning）
+- Tauri production bundle audit：PASS
+- 生产 `.app`：20.08 MiB，DMG 9.1 MiB
 
-- workspace tests
-- clean all-targets
-- HTTP tracked
-- frontend test/typecheck/build
-- fmt/clippy
-- Native E2E
-- production bundle audit
+Native E2E 沿用 P10 最终构建（P11 仅新增测试，无应用代码变更）。

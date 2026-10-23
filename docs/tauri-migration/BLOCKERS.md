@@ -94,3 +94,10 @@
 - P10.2 accepted quality debt、issue 跨审校可靠关联、完整 Context Broker/RAG、promptText 导出审计未完成。
 - P10.3 双窗口同时编辑、编辑中取消、保存候选失败、正式章节被外部更新未自动化。
 - 真实 Provider/计费/真实用户库未验收。
+
+## B-014 P11 未完成
+
+- P11.1 Repair 跨进程 SIGKILL、Lease 过期、真实 timeout、重复 Cancel 未完成；Gate 保持 PARTIAL。
+- P11.2 Candidate Edit SQLite Journal 未实施，未确认编辑仍只在 sessionStorage；Gate NOT_STARTED。
+- P11.3 Review Issue Occurrence / accepted Command+UI / 稳定跨轮关联未实施；Gate PARTIAL。
+- 不得把真实 HTTP EOF/Cancel 测试宣称为完整跨进程恢复。

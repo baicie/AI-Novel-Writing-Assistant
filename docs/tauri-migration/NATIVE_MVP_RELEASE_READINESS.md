@@ -150,3 +150,9 @@ pnpm --filter @ai-novel/client test
 - G1 repair 超时/SSE/取消/跨进程恢复仍 PARTIAL。
 - G3 Quality Debt/Context 仍 PARTIAL（accepted/RAG/完整 Broker 未完成）。
 - 生产包审计 PASS，无测试插件/假 Key/WebDriver。
+
+## P11 可靠性
+
+- P11.1 Repair 真实 HTTP SSE EOF、取消迟到 token、成功修复已验证；跨进程/Lease/timeout 未完成，PARTIAL。
+- P11.2 Candidate Edit Journal 未实施，未确认候选编辑仍用 sessionStorage，NOT_STARTED。
+- P11.3 Quality Debt lifecycle 仅审计，accepted/occurrence 未实施，PARTIAL。
