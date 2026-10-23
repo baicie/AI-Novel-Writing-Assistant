@@ -265,6 +265,17 @@ export interface IndexKnowledgeInput {
   embeddingModel?: string;
 }
 
+export interface ChapterDraftView {
+  novelId: string;
+  chapterId: string;
+  clientId: string;
+  content: string;
+  baseOfficialVersion: number;
+  baseUpdatedAt: string;
+  localRevision: number;
+  updatedAt: number;
+}
+
 export interface ModelSetupView {
   endpoint: string;
   model: string;
@@ -750,6 +761,42 @@ export function getQuickSetupStatus(): Promise<Record<string, unknown>> {
 
 export function getFirstNovelOnboarding(): Promise<Record<string, unknown>> {
   return invoke("get_first_novel_onboarding");
+}
+
+export function getChapterDraft(input: {
+  novelId: string;
+  chapterId: string;
+  clientId: string;
+}): Promise<ChapterDraftView | null> {
+  return invoke("get_chapter_draft", input);
+}
+
+export function listChapterDrafts(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<ChapterDraftView[]> {
+  return invoke("list_chapter_drafts", input);
+}
+
+export function saveChapterDraft(input: {
+  novelId: string;
+  chapterId: string;
+  clientId: string;
+  content: string;
+  baseOfficialVersion: number;
+  baseUpdatedAt: string;
+}): Promise<ChapterDraftView> {
+  return invoke("save_chapter_draft", { request: input });
+}
+
+export function clearChapterDraft(input: {
+  novelId: string;
+  chapterId: string;
+  clientId: string;
+  submittedContent: string;
+  localRevision: number;
+}): Promise<boolean> {
+  return invoke("clear_chapter_draft", input);
 }
 
 export function getModelSetup(): Promise<ModelSetupView | null> {

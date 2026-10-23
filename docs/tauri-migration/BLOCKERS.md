@@ -66,3 +66,10 @@
 - 未覆盖：双击/双窗口、Channel 断线重连、过期版本 UI、中文拼音输入法 composition、撤销/重做。
 - 稳定性：director E2E 连续 3 轮通过（14–24s），无 flaky。
 - E2E 使用隔离临时数据目录与本机 HTTP/SSE Mock Provider，不使用真实付费模型。
+
+## B-010 中文输入法 composition 与双窗口人工验收
+
+- 状态：**BLOCKED / PARTIAL**。
+- 已自动验证：本地草稿 SQLite 跨进程恢复、SIGKILL 恢复、保存竞态、切章保存。
+- 未自动验证：macOS 拼音 composition 候选/光标、真实双窗口冲突 UI、窗口关闭按钮、AI Commit 与人工保存同秒冲突。
+- 处理：按 `EDITOR_ACCEPTANCE.md` 执行人工验收；不得把普通 WebDriver 中文字符输入当成输入法组合输入通过。

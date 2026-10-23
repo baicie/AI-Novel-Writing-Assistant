@@ -2,10 +2,11 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, CreateNovelInput,
-    DeleteChapterRecord, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel, NewVolume,
-    NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome, SaveChapterRecord,
-    UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
+    ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
+    CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult, NewChapter, NewNovel,
+    NewVolume, NovelDetail, NovelRepository, NovelSummary, PortError, PromoteOutcome,
+    SaveChapterDraftRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateNovelFields,
+    UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
@@ -681,6 +682,96 @@ impl NovelRepository for SqliteKernel {
         self.get_chapter(&input.novel_id, &input.chapter_id).await
     }
 
+    async fn save_chapter_draft(
+        &self,
+        record: SaveChapterDraftRecord,
+    ) -> Result<ChapterDraftView, PortError> {
+        let row = sqlx::query(
+            "INSERT INTO chapter_local_draft
+                (novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+             ON CONFLICT(novel_id, chapter_id, client_id) DO UPDATE SET
+                content = excluded.content,
+                base_official_version = excluded.base_official_version,
+                base_updated_at = excluded.base_updated_at,
+                local_revision = chapter_local_draft.local_revision + 1,
+                updated_at = excluded.updated_at
+             RETURNING novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at",
+        )
+        .bind(&record.novel_id)
+        .bind(&record.chapter_id)
+        .bind(&record.client_id)
+        .bind(&record.content)
+        .bind(record.base_official_version)
+        .bind(&record.base_updated_at)
+        .bind(record.now_ms)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        draft_from_row(&row)
+    }
+
+    async fn get_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+    ) -> Result<Option<ChapterDraftView>, PortError> {
+        let row = sqlx::query(
+            "SELECT novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at
+             FROM chapter_local_draft WHERE novel_id = ? AND chapter_id = ? AND client_id = ?",
+        )
+        .bind(novel_id)
+        .bind(chapter_id)
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        row.as_ref().map(draft_from_row).transpose()
+    }
+
+    async fn list_chapter_drafts(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterDraftView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT novel_id, chapter_id, client_id, content, base_official_version, base_updated_at, local_revision, updated_at
+             FROM chapter_local_draft WHERE novel_id = ? AND chapter_id = ?
+             ORDER BY updated_at DESC, local_revision DESC",
+        )
+        .bind(novel_id)
+        .bind(chapter_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter().map(draft_from_row).collect()
+    }
+
+    async fn clear_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+        submitted_content: &str,
+        local_revision: i64,
+    ) -> Result<bool, PortError> {
+        let result = sqlx::query(
+            "DELETE FROM chapter_local_draft
+             WHERE novel_id = ? AND chapter_id = ? AND client_id = ?
+               AND content = ? AND local_revision <= ?",
+        )
+        .bind(novel_id)
+        .bind(chapter_id)
+        .bind(client_id)
+        .bind(submitted_content)
+        .bind(local_revision)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         let current = sqlx::query(
@@ -1009,6 +1100,19 @@ fn map_volume_sql(error: sqlx::Error) -> PortError {
     } else {
         map_sql(error)
     }
+}
+
+fn draft_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ChapterDraftView, PortError> {
+    Ok(ChapterDraftView {
+        novel_id: row.try_get("novel_id").map_err(map_sql)?,
+        chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+        client_id: row.try_get("client_id").map_err(map_sql)?,
+        content: row.try_get("content").map_err(map_sql)?,
+        base_official_version: row.try_get("base_official_version").map_err(map_sql)?,
+        base_updated_at: row.try_get("base_updated_at").map_err(map_sql)?,
+        local_revision: row.try_get("local_revision").map_err(map_sql)?,
+        updated_at: row.try_get("updated_at").map_err(map_sql)?,
+    })
 }
 
 fn novel_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<NovelSummary, PortError> {

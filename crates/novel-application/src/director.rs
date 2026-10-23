@@ -10,16 +10,17 @@ use novel_prompt::resolve;
 use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
 
 use crate::dto::{
-    ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, CreateNovelInput, GenerationEvent,
-    ListNovelsQuery, ListNovelsResult, NovelDetail, NovelSummary, RunCandidateView, RunContract,
-    RunDetailView, RunGateView, RunUsageView, UpdateNovelFields, VolumeSnapshot, event_from_stored,
+    ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
+    CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult, NovelDetail,
+    NovelSummary, RunCandidateView, RunContract, RunDetailView, RunGateView, RunUsageView,
+    UpdateNovelFields, VolumeSnapshot, event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
 use crate::ports::{
     Clock, CommandOutcome, DeleteChapterRecord, Ids, NewChapter, NewNovel, NewVolume,
-    NovelRepository, OpenRunRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
-    WorkflowRepository,
+    NovelRepository, OpenRunRecord, SaveChapterDraftRecord, SaveChapterRecord,
+    UpdateChapterMetaRecord, UpdateVolumeRecord, WorkflowRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -670,6 +671,77 @@ impl DirectorService {
     }
 
     /// Phase 2.1：获取小说的所有运行列表（按时间倒序）。
+    /// Persist an author-local draft without touching chapter_revision.
+    pub async fn save_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+        content: &str,
+        base_official_version: i64,
+        base_updated_at: &str,
+    ) -> Result<ChapterDraftView, AppError> {
+        self.novels.get_chapter(novel_id, chapter_id).await?;
+        if client_id.trim().is_empty() {
+            return Err(AppError::validation("本地草稿缺少窗口标识。"));
+        }
+        Ok(self
+            .novels
+            .save_chapter_draft(SaveChapterDraftRecord {
+                novel_id: novel_id.to_string(),
+                chapter_id: chapter_id.to_string(),
+                client_id: client_id.to_string(),
+                content: content.to_string(),
+                base_official_version,
+                base_updated_at: base_updated_at.to_string(),
+                now_ms: self.clock.now_ms(),
+            })
+            .await?)
+    }
+
+    pub async fn get_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+    ) -> Result<Option<ChapterDraftView>, AppError> {
+        Ok(self
+            .novels
+            .get_chapter_draft(novel_id, chapter_id, client_id)
+            .await?)
+    }
+
+    pub async fn list_chapter_drafts(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterDraftView>, AppError> {
+        Ok(self
+            .novels
+            .list_chapter_drafts(novel_id, chapter_id)
+            .await?)
+    }
+
+    pub async fn clear_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+        submitted_content: &str,
+        local_revision: i64,
+    ) -> Result<bool, AppError> {
+        Ok(self
+            .novels
+            .clear_chapter_draft(
+                novel_id,
+                chapter_id,
+                client_id,
+                submitted_content,
+                local_revision,
+            )
+            .await?)
+    }
+
     pub async fn list_runs(&self, novel_id: &str) -> Result<Vec<crate::dto::RunSummary>, AppError> {
         Ok(self.runs.list_runs(novel_id).await?)
     }

@@ -25,7 +25,7 @@
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 221 tests PASS
+# 222 tests PASS
 
 cargo test -p novel-application --test p8_director_loop
 # 3 PASS
@@ -66,3 +66,11 @@ P8 后端结构化步骤和原生 Director MVP 已有实际代码与自动化证
 - 独立干净 Git Worktree 检出 `340c8b01`：`cargo test --workspace --all-targets` PASS；原工作树仍因用户未跟踪 `integration_runs.rs` 阻塞。
 - 前端测试 186 passing（补充草稿保存竞态测试）。
 - 生产 Release 仍为 `withGlobalTauri:false`、capabilities 仅 default，无 WDIO marker。
+
+
+## P8.5 Editor Data Safety
+
+- SQLite `chapter_local_draft`：VERIFIED。
+- 未保存正文跨进程 SIGKILL 恢复：VERIFIED（WDIO 新进程）。
+- 正式 Revision 与 Local Draft 分离：VERIFIED（Rust test）。
+- 中文 composition / 双窗口 UI：PARTIAL/BLOCKED，见 `EDITOR_ACCEPTANCE.md`。

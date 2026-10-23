@@ -102,6 +102,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
             <div className="grid grid-cols-1 gap-2">
               <Button
                 size="sm"
+                data-testid="chapter-save-button"
                 onClick={onSave}
                 disabled={!isDirty || isSaving}
                 className="w-full"

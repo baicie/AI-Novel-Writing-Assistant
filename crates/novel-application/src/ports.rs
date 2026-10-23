@@ -8,10 +8,10 @@ use novel_domain::{
 use novel_workflow::AttemptView;
 
 use crate::dto::{
-    ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
-    CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult, NovelDetail,
-    NovelSummary, RecoverableTaskSummary, RunArtifactView, RunContract, RunSummary, RunUsageView,
-    TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
+    ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,
+    CharacterSnapshot, CreateNovelInput, KnowledgeDocumentSummary, ListNovelsQuery,
+    ListNovelsResult, NovelDetail, NovelSummary, RecoverableTaskSummary, RunArtifactView,
+    RunContract, RunSummary, RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use crate::error::PortError;
 
@@ -43,6 +43,17 @@ pub struct SaveChapterRecord {
     pub revision_id: String,
     pub artifact_id: String,
     pub content_sha256: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SaveChapterDraftRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub client_id: String,
+    pub content: String,
+    pub base_official_version: i64,
+    pub base_updated_at: String,
     pub now_ms: i64,
 }
 
@@ -336,6 +347,29 @@ pub trait NovelRepository: Send + Sync {
         &self,
         input: SaveChapterRecord,
     ) -> Result<ChapterSnapshot, PortError>;
+    async fn save_chapter_draft(
+        &self,
+        record: SaveChapterDraftRecord,
+    ) -> Result<ChapterDraftView, PortError>;
+    async fn get_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+    ) -> Result<Option<ChapterDraftView>, PortError>;
+    async fn list_chapter_drafts(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<ChapterDraftView>, PortError>;
+    async fn clear_chapter_draft(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        client_id: &str,
+        submitted_content: &str,
+        local_revision: i64,
+    ) -> Result<bool, PortError>;
     async fn delete_chapter(&self, input: DeleteChapterRecord) -> Result<(), PortError>;
     async fn update_chapter_meta(
         &self,

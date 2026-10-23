@@ -1,3 +1,4 @@
+use novel_application::ChapterDraftView;
 use novel_application::{AppError, ChapterSnapshot};
 use serde::Serialize;
 use tauri::State;
@@ -116,4 +117,83 @@ mod tests {
         assert!(workspace.diagnostic_cards.is_empty());
         assert!(workspace.recommended_task.is_none());
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveChapterDraftRequest {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub client_id: String,
+    pub content: String,
+    pub base_official_version: i64,
+    pub base_updated_at: String,
+}
+
+#[tauri::command]
+pub async fn get_chapter_draft(
+    state: tauri::State<'_, crate::state::AppState>,
+    novel_id: String,
+    chapter_id: String,
+    client_id: String,
+) -> Result<Option<ChapterDraftView>, novel_application::AppError> {
+    state
+        .runtime
+        .director
+        .get_chapter_draft(&novel_id, &chapter_id, &client_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn list_chapter_drafts(
+    state: tauri::State<'_, crate::state::AppState>,
+    novel_id: String,
+    chapter_id: String,
+) -> Result<Vec<ChapterDraftView>, novel_application::AppError> {
+    state
+        .runtime
+        .director
+        .list_chapter_drafts(&novel_id, &chapter_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn save_chapter_draft(
+    state: tauri::State<'_, crate::state::AppState>,
+    request: SaveChapterDraftRequest,
+) -> Result<ChapterDraftView, novel_application::AppError> {
+    state
+        .runtime
+        .director
+        .save_chapter_draft(
+            &request.novel_id,
+            &request.chapter_id,
+            &request.client_id,
+            &request.content,
+            request.base_official_version,
+            &request.base_updated_at,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn clear_chapter_draft(
+    state: tauri::State<'_, crate::state::AppState>,
+    novel_id: String,
+    chapter_id: String,
+    client_id: String,
+    submitted_content: String,
+    local_revision: i64,
+) -> Result<bool, novel_application::AppError> {
+    state
+        .runtime
+        .director
+        .clear_chapter_draft(
+            &novel_id,
+            &chapter_id,
+            &client_id,
+            &submitted_content,
+            local_revision,
+        )
+        .await
 }

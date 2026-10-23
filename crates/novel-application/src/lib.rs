@@ -24,12 +24,12 @@ mod worker;
 
 pub use director::{DirectorService, OpenRunInput};
 pub use dto::{
-    ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot,
-    CreateNovelInput, GenerationEvent, KnowledgeDocumentSummary, ListNovelsQuery, ListNovelsResult,
-    ListRunsResult, NovelDetail, NovelSummary, RecoverableTaskListResponse, RecoverableTaskSummary,
-    RunArtifactView, RunCandidateView, RunContract, RunDetailView, RunGateView, RunSummary,
-    RunUsageView, TaskOverviewSummary, UpdateNovelFields, VolumeSnapshot, command_view,
-    event_from_stored,
+    ChapterDraftView, ChapterFullDetail, ChapterRevisionSnapshot, ChapterSnapshot,
+    CharacterSnapshot, CreateNovelInput, GenerationEvent, KnowledgeDocumentSummary,
+    ListNovelsQuery, ListNovelsResult, ListRunsResult, NovelDetail, NovelSummary,
+    RecoverableTaskListResponse, RecoverableTaskSummary, RunArtifactView, RunCandidateView,
+    RunContract, RunDetailView, RunGateView, RunSummary, RunUsageView, TaskOverviewSummary,
+    UpdateNovelFields, VolumeSnapshot, command_view, event_from_stored,
 };
 pub use error::{AppError, AppErrorCode, PortError};
 pub use hash::{json_hash, sha256_hex};
@@ -40,9 +40,9 @@ pub use ports::{
     DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LookupRepository, ModelSecrets,
     NewArtifact, NewAttempt, NewCandidate, NewChapter, NewDocument, NewEmbedding, NewInvocation,
     NewNovel, NewVolume, NewWorld, NoFault, NoModelSecrets, NovelRepository, OpenRunRecord,
-    PromoteOutcome, RetrievalTrace, SaveChapterRecord, SearchHit, StoredEvent, SystemClock,
-    TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds,
-    WorkflowRepository, WorldRepository,
+    PromoteOutcome, RetrievalTrace, SaveChapterDraftRecord, SaveChapterRecord, SearchHit,
+    StoredEvent, SystemClock, TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord,
+    UpdateWorldFields, UuidIds, WorkflowRepository, WorldRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

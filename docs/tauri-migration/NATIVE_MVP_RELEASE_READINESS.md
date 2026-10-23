@@ -12,9 +12,29 @@
 | 持久化 | VERIFIED（Native UI） | 独立 App 进程重启后正文、officialVersion、Run、Artifact 恢复 |
 | 取消 / 恢复 | VERIFIED（取消）/ PARTIAL（恢复） | UI 取消真实通过；Safety 禁止普通 resume；Provider paused 的 UI Resume 未做按钮 E2E |
 | 竞态处理 | PARTIAL | 单书单活跃 Run、stale expectedVersion、重复命令幂等有后端测试；双击/双窗口/Channel 断线 UI 未覆盖 |
-| Editor | PARTIAL | 本地草稿、显式保存、CAS、保存中禁用、切换提示、draft race 单测；无 autosave debounce；中文输入法未验收 |
+| Editor | VERIFIED（durable local draft）/ PARTIAL（IME/窗口关闭） | SQLite `chapter_local_draft`、600ms autosave、SIGKILL 新进程恢复、正式保存 CAS；中文 composition 人工未验 |
 | 生产构建隔离 | VERIFIED | `withGlobalTauri:false`、capabilities 仅 default、无 WDIO binary markers、生产前端无 wdio |
 | macOS 发布准备 | PARTIAL | .app/DMG 可用但未签名/公证；完整 GUI 人工验收未做 |
+
+## 1.1 Editor Data Safety
+
+本地草稿已从 `sessionStorage` 升级为 SQLite 独立 Journal；不创建正式 Revision。详见：
+
+- `EDITOR_DATA_SAFETY.md`
+- `EDITOR_ACCEPTANCE.md`
+
+已自动验证：
+
+- 输入后自动保存本地草稿，刷新恢复。
+- 正式保存后切换章节返回正文一致。
+- 强制 SIGKILL 后新 App 进程恢复未保存草稿并正式保存。
+- 旧保存响应/继续输入/其他窗口草稿不被错误清除（Rust + 前端单测）。
+
+仍未验证：
+
+- 系统拼音 composition。
+- 真实双窗口 UI 冲突。
+- 最后 600ms debounce 内 SIGKILL 的输入窗口（明确风险）。
 
 ## 2. 自动化证据
 
@@ -22,7 +42,7 @@
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 221 passed
+# 222 passed
 
 # 用户未跟踪文件不进入的独立临时 worktree：
 git worktree add /tmp/biz-novel-clean HEAD
@@ -47,6 +67,9 @@ No flaky failure.
 test:cancel      1 passing
 test:safety      1 passing (issues > 0)
 test:restart     1 passing (new app process)
+test:editor      2 passing × 2 (refresh + official save/switch)
+test:editor-crash SIGKILL harness, expected non-zero
+test:editor-crash-restart 1 passing (new process recovered pre-SIGKILL draft)
 ```
 
 ### 编辑草稿单元测试
@@ -97,7 +120,7 @@ pnpm --filter @ai-novel/client test
 
 ## 5. 发布结论
 
-- **开发者可用技术预览版：YES**。macOS arm64 未签名 `.app`/DMG 可用；核心 Native Director 自动化闭环通过。
+- **开发者可用技术预览版：YES**。macOS arm64 未签名 `.app`/DMG 可用；核心 Native Director 自动化闭环通过；未保存正文已实现 SQLite 跨进程 SIGKILL 恢复。
 - **正式生产发布版：NO**。未签名/公证，未完成真实 Provider/真实输入法/完整产品功能等价验收。
 - 原 Electron 产品的全量功能不等价；图像、短剧、漫画、移动端、云端协作未迁移。
 

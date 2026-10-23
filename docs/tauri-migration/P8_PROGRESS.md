@@ -36,7 +36,7 @@ P8.1–P8.3 的最小结构化后端切片已实现；P8.4 已通过 macOS WDIO 
 
 ```bash
 cargo test --workspace --exclude novel-http
-# 221 passed
+# 222 passed
 
 cargo test -p novel-application --test p8_director_loop
 # 3 passed
@@ -63,3 +63,11 @@ cargo test -p novel-application --test recovery
 ## 真实 Provider 边界
 
 本轮没有调用真实付费模型。`ScriptedLlm` 用于结构化合同/数据库/工作流测试；`runtime_provider_http` 与 `src-tauri/tests/runtime_provider` 使用真实 `OpenAiCompatibleProvider` + 本地 Mock HTTP/SSE Server；WDIO Native UI E2E 也经过真实 Runtime/Provider HTTP/SQLite，但仍是本地 Mock，不是真实付费 Provider 验收。
+
+## P8.5 Editor 数据安全
+
+- 新增 SQLite `chapter_local_draft` 与 Tauri draft Commands。
+- 600ms 本地草稿 autosave；官方保存仍显式 CAS。
+- WDIO：autosave+refresh、official save+switch、SIGKILL 新进程恢复。
+- 前端草稿竞态 186 tests；Rust workspace 222 tests。
+- 中文输入法/真实双窗口仍有人工验收项。

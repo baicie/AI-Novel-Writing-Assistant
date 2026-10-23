@@ -125,6 +125,10 @@ async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
             "0004",
             include_str!("../../../migrations/0004_post_generation_style_review.sql"),
         ),
+        (
+            "0005",
+            include_str!("../../../migrations/0005_chapter_local_draft.sql"),
+        ),
     ];
     ensure_schema_migration_table(pool).await?;
     for (version, script) in SCRIPTS {

@@ -279,6 +279,19 @@ pub struct RunDetailView {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterDraftView {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub client_id: String,
+    pub content: String,
+    pub base_official_version: i64,
+    pub base_updated_at: String,
+    pub local_revision: i64,
+    pub updated_at: i64,
+}
+
 /// 章节完整详情。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
