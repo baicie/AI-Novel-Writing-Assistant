@@ -132,10 +132,16 @@ pub async fn subscribe_run(
         loop {
             match receiver.recv().await {
                 Ok(event) if event.run_id() == run_id => {
+                    let terminal = matches!(
+                        event,
+                        GenerationEvent::RunCompleted { .. }
+                            | GenerationEvent::RunFailed { .. }
+                            | GenerationEvent::RunCancelled { .. }
+                    );
                     if let Some(seq) = event.seq() {
                         last_seq = last_seq.max(seq);
                     }
-                    if channel.send(event).is_err() {
+                    if channel.send(event).is_err() || terminal {
                         break;
                     }
                 }
