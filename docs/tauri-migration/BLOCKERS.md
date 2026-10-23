@@ -122,5 +122,5 @@
 
 ## B-019 P11.1-H2-A
 
-- Lease Fencing 写入完整性已通过两个 Worker 竞争与 Repository 级测试。
+- Lease Fencing 写入完整性已通过两个 Worker 竞争与 Repository 级测试（`e6ee266d`）。
 - 仍未覆盖：真实进程重启后的 Lease 接管、Re-review 中途崩溃、Provider timeout、持久化 Cancel 与 Commit 竞争。

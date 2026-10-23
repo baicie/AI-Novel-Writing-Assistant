@@ -1,6 +1,6 @@
 # P11.1-H2-A Lease Fencing
 
-基线：`3e05c8ff`。
+基线：`3e05c8ff`。代码提交：`e6ee266d`。
 
 ## Fencing 数据模型
 
@@ -128,3 +128,27 @@ Fencing 只强化执行权，不改变 Workflow 业务语义：
 ## Gate
 
 **VERIFIED**（仅 Lease Fencing 写入完整性）。
+
+## 最终测试
+
+```text
+cargo test -p novel-application --test p11_lease_fence
+1 passed
+
+cargo test -p novel-storage-sqlite --test workflow_lease
+2 passed
+
+cargo test --workspace --exclude novel-http
+240 passed
+
+cargo test --workspace --all-targets
+独立干净 Worktree（HEAD e6ee266d）PASS
+
+HTTP tracked
+55 passed
+
+fmt / clippy
+PASS
+```
+
+生产包：20.29 MiB，DMG 9.2 MiB；recovery_worker / WDIO / E2E key absent。
