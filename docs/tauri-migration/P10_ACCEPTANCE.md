@@ -19,7 +19,7 @@ cargo test --workspace --exclude novel-http
 233 passed
 
 cargo test --workspace --all-targets
-独立干净 Worktree（HEAD 703d75d7）PASS
+独立干净 Worktree（HEAD f44e5ca5）PASS
 
 已跟踪 novel-http target
 55 passed

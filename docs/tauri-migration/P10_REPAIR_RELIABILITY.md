@@ -1,13 +1,13 @@
 # P10.1 Repair Reliability
 
-## 1. 风险矩阵（基于 HEAD 703d75d7 实际源码）
+## 1. 风险矩阵（基于 HEAD f44e5ca5 实际源码）
 
 | 风险 | 状态 | 证据 / 处理 |
 | --- | --- | --- |
 | `max_automatic_retries` 同时承担远端重试和质量修复 | **FIXED** | 新增 `repair_budget`，Plan v3；v2 保留旧语义 |
 | 旧 v1/v2 Run 被静默套用新修复规则 | **FIXED（设计）** | Plan v3；v2 用 `max_automatic_retries` 作为遗留修复预算；v1 仍 fail-closed |
 | Repair 请求与远程请求共享预算 | **FIXED** | 远端 retry 只看 `max_automatic_retries`；质量修复只看 `repair_budget` |
-| residual issues 后 Worker tick 返回 Conflict | **FIXED** | `pause_safety` 处理已持久化的 Safety pause，不再误报 |
+| residual issues 后 Worker tick 返回 Conflict | **FIXED** | `pause_safety` 处理已持久化的暂停，不再误报；`f44e5ca5` |
 | Repair 超时 | **PARTIAL** | Provider 错误路径有暂停，但无专项真实超时测试 |
 | Repair SSE 提前 EOF | **PARTIAL** | Provider 层已有错误分类；未做专项修复测试 |
 | Repair 期间 Cancel | **PARTIAL** | Cancellation 覆盖所有 LLM 调用；无 repair 专项 E2E |
