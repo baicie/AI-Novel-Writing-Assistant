@@ -440,7 +440,7 @@ export default function TauriDirectorPage() {
           <h2 className="text-sm font-semibold">开始一次创作</h2>
           <label className="block space-y-2 text-xs">选择章节
             <Select value={currentChapter?.id} onValueChange={setChapterId}>
-              <SelectTrigger><SelectValue placeholder="选择要创作的章节" /></SelectTrigger>
+              <SelectTrigger data-testid="director-chapter-select"><SelectValue placeholder="选择要创作的章节" /></SelectTrigger>
               <SelectContent>{chapters.map(chapter => <SelectItem key={chapter.id} value={chapter.id}>{chapter.sortOrder}. {chapter.title}</SelectItem>)}</SelectContent>
             </Select>
           </label>

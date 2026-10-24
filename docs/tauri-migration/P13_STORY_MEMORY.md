@@ -85,3 +85,15 @@ Director 页面新增“长篇记忆”区域：
 - 不修改正式正文。
 
 仍缺 AI 抽取确认与记忆冲突人工裁决 UI。
+
+
+## Native 表单 WDIO（第 6 轮）
+
+`test:memory` 1 passing：
+
+- 创建两章小说；
+- 选择第二章启动 Director；
+- 在长篇记忆填写时间线；
+- 真实 Tauri Command 保存；
+- UI 显示事实；
+- `list_story_facts` 返回该事实。

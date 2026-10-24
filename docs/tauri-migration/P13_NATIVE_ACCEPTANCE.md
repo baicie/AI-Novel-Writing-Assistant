@@ -107,3 +107,10 @@ Director 4 passing
 ```
 
 长篇记忆三种编辑表单、知识索引健康与重建按钮已进入页面；尚未对表单提交做 WDIO 自动化。
+
+
+第 6 轮新增：
+
+```text
+test:memory 1 passing
+```

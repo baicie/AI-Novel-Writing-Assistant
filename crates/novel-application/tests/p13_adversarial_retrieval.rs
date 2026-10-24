@@ -1,6 +1,5 @@
 use novel_application::{KnowledgeRepository, NewDocument, NewNovel, NovelRepository};
-use novel_context::ChunkRef;
-use novel_context::{Lexicon, assemble, fts_query, tokenize};
+use novel_context::{ChunkRef, Lexicon, assemble, fts_query, tokenize};
 use novel_storage_sqlite::SqliteKernel;
 
 async fn index(kernel: &SqliteKernel, id: &str, owner: &str, body: &str, revision: &str) {
@@ -25,7 +24,7 @@ async fn index(kernel: &SqliteKernel, id: &str, owner: &str, body: &str, revisio
 }
 
 #[tokio::test]
-async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
+async fn adversarial_retrieval_keeps_sources_separate_and_computes_metrics() {
     let dir = tempfile::tempdir().unwrap();
     let kernel = SqliteKernel::open(&dir.path().join("adversarial.sqlite"))
         .await
@@ -74,12 +73,56 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
         "plan-1",
     )
     .await;
+    index(
+        &kernel,
+        "location",
+        "world",
+        "青阳城 山门所在 地理事实",
+        "rev-5",
+    )
+    .await;
+    index(
+        &kernel,
+        "alias",
+        "character",
+        "青翼蝠王 魂兽 别称 林动旧识",
+        "rev-6",
+    )
+    .await;
+    index(
+        &kernel,
+        "old-setting",
+        "world",
+        "旧设定 祖祠在东山",
+        "rev-7",
+    )
+    .await;
+    index(
+        &kernel,
+        "new-setting",
+        "world",
+        "新设定 祖祠在西山",
+        "rev-8",
+    )
+    .await;
+    index(
+        &kernel,
+        "memory",
+        "character",
+        "回忆 林若 生前 已故",
+        "rev-9",
+    )
+    .await;
     let lexicon = Lexicon::default();
     let cases = [
         ("掌门之子", "young:0"),
         ("冒充", "impostor:0"),
         ("已死", "rumor:0"),
         ("存活", "fact:0"),
+        ("青阳城", "location:0"),
+        ("青翼蝠王", "alias:0"),
+        ("西山", "new-setting:0"),
+        ("生前", "memory:0"),
     ];
     let mut mrr = 0.0;
     let mut ndcg = 0.0;
@@ -118,7 +161,6 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
     mrr /= n;
     ndcg /= n;
     precision /= n;
-    // Future planning can be a goal but must not be assembled as confirmed character fact.
     let chunks = vec![ChunkRef {
         id: "future:0".into(),
         owner_type: "future_plan".into(),

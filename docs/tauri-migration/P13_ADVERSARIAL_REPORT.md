@@ -18,6 +18,10 @@
 | 传闻“已死” | correct rumor source at rank 1 |
 | 真实“存活” | correct fact source at rank 1 |
 | 未来计划 owner | excluded from confirmed character facts |
+| 地点事实 | 青阳城 correct source |
+| 别名 | 青翼蝠王 correct source |
+| 旧设定修改 | 西山新设定 correct source |
+| 已故人物回忆 | 生前 correct source |
 | Source revision | all returned hits carry sourceRevision |
 | 旧章节 revision | old FTS/Vector content not returned |
 | 删除知识 | no hits |
@@ -25,8 +29,8 @@
 | Accepted 后问题再次出现 | 不静默重新 open |
 
 ```text
-P13 adversarial: dataset=p13-adversarial-v1 cases=4 correct=4
-recall=1.00 precision=0.88 mrr=1.00 ndcg=1.00
+P13 adversarial: dataset=p13-adversarial-v1 cases=8 correct=8
+recall=1.00 precision=0.88 mrr=0.94 ndcg=0.94
 source_revision_accuracy=1.00 future_leak=0
 ```
 

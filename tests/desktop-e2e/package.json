@@ -14,6 +14,7 @@
     "test:editor-crash-restart": "wdio run wdio.conf.mjs --spec specs/editor-crash-restart.spec.mjs",
     "test:confirm-edit-restart": "wdio run wdio.conf.mjs --spec specs/confirm-edit-restart.spec.mjs",
     "test:candidate-journal-crash": "wdio run wdio.conf.mjs --spec specs/candidate-journal-crash.spec.mjs",
-    "test:candidate-journal-restart": "wdio run wdio.conf.mjs --spec specs/candidate-journal-restart.spec.mjs"
+    "test:candidate-journal-restart": "wdio run wdio.conf.mjs --spec specs/candidate-journal-restart.spec.mjs",
+    "test:memory": "wdio run wdio.conf.mjs --spec specs/memory.spec.mjs"
   }
 }
