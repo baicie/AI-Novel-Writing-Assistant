@@ -172,6 +172,13 @@ export function listStoryFacts(input: { novelId: string; beforeChapterOrder: num
   return invoke("list_story_facts", input);
 }
 
+export function upsertTimelineEvent(input: {
+  id: string; novelId: string; chapterOrder: number; body: string;
+  sourceChapterId: string; sourceRevision: string; status: string;
+}): Promise<void> {
+  return invoke("upsert_timeline_event", { request: input });
+}
+
 export interface RunDetailView {
   id: string;
   novelId: string;

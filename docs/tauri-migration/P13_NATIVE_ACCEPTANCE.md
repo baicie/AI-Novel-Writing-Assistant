@@ -81,3 +81,6 @@ Director 4 passing（含长篇记忆只读面板）
 ```
 
 知识库索引状态/重试 UI 与记忆编辑 UI 未验收。
+
+
+第 4 轮新增：Director 长篇记忆区域支持作者记录时间线事实（真实 Tauri Command）。

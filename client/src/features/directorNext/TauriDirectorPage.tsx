@@ -14,6 +14,7 @@ import {
   listReviewOccurrences,
   listStoryFacts,
   regenerateRun,
+  upsertTimelineEvent,
   saveCandidateEditDraft,
   rejectRun,
   getActiveRun,
@@ -96,6 +97,8 @@ export default function TauriDirectorPage() {
   const [candidateDraftStatus, setCandidateDraftStatus] = useState<"idle" | "saving" | "saved" | "error" | "restored">("idle");
   const [candidateDraftChoices, setCandidateDraftChoices] = useState<CandidateEditDraftView[]>([]);
   const [debtHistory, setDebtHistory] = useState<Record<string, ReviewOccurrenceView[]>>({});
+  const [memoryBody, setMemoryBody] = useState("");
+  const [memorySaving, setMemorySaving] = useState(false);
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -121,6 +124,26 @@ export default function TauriDirectorPage() {
   const chapters = chaptersQuery.data ?? [];
   const latestCandidate = detail?.latestCandidate ?? null;
   const targetChapterOrder = chapters.find(chapter => chapter.id === (detail?.chapterId ?? ""))?.sortOrder ?? 1;
+  const memoryPreviousChapter = [...chapters]
+    .filter(chapter => chapter.sortOrder < targetChapterOrder)
+    .sort((left, right) => right.sortOrder - left.sortOrder)[0];
+  const saveTimelineMemory = async () => {
+    if (!memoryPreviousChapter || !memoryBody.trim()) return;
+    setMemorySaving(true);
+    try {
+      await upsertTimelineEvent({
+        id: `ui-memory-${Date.now()}`, novelId, chapterOrder: memoryPreviousChapter.sortOrder,
+        body: memoryBody.trim(), sourceChapterId: memoryPreviousChapter.id,
+        sourceRevision: `ui@${Date.now()}`, status: "confirmed",
+      });
+      setMemoryBody("");
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "记录时间线事实失败，请重试。");
+    } finally {
+      setMemorySaving(false);
+    }
+  };
   const storyFactsQuery = useQuery<StoryFactView[]>({
     queryKey: ["tauri-director", novelId, "story-facts", detail?.chapterId ?? "", targetChapterOrder],
     queryFn: () => listStoryFacts({ novelId, beforeChapterOrder: targetChapterOrder }),
@@ -484,6 +507,11 @@ export default function TauriDirectorPage() {
                   <p className="mt-1 text-muted-foreground">来源版本：{fact.sourceRevision ?? "未标注"}</p>
                 </li>)}
               </ul> : <p className="text-xs text-muted-foreground">当前章节之前还没有已确认的人物状态、时间线或伏笔事实。</p>}
+              {memoryPreviousChapter ? <form className="space-y-2 border-t border-border/50 pt-3" onSubmit={(event) => { event.preventDefault(); void saveTimelineMemory(); }}>
+                <p className="text-xs text-muted-foreground">记录到第{memoryPreviousChapter.sortOrder}章时间线（作者确认）</p>
+                <textarea data-testid="director-memory-input" className="min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm" value={memoryBody} onChange={(event) => setMemoryBody(event.target.value)} placeholder="例如：林动在祖祠发现封印。" />
+                <Button data-testid="director-save-memory" type="submit" variant="outline" disabled={memorySaving || !memoryBody.trim()}>{memorySaving ? "保存中…" : "记录时间线"}</Button>
+              </form> : <p className="text-xs text-muted-foreground">当前章节之前没有可绑定来源的正式章节。</p>}
             </section>
 
             <section className="rounded-md bg-muted/20 p-4 text-xs text-muted-foreground">
