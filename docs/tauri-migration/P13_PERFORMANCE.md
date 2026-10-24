@@ -77,3 +77,8 @@ Candidate Journal SIGKILL crash + restart 1 passing
 
 
 第 8 轮最终构建：`.app` 20.74 MiB；DMG 9.3 MiB；audit PASS。
+
+
+## 最终构建
+
+`.app` 21.04 MiB；DMG 9.4 MiB；Tauri release audit PASS。

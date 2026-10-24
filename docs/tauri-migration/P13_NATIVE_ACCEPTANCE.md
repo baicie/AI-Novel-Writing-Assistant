@@ -146,3 +146,15 @@ test:memory-extraction 1 passing
 ```text
 test:knowledge 1 passing（新增 / 编辑 / 删除）
 ```
+
+
+## 最终 Native 回归
+
+```text
+Director 4 passing
+test:knowledge 1 passing
+test:memory 1 passing
+test:memory-extraction 1 passing
+```
+
+生产包 `.app` 21.04 MiB，DMG 9.4 MiB，audit PASS。

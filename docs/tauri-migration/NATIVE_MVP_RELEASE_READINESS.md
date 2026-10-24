@@ -186,3 +186,10 @@ pnpm --filter @ai-novel/client test
 
 - AI 记忆抽取采用正式章节 → 候选 → 人工确认 → 正式记忆，AI 不会直接写 confirmed 事实。
 - 传闻/人物宣称/推测即使确认也只写 disputed，不进入 Context。
+
+## P13.5–P13.9
+
+- AI 记忆抽取 + 人工确认 Native WDIO 通过。
+- 知识库 Native CRUD + 索引健康面板通过。
+- 1000 章 1412–1416 字/章 Context/索引基线采集。
+- 完整 50 case 对抗集、冲突裁决 UI、后台索引重试、500/1000 章并发性能仍未完成。
