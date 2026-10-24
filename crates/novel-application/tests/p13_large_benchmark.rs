@@ -62,7 +62,6 @@ async fn fifty_chapter_fifty_question_annotated_retrieval_benchmark() {
     let lexicon = Lexicon::default();
     let characters = ["林动", "苏晚", "陆沉", "林若", "青翼蝠王"];
     let locations = ["青阳城", "祖祠", "山门", "黑风寨", "北境"];
-    let mut bodies = Vec::new();
     for order in 1..=50usize {
         let character = characters[order % characters.len()];
         let location = locations[order % locations.len()];
@@ -76,7 +75,6 @@ async fn fifty_chapter_fifty_question_annotated_retrieval_benchmark() {
              第{order}章的事件与此前章节保持连续，并留下需要后续确认的伏笔。{tag}。",
             tag = tag(order)
         );
-        bodies.push(body.clone());
         let terms = fts_query(&tokenize(&body, &lexicon));
         KnowledgeRepository::index_document(
             &kernel,

@@ -82,3 +82,19 @@ Candidate Journal SIGKILL crash + restart 1 passing
 ## 最终构建
 
 `.app` 21.04 MiB；DMG 9.4 MiB；Tauri release audit PASS。
+
+
+## P13.9 100/500/1000 章真实规模基线
+
+新增 `crates/novel-application/tests/p13_scale_baseline.rs`，每章约 1.4–1.5k 中文字符：
+
+| 章节 | build_ms | context p95 | search p95 | 并发 8×10 | 增量 | DB bytes | chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 208 | 3.76ms | 425us | 17ms | 1ms | 5,304,320 | 99 |
+| 500 | 1170 | 11.39ms | 567us | 20ms | 3ms | 25,006,080 | 499 |
+| 1000 | 2223 | 20.03ms | 616us | 22ms | 7ms | 49,594,368 | 999 |
+
+条件：M1/8GB、jobs=4、SQLite WAL、合成正文、目标章节无正式正文。
+未采集：进程内存峰值、冷启动/预热差异、真实双窗口、真实 Embedding。
+
+详细报告：[P13_PERFORMANCE_SCALE.md](P13_PERFORMANCE_SCALE.md)。
