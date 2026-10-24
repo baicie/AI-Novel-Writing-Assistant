@@ -17,6 +17,8 @@ pub struct IndexKnowledgeRequest {
     pub body: String,
     pub embedding: Option<Vec<f32>>,
     pub embedding_model: Option<String>,
+    pub source_revision: Option<String>,
+    pub source_content_hash: Option<String>,
 }
 
 #[tauri::command]
@@ -52,6 +54,8 @@ pub async fn index_knowledge(
             body: body.to_string(),
             terms,
             created_at: novel_platform::now_ms(),
+            source_revision: request.source_revision,
+            source_content_hash: request.source_content_hash,
             embedding,
         })
         .await
@@ -109,6 +113,18 @@ pub async fn search_knowledge_vector(
             true,
             limit.unwrap_or(8).clamp(1, 50),
         )
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn delete_knowledge_document(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<bool, AppError> {
+    state
+        .kernel
+        .delete_document(&document_id)
         .await
         .map_err(AppError::from)
 }

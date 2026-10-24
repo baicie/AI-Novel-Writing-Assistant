@@ -374,6 +374,8 @@ async fn knowledge_search_keeps_trace_to_ids() {
             body: body.into(),
             terms,
             created_at: 1,
+            source_revision: None,
+            source_content_hash: None,
             embedding: Some(NewEmbedding {
                 model: "m".into(),
                 normalized: true,
@@ -393,6 +395,8 @@ async fn knowledge_search_keeps_trace_to_ids() {
             body: "另一段".into(),
             terms: "另一 段".into(),
             created_at: 2,
+            source_revision: None,
+            source_content_hash: None,
             embedding: Some(NewEmbedding {
                 model: "m".into(),
                 normalized: true,

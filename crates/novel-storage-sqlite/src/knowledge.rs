@@ -6,6 +6,7 @@ use novel_application::{
     SearchHit,
 };
 use novel_context::{cosine, decode_f32, encode_f32};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 
 use crate::db::{SqliteKernel, map_sql};
@@ -13,29 +14,99 @@ use crate::db::{SqliteKernel, map_sql};
 #[async_trait]
 impl KnowledgeRepository for SqliteKernel {
     async fn index_document(&self, document: NewDocument) -> Result<(), PortError> {
-        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let source_hash = document
+            .source_content_hash
+            .clone()
+            .unwrap_or_else(|| hex::encode(Sha256::digest(document.body.as_bytes())));
+        // Phase 1: mark the document as rebuilding before touching chunks. Once
+        // this commits, stale chunks are no longer returned to readers even if the
+        // rebuild transaction fails below.
+        let existing: Option<(i64, String, String, String, Option<String>, String)> =
+            sqlx::query_as(
+                "SELECT version, title, body, owner_type, source_content_hash, index_status
+             FROM knowledge_document WHERE id = ?",
+            )
+            .bind(&document.id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        if let Some((_version, title, body, owner, existing_hash, status)) = &existing
+            && title == &document.title
+            && body == &document.body
+            && owner == &document.owner_type
+            && existing_hash.as_deref() == Some(source_hash.as_str())
+            && status == "ready"
+        {
+            return Ok(());
+        }
+        let next_version = existing.as_ref().map(|row| row.0 + 1).unwrap_or(1);
+        let source_revision = document
+            .source_revision
+            .clone()
+            .unwrap_or_else(|| format!("v{next_version}"));
         sqlx::query(
-            "INSERT INTO knowledge_document(id, novel_id, owner_type, title, body, version, index_status, created_at)
-             VALUES (?, ?, ?, ?, ?, 1, 'ready', ?)",
+            "INSERT INTO knowledge_document
+               (id, novel_id, owner_type, title, body, version, index_status, created_at,
+                source_revision, source_content_hash, index_version, indexed_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'building', ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               novel_id = excluded.novel_id,
+               owner_type = excluded.owner_type,
+               title = excluded.title,
+               body = excluded.body,
+               version = excluded.version,
+               index_status = 'building',
+               source_revision = excluded.source_revision,
+               source_content_hash = excluded.source_content_hash,
+               index_version = excluded.index_version,
+               indexed_at = excluded.indexed_at",
         )
         .bind(&document.id)
         .bind(&document.novel_id)
         .bind(&document.owner_type)
         .bind(&document.title)
         .bind(&document.body)
+        .bind(next_version)
         .bind(document.created_at)
-        .execute(tx.deref_mut())
+        .bind(&source_revision)
+        .bind(&source_hash)
+        .bind(next_version)
+        .bind(document.created_at)
+        .execute(&self.pool)
         .await
         .map_err(map_sql)?;
-        let chunk_id = format!("{}:0", document.id);
-        sqlx::query("INSERT INTO knowledge_chunk(id, document_id, ordinal, body, terms) VALUES (?, ?, 0, ?, ?)")
-            .bind(&chunk_id)
+
+        // Phase 2: replace all derived rows atomically.
+        let old_chunks: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM knowledge_chunk WHERE document_id = ?")
+                .bind(&document.id)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        for chunk_id in &old_chunks {
+            sqlx::query("DELETE FROM knowledge_fts WHERE chunk_id = ?")
+                .bind(chunk_id)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+            sqlx::query("DELETE FROM embedding WHERE chunk_id = ?")
+                .bind(chunk_id)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        }
+        sqlx::query("DELETE FROM knowledge_chunk WHERE document_id = ?")
             .bind(&document.id)
-            .bind(&document.body)
-            .bind(&document.terms)
             .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
+        let chunk_id = format!("{}:0", document.id);
+        let chunk_hash = hex::encode(Sha256::digest(document.body.as_bytes()));
+        sqlx::query("INSERT INTO knowledge_chunk(id, document_id, ordinal, body, terms, source_revision, chunk_hash) VALUES (?, ?, 0, ?, ?, ?, ?)")
+            .bind(&chunk_id).bind(&document.id).bind(&document.body).bind(&document.terms)
+            .bind(&source_revision).bind(&chunk_hash)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
         sqlx::query("INSERT INTO knowledge_fts(chunk_id, terms) VALUES (?, ?)")
             .bind(&chunk_id)
             .bind(&document.terms)
@@ -44,17 +115,63 @@ impl KnowledgeRepository for SqliteKernel {
             .map_err(map_sql)?;
         if let Some(embedding) = &document.embedding {
             sqlx::query("INSERT INTO embedding(chunk_id, model, dimensions, normalized, vector_blob) VALUES (?, ?, ?, ?, ?)")
-                .bind(&chunk_id)
-                .bind(&embedding.model)
-                .bind(embedding.vector.len() as i64)
-                .bind(i64::from(u8::from(embedding.normalized)))
-                .bind(encode_f32(&embedding.vector))
+                .bind(&chunk_id).bind(&embedding.model).bind(embedding.vector.len() as i64)
+                .bind(i64::from(u8::from(embedding.normalized))).bind(encode_f32(&embedding.vector))
+                .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        sqlx::query(
+            "UPDATE knowledge_document SET index_status = 'ready', indexed_at = ? WHERE id = ?",
+        )
+        .bind(document.created_at)
+        .bind(&document.id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn delete_document(&self, document_id: &str) -> Result<bool, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let exists: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_document WHERE id = ?")
+                .bind(document_id)
+                .fetch_one(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        if exists == 0 {
+            return Ok(false);
+        }
+        let chunks: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM knowledge_chunk WHERE document_id = ?")
+                .bind(document_id)
+                .fetch_all(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        for chunk_id in &chunks {
+            sqlx::query("DELETE FROM knowledge_fts WHERE chunk_id = ?")
+                .bind(chunk_id)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+            sqlx::query("DELETE FROM embedding WHERE chunk_id = ?")
+                .bind(chunk_id)
                 .execute(tx.deref_mut())
                 .await
                 .map_err(map_sql)?;
         }
+        sqlx::query("DELETE FROM knowledge_chunk WHERE document_id = ?")
+            .bind(document_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sqlx::query("DELETE FROM knowledge_document WHERE id = ?")
+            .bind(document_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
         tx.commit().await.map_err(map_sql)?;
-        Ok(())
+        Ok(true)
     }
 
     async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError> {
@@ -94,7 +211,7 @@ impl KnowledgeRepository for SqliteKernel {
              FROM knowledge_fts
              JOIN knowledge_chunk c ON c.id = knowledge_fts.chunk_id
              JOIN knowledge_document d ON d.id = c.document_id
-             WHERE d.novel_id = ? AND knowledge_fts MATCH ?
+             WHERE d.novel_id = ? AND d.index_status = 'ready' AND knowledge_fts MATCH ?
              LIMIT ?",
         )
         .bind(novel_id)
@@ -119,7 +236,7 @@ impl KnowledgeRepository for SqliteKernel {
              FROM embedding e
              JOIN knowledge_chunk c ON c.id = e.chunk_id
              JOIN knowledge_document d ON d.id = c.document_id
-             WHERE d.novel_id = ? AND e.model = ? AND e.dimensions = ? AND e.normalized = ?",
+             WHERE d.novel_id = ? AND d.index_status = 'ready' AND e.model = ? AND e.dimensions = ? AND e.normalized = ?",
         )
         .bind(novel_id)
         .bind(model)

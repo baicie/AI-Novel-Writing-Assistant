@@ -238,6 +238,10 @@ pub struct NewDocument {
     pub terms: String,
     pub created_at: i64,
     pub embedding: Option<NewEmbedding>,
+    /// Authoritative source revision, e.g. a chapter revision version.
+    pub source_revision: Option<String>,
+    /// Hash of the authoritative source content.
+    pub source_content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -768,6 +772,7 @@ pub trait WorkflowRepository: Send + Sync {
 #[async_trait]
 pub trait KnowledgeRepository: Send + Sync {
     async fn index_document(&self, document: NewDocument) -> Result<(), PortError>;
+    async fn delete_document(&self, document_id: &str) -> Result<bool, PortError>;
     async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError>;
     async fn search_keyword(
         &self,

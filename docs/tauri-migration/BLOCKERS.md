@@ -139,3 +139,11 @@
 
 - Occurrence/稳定 key/accepted CAS 已实现。
 - 未完成：同一问题跨两轮审校端到端测试、完整质量债历史 UI、resolved 与 Review Artifact 外键。
+
+## B-023 P13
+
+- P13.0/P13.1 索引生命周期已修复；SearchHit 未返回 sourceRevision。
+- P13.1 正式章节保存未自动触发索引重建。
+- P13.2 长篇剧情记忆未开始。
+- P13.3 对抗性评测集未开始。
+- P13.4 Native 验收与 500/1000 章性能未执行。

@@ -53,6 +53,7 @@ fn main() {
         "list_knowledge_documents",
         "search_knowledge",
         "search_knowledge_vector",
+        "delete_knowledge_document",
         "list_genres",
         "list_story_modes",
         "get_task_overview",

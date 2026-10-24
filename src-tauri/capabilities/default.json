@@ -60,6 +60,7 @@
     "allow-list-knowledge-documents",
     "allow-search-knowledge",
     "allow-search-knowledge-vector",
+"allow-delete-knowledge-document",
     "allow-list-genres",
     "allow-list-story-modes",
     "allow-get-task-overview",
