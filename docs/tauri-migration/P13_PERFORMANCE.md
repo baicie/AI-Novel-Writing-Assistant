@@ -70,4 +70,4 @@ Candidate Journal SIGKILL crash + restart 1 passing
 - 与章节保存同一事务完成
 
 
-第 5 轮构建：`.app` 20.72 MiB；DMG 9.5 MiB；audit PASS。
+第 6 轮构建：`.app` 20.72 MiB；DMG 9.5 MiB；audit PASS。
