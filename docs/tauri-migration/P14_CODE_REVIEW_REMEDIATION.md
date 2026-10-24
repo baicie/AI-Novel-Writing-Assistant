@@ -89,7 +89,9 @@ MemoryService::resolve_conflict()
 - `retry_index_document() == false` 不再无条件 succeeded，改为 obsolete。
 - 旧 revision / 已删除来源标记 obsolete 并保留错误。
 - Tauri 启动增加 30s lease 过期恢复扫描。
-- 手动任务使用 `tauri-manual-{timestamp}` owner，非固定长期 owner。
+- 手动任务使用 `tauri-manual-{timestamp}` owner，非固定长期 owner；
+- failed/obsolete 任务可 reset 后手动重试；
+- 空 sourceRevision 的用户文档不因 `None` 被误判 stale。
 - Native 索引队列 UI 有刷新/重试。
 
 测试：`p13_index_jobs` 3 passed：

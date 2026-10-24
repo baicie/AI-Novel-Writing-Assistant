@@ -74,18 +74,58 @@
 
 ### Native 回归
 
-最终 HEAD 需重跑：
+最终 HEAD 结果：
 
 ```text
-Director / memory / memory-extraction / conflict / knowledge
-Index Retry
-Editor SIGKILL
-Candidate Journal SIGKILL
-Repair Recovery
-Chapter Commit CAS
+Director              4 passing
+conflict              1 passing
+memory-extraction     1 passing
+knowledge CRUD        1 passing
+
+editor-crash          未通过（WDIO 在主动 SIGKILL 后连接断开）
+candidate-journal-crash 未通过（同类 SIGKILL 连接问题）
+editor-crash-restart / candidate-journal-restart
+restart / confirm-edit-restart
+  失败原因：这些两进程 spec 需要同一临时数据目录的 crash 前状态文件；
+  单次独立运行没有状态文件，不能据此判定产品数据安全回归。
+Index Retry          未完成 WDIO
 ```
 
-本报告后续补最终结果。
+因此 Native 数据安全 G7/D 仍为 PARTIAL；不把 crash spec 失败写成产品通过。
+
+## 最终验证
+
+```text
+cargo test --workspace --exclude novel-http
+275 passed, 0 failed, 688.70s
+
+clean worktree cargo test --workspace --all-targets
+334 passed, 0 failed（实际执行）
+
+pnpm test
+186 passed, 0 failed
+
+pnpm typecheck / build
+PASS
+
+cargo fmt --check
+PASS
+
+cargo clippy --workspace --exclude novel-http --all-targets
+PASS（既有 warning）
+
+Production .app
+21.40 MiB
+
+DMG
+9.5 MiB，hdiutil verify VALID
+
+Commands / Handlers / Capabilities
+89 / 89 / 89
+
+Tauri release audit
+PASS
+```
 
 ## 未完成 / P14 Backlog
 
