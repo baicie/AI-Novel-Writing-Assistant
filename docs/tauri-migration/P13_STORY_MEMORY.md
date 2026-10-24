@@ -93,7 +93,8 @@ Director 页面新增“长篇记忆”区域：
 
 - 创建两章小说；
 - 选择第二章启动 Director；
-- 在长篇记忆填写时间线；
-- 真实 Tauri Command 保存；
+- 在长篇记忆填写时间线并保存；
+- 填写伏笔标题/线索并保存；
+- 真实 Tauri Command 写入；
 - UI 显示事实；
-- `list_story_facts` 返回该事实。
+- `list_story_facts` 返回 timeline + plot_thread。
