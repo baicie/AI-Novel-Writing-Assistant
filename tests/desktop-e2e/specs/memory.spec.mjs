@@ -8,7 +8,7 @@ async function openDirector(novelId) {
   await (await $("[data-testid=director-start-button]")).waitForDisplayed({ timeout: 20_000 });
 }
 describe("Director long-term memory", () => {
-  it("records author-confirmed timeline and plot facts through the Native UI", async () => {
+  it("records author-confirmed timeline, plot and character facts through the Native UI", async () => {
     const novel = await invoke("create_novel", { title: "WDIO 长篇记忆", description: "" });
     await invoke("create_chapter", { novelId: novel.id, title: "第一章", sortOrder: 1 });
     await invoke("create_chapter", { novelId: novel.id, title: "第二章", sortOrder: 2 });
@@ -29,8 +29,15 @@ describe("Director long-term memory", () => {
     await (await $("[data-testid=director-plot-body]")).addValue("封印尚未解释");
     await (await $("[data-testid=director-save-plot]")).click();
     await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("WDIO 祖祠伏笔"), { timeout: 20_000, timeoutMsg: "plot thread did not appear" });
+    await (await $("[data-testid=director-new-character]")).addValue("WDIO 林动");
+    await (await $("[data-testid=director-add-character]")).click();
+    await browser.pause(500);
+    await (await $("[data-testid=director-state-body]")).addValue("WDIO 状态事实：林动成为掌门。");
+    await (await $("[data-testid=director-save-state]")).click();
+    await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("WDIO 状态事实"), { timeout: 20_000, timeoutMsg: "character state did not appear" });
     const facts = await invoke("list_story_facts", { novelId: novel.id, beforeChapterOrder: 2 });
     expect(facts.some(fact => fact.body.includes("WDIO 时间线事实"))).toBe(true);
     expect(facts.some(fact => fact.factType === "plot_thread" && fact.body.includes("WDIO 祖祠伏笔"))).toBe(true);
+    expect(facts.some(fact => fact.factType === "character_state" && fact.body.includes("WDIO 状态事实"))).toBe(true);
   });
 });

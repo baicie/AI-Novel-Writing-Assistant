@@ -8,6 +8,7 @@ import {
   approveRun,
   cancelRun,
   clearCandidateEditDraft,
+  createCharacter,
   confirmCandidateAfterEdit,
   getCandidateEditDraft,
   listCandidateEditDrafts,
@@ -110,6 +111,7 @@ export default function TauriDirectorPage() {
   const [stateCharacterId, setStateCharacterId] = useState("");
   const [stateBody, setStateBody] = useState("");
   const [stateSaving, setStateSaving] = useState(false);
+  const [newCharacterName, setNewCharacterName] = useState("");
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -123,6 +125,20 @@ export default function TauriDirectorPage() {
   const mounted = useRef(true);
 
   useEffect(() => () => { mounted.current = false; }, []);
+
+  const addMemoryCharacter = async () => {
+    if (!newCharacterName.trim()) return;
+    try {
+      const created = await createCharacter({
+        id: `ui-character-${Date.now()}`, novelId, name: newCharacterName.trim(), role: "配角",
+      });
+      setStateCharacterId(created.id);
+      setNewCharacterName("");
+      await charactersQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "创建人物失败，请重试。");
+    }
+  };
 
   const saveCharacterState = async () => {
     if (!memoryPreviousChapter || !stateCharacterId || !stateBody.trim()) return;
@@ -596,6 +612,10 @@ export default function TauriDirectorPage() {
               </form> : null}
               {memoryPreviousChapter ? <form className="space-y-2 border-t border-border/50 pt-3" onSubmit={(event) => { event.preventDefault(); void saveCharacterState(); }}>
                 <p className="text-xs text-muted-foreground">记录人物状态（作者确认）</p>
+                <div className="flex gap-2">
+                  <input data-testid="director-new-character" className="min-w-0 flex-1 rounded-md border border-input bg-background p-2 text-sm" value={newCharacterName} onChange={(event) => setNewCharacterName(event.target.value)} placeholder="新人物名字" />
+                  <Button data-testid="director-add-character" type="button" variant="outline" onClick={() => void addMemoryCharacter()} disabled={!newCharacterName.trim()}>添加</Button>
+                </div>
                 <select data-testid="director-state-character" className="w-full rounded-md border border-input bg-background p-2 text-sm" value={stateCharacterId} onChange={(event) => setStateCharacterId(event.target.value)}>
                   <option value="">选择人物</option>
                   {(charactersQuery.data ?? []).map(character => <option key={character.id} value={character.id}>{character.name}</option>)}

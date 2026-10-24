@@ -8,6 +8,7 @@ fn main() {
         "delete_novel",
         "list_chapters",
         "list_characters",
+        "create_character",
         "create_chapter",
         "get_chapter",
         "save_chapter",

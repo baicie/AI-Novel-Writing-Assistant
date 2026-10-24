@@ -25,6 +25,15 @@ pub struct NewNovel {
 }
 
 #[derive(Debug, Clone)]
+pub struct NewCharacter {
+    pub id: String,
+    pub novel_id: String,
+    pub name: String,
+    pub role: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewChapter {
     pub id: String,
     pub novel_id: String,
@@ -410,6 +419,10 @@ pub trait NovelRepository: Send + Sync {
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
     async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError>;
+    async fn create_character(
+        &self,
+        character: NewCharacter,
+    ) -> Result<CharacterSnapshot, PortError>;
     async fn list_worlds_for_context(
         &self,
         novel_id: &str,

@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use novel_application::{
     CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
     CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult,
-    NewChapter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary, PortError,
-    PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord,
-    StoryFactView, UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
+    NewChapter, NewCharacter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary,
+    PortError, PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord,
+    SaveChapterRecord, StoryFactView, UpdateChapterMetaRecord, UpdateNovelFields,
+    UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
@@ -564,6 +565,36 @@ impl NovelRepository for SqliteKernel {
         .await
         .map_err(map_sql)?;
         rows.iter().map(chapter_from_row).collect()
+    }
+
+    async fn create_character(
+        &self,
+        character: NewCharacter,
+    ) -> Result<CharacterSnapshot, PortError> {
+        sqlx::query(
+            "INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, '{}', ?, ?)",
+        )
+        .bind(&character.id)
+        .bind(&character.novel_id)
+        .bind(&character.name)
+        .bind(&character.role)
+        .bind(character.now_ms)
+        .bind(character.now_ms)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(CharacterSnapshot {
+            id: character.id,
+            novel_id: character.novel_id,
+            name: character.name,
+            role: character.role,
+            personality: None,
+            arc: None,
+            profile: serde_json::json!({}),
+            created_at: character.now_ms,
+            updated_at: character.now_ms,
+        })
     }
 
     async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError> {

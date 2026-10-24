@@ -1,6 +1,6 @@
 use novel_application::{
     AppError, ChapterRevisionSnapshot, ChapterSnapshot, CharacterSnapshot, NovelDetail,
-    NovelSummary, UpdateNovelFields, VolumeSnapshot,
+    NovelRepository, NovelSummary, UpdateNovelFields, VolumeSnapshot,
 };
 use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use serde::Deserialize;
@@ -410,4 +410,34 @@ pub async fn delete_volume(
         .director
         .delete_volume(&novel_id, &volume_id)
         .await
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCharacterRequest {
+    pub id: String,
+    pub novel_id: String,
+    pub name: String,
+    pub role: String,
+}
+
+#[tauri::command]
+pub async fn create_character(
+    state: State<'_, AppState>,
+    request: CreateCharacterRequest,
+) -> Result<novel_application::CharacterSnapshot, AppError> {
+    if request.name.trim().is_empty() {
+        return Err(AppError::validation("人物名字不能为空。"));
+    }
+    state
+        .kernel
+        .create_character(novel_application::NewCharacter {
+            id: request.id,
+            novel_id: request.novel_id,
+            name: request.name.trim().into(),
+            role: request.role,
+            now_ms: novel_platform::now_ms(),
+        })
+        .await
+        .map_err(AppError::from)
 }

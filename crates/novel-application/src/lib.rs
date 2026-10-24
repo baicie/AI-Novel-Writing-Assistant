@@ -44,13 +44,13 @@ pub use knowledge::assemble_context;
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
     DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LeaseFence, LookupRepository,
-    ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewCharacterState,
-    NewDocument, NewEmbedding, NewInvocation, NewNovel, NewPlotThread, NewQualityDebt,
-    NewReviewOccurrence, NewTimelineEvent, NewVolume, NewWorld, NoFault, NoModelSecrets,
-    NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace, SaveCandidateEditDraftRecord,
-    SaveChapterDraftRecord, SaveChapterRecord, SearchHit, StoredEvent, StoryFactView, SystemClock,
-    TaskCenterRepository, UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds,
-    WorkflowRepository, WorldRepository,
+    ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewCharacter,
+    NewCharacterState, NewDocument, NewEmbedding, NewInvocation, NewNovel, NewPlotThread,
+    NewQualityDebt, NewReviewOccurrence, NewTimelineEvent, NewVolume, NewWorld, NoFault,
+    NoModelSecrets, NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace,
+    SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord, SearchHit,
+    StoredEvent, StoryFactView, SystemClock, TaskCenterRepository, UpdateChapterMetaRecord,
+    UpdateVolumeRecord, UpdateWorldFields, UuidIds, WorkflowRepository, WorldRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

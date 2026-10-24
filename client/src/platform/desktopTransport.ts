@@ -427,6 +427,10 @@ export function deleteNovel(novelId: string): Promise<void> {
   return invoke("delete_novel", { novelId });
 }
 
+export function createCharacter(input: { id: string; novelId: string; name: string; role: string }): Promise<CharacterSnapshot> {
+  return invoke("create_character", { request: input });
+}
+
 export function listCharacters(novelId: string): Promise<CharacterSnapshot[]> {
   return invoke("list_characters", { novelId });
 }

@@ -112,7 +112,7 @@ Director 4 passing
 第 6 轮新增：
 
 ```text
-test:memory 1 passing（时间线 + 伏笔）
+test:memory 1 passing（时间线 + 伏笔 + 人物状态）
 ```
 
 
@@ -120,5 +120,5 @@ test:memory 1 passing（时间线 + 伏笔）
 
 ```text
 Director 4 passing
-test:memory 1 passing（时间线 + 伏笔）
+test:memory 1 passing（时间线 + 伏笔 + 人物状态）
 ```

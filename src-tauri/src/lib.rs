@@ -185,6 +185,7 @@ pub fn run() {
             commands::novel::delete_novel,
             commands::novel::list_chapters,
             commands::novel::list_characters,
+commands::novel::create_character,
             commands::novel::create_chapter,
             commands::novel::get_chapter,
             commands::novel::save_chapter,
