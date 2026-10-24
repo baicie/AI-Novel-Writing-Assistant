@@ -1,0 +1,26 @@
+{
+  "dataset": "p13-large-v1",
+  "chapters": 50,
+  "questions": 50,
+  "answered": 40,
+  "metrics": {
+    "recallAt10": 1.0,
+    "precisionAt5": 0.2,
+    "mrr": 0.76,
+    "ndcg": 0.78,
+    "sourceRevisionAccuracy": 1.0,
+    "futureLeakage": 0,
+    "noAnswerAccuracy": 1.0
+  },
+  "categories": [
+    {"name": "clue", "cases": 20, "hit": 20, "recall": 1.0},
+    {"name": "location", "cases": 10, "hit": 10, "recall": 1.0},
+    {"name": "alias", "cases": 10, "hit": 10, "recall": 1.0},
+    {"name": "no_answer", "cases": 10, "hit": 0, "recall": null}
+  ],
+  "limitations": [
+    "lexical-only; no vector/hybrid comparison",
+    "synthetic tag-based questions, not human semantic labels",
+    "no 50-chapter foreshadowing/narrator/depth categories"
+  ]
+}
