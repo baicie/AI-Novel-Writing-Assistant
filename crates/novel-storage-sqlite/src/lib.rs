@@ -1,4 +1,5 @@
 mod db;
+mod index_jobs;
 mod knowledge;
 mod legacy_import;
 mod lookups;

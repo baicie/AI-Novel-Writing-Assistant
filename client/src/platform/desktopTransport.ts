@@ -194,6 +194,19 @@ export interface MemoryCandidateView {
   version: number; decisionReason?: string | null; createdAt: number; updatedAt: number;
 }
 
+export interface IndexJobView {
+  id: string; novelId: string; sourceType: string; sourceId: string; sourceRevision: string;
+  indexVersion: number; status: string; attemptCount: number; maxAttempts: number;
+  nextRunAt: number; lastErrorCategory?: string | null; lastError?: string | null;
+  createdAt: number; updatedAt: number;
+}
+
+export interface MemoryConflictView {
+  id: string; novelId: string; conflictType: string; entityKey: string; chapterId: string;
+  chapterOrder: number; candidateIds: string[]; factIds: string[]; status: string;
+  version: number; description: string; createdAt: number; updatedAt: number;
+}
+
 export interface MemoryExtractionJobView {
   id: string; commandId: string; novelId: string; chapterId: string;
   chapterVersion: number; status: string; error?: string | null; createdAt: number;
@@ -220,6 +233,21 @@ export function rejectMemoryCandidate(input: { candidateId: string; expectedVers
 
 export function deferMemoryCandidate(input: { candidateId: string; expectedVersion: number }): Promise<MemoryCandidateView> {
   return invoke("defer_memory_candidate", input);
+}
+
+export function syncMemoryConflicts(input: { novelId: string }): Promise<MemoryConflictView[]> {
+  return invoke("sync_memory_conflicts", input);
+}
+
+export function listMemoryConflicts(input: { novelId: string }): Promise<MemoryConflictView[]> {
+  return invoke("list_memory_conflicts", input);
+}
+
+export function resolveMemoryConflict(input: {
+  conflictId: string; expectedVersion: number; commandId: string; decision: string;
+  chosenCandidateId?: string | null; reason: string; operator: string;
+}): Promise<MemoryConflictView> {
+  return invoke("resolve_memory_conflict", { request: input });
 }
 
 export function updateMemoryCandidateValue(input: { candidateId: string; expectedVersion: number; value: string }): Promise<MemoryCandidateView> {
@@ -840,6 +868,24 @@ export function listKnowledgeDocuments(): Promise<KnowledgeDocumentSummary[]> {
 
 export function indexKnowledge(input: IndexKnowledgeInput): Promise<void> {
   return invoke("index_knowledge", { request: input });
+}
+
+export function listIndexJobs(input: { novelId: string }): Promise<IndexJobView[]> {
+  return invoke("list_index_jobs", input);
+}
+
+export function retryIndexJob(input: { jobId: string }): Promise<IndexJobView> {
+  return invoke("retry_index_job", input);
+}
+
+export function recoverIndexJobs(): Promise<IndexJobView[]> {
+  return invoke("recover_index_jobs");
+}
+
+export function retryKnowledgeDocumentWithJob(input: {
+  novelId: string; documentId: string; sourceRevision: string; indexVersion: number;
+}): Promise<IndexJobView> {
+  return invoke("retry_knowledge_document_with_job", input);
 }
 
 export function retryKnowledgeDocument(documentId: string): Promise<boolean> {

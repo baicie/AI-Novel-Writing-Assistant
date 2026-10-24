@@ -1585,7 +1585,7 @@ async fn invalidate_story_facts(
     .map_err(map_sql)?;
     sqlx::query(
         "UPDATE plot_thread SET status = 'superseded', updated_at = ?
-         WHERE source_chapter_id = ? AND status = 'confirmed' AND source_revision != ?",
+         WHERE source_chapter_id = ? AND status IN ('open','resolved') AND source_revision != ?",
     )
     .bind(now_ms)
     .bind(chapter_id)

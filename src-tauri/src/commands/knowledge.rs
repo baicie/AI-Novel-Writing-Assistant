@@ -1,6 +1,6 @@
 use novel_application::{
-    AppError, KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, NewEmbedding,
-    NovelRepository, SearchHit,
+    AppError, IndexJobRepository, IndexJobView, KnowledgeDocumentSummary, KnowledgeRepository,
+    NewDocument, NewEmbedding, NewIndexJob, NovelRepository, SearchHit,
 };
 use novel_context::{Lexicon, fts_query, tokenize};
 use serde::Deserialize;
@@ -374,4 +374,173 @@ pub async fn get_knowledge_document(
         .get_document_body(&document_id)
         .await
         .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn sync_memory_conflicts(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Vec<novel_application::MemoryConflictView>, AppError> {
+    memory_service(&state).sync_conflicts(&novel_id).await
+}
+
+#[tauri::command]
+pub async fn list_memory_conflicts(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Vec<novel_application::MemoryConflictView>, AppError> {
+    memory_service(&state).list_conflicts(&novel_id).await
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveMemoryConflictRequest {
+    pub conflict_id: String,
+    pub expected_version: i64,
+    pub command_id: String,
+    pub decision: String,
+    pub chosen_candidate_id: Option<String>,
+    pub reason: String,
+    pub operator: String,
+}
+
+#[tauri::command]
+pub async fn resolve_memory_conflict(
+    state: State<'_, AppState>,
+    request: ResolveMemoryConflictRequest,
+) -> Result<novel_application::MemoryConflictView, AppError> {
+    memory_service(&state)
+        .resolve_conflict(
+            &request.conflict_id,
+            request.expected_version,
+            &request.command_id,
+            &request.decision,
+            request.chosen_candidate_id.as_deref(),
+            &request.reason,
+            &request.operator,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn list_index_jobs(
+    state: State<'_, AppState>,
+    novel_id: String,
+) -> Result<Vec<IndexJobView>, AppError> {
+    state
+        .kernel
+        .list_index_jobs(&novel_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn recover_index_jobs(state: State<'_, AppState>) -> Result<Vec<IndexJobView>, AppError> {
+    state
+        .kernel
+        .recover_expired_index_jobs(novel_platform::now_ms())
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn retry_index_job(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<IndexJobView, AppError> {
+    let jobs = state
+        .kernel
+        .list_index_jobs("")
+        .await
+        .map_err(AppError::from)?;
+    let _ = jobs;
+    let job = state
+        .kernel
+        .claim_index_job(
+            &job_id,
+            "tauri-manual",
+            novel_platform::now_ms() + 60_000,
+            novel_platform::now_ms(),
+        )
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::conflict("索引任务不可执行或已被其他执行者领取。"))?;
+    execute_index_job(&state, job).await
+}
+
+#[tauri::command]
+pub async fn retry_knowledge_document_with_job(
+    state: State<'_, AppState>,
+    novel_id: String,
+    document_id: String,
+    source_revision: String,
+    index_version: i64,
+) -> Result<IndexJobView, AppError> {
+    let now = novel_platform::now_ms();
+    let job = state
+        .kernel
+        .enqueue_index_job(NewIndexJob {
+            id: format!("index-job-{now}-{document_id}"),
+            command_id: format!("retry-{document_id}-{now}"),
+            novel_id,
+            source_type: "knowledge_document".into(),
+            source_id: document_id,
+            source_revision,
+            index_version,
+            max_attempts: 5,
+            now_ms: now,
+        })
+        .await
+        .map_err(AppError::from)?;
+    let claimed = state
+        .kernel
+        .claim_index_job(&job.id, "tauri-manual", now + 60_000, now)
+        .await
+        .map_err(AppError::from)?
+        .ok_or_else(|| AppError::conflict("索引任务不可执行。"))?;
+    execute_index_job(&state, claimed).await
+}
+
+async fn execute_index_job(state: &AppState, job: IndexJobView) -> Result<IndexJobView, AppError> {
+    let now = novel_platform::now_ms();
+    match state.kernel.retry_index_document(&job.source_id).await {
+        Ok(completed) => {
+            if completed {
+                state
+                    .kernel
+                    .complete_index_job(&job.id, "tauri-manual", now)
+                    .await
+                    .map_err(AppError::from)?;
+            } else {
+                state
+                    .kernel
+                    .complete_index_job(&job.id, "tauri-manual", now)
+                    .await
+                    .map_err(AppError::from)?;
+            }
+        }
+        Err(error) => {
+            let failed = state
+                .kernel
+                .fail_index_job(
+                    &job.id,
+                    "tauri-manual",
+                    "index_error",
+                    &error.to_string(),
+                    now + job.attempt_count.max(1) * 1_000,
+                    now,
+                )
+                .await
+                .map_err(AppError::from)?;
+            return Ok(failed);
+        }
+    }
+    let jobs = state
+        .kernel
+        .list_index_jobs(&job.novel_id)
+        .await
+        .map_err(AppError::from)?;
+    jobs.into_iter()
+        .find(|current| current.id == job.id)
+        .ok_or_else(|| AppError::not_found("索引任务不存在。"))
 }

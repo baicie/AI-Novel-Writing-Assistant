@@ -162,6 +162,14 @@ async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
             "0012",
             include_str!("../../../migrations/0012_memory_extraction.sql"),
         ),
+        (
+            "0013",
+            include_str!("../../../migrations/0013_memory_conflict.sql"),
+        ),
+        (
+            "0014",
+            include_str!("../../../migrations/0014_knowledge_index_job.sql"),
+        ),
     ];
     ensure_schema_migration_table(pool).await?;
     for (version, script) in SCRIPTS {

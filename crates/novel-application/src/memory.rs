@@ -7,8 +7,8 @@ use crate::dto::ChapterSnapshot;
 use crate::error::AppError;
 use crate::hash::sha256_hex;
 use crate::ports::{
-    Clock, Ids, MemoryCandidateView, MemoryExtractionJobView, MemoryRepository, ModelSecrets,
-    NewMemoryCandidate, NewMemoryJob, NovelRepository,
+    Clock, Ids, MemoryCandidateView, MemoryConflictView, MemoryExtractionJobView, MemoryRepository,
+    ModelSecrets, NewMemoryCandidate, NewMemoryJob, NovelRepository,
 };
 use novel_llm::LlmProvider;
 
@@ -280,6 +280,100 @@ impl MemoryService {
             now_ms: now,
         };
         Ok(self.memory.create_memory_job(job, &candidates).await?)
+    }
+
+    pub async fn sync_conflicts(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<MemoryConflictView>, AppError> {
+        Ok(self
+            .memory
+            .sync_memory_conflicts(novel_id, self.clock.now_ms())
+            .await?)
+    }
+
+    pub async fn list_conflicts(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<MemoryConflictView>, AppError> {
+        Ok(self.memory.list_memory_conflicts(novel_id).await?)
+    }
+
+    pub async fn resolve_conflict(
+        &self,
+        conflict_id: &str,
+        expected_version: i64,
+        command_id: &str,
+        decision: &str,
+        chosen_candidate_id: Option<&str>,
+        reason: &str,
+        operator: &str,
+    ) -> Result<MemoryConflictView, AppError> {
+        if command_id.trim().is_empty() || operator.trim().is_empty() {
+            return Err(AppError::validation("冲突裁决需要 commandId 和操作者。"));
+        }
+        if !matches!(
+            decision,
+            "confirm_new"
+                | "keep_existing"
+                | "mark_disputed"
+                | "supersede_with_evidence"
+                | "reject_extraction"
+        ) {
+            return Err(AppError::validation("未知的冲突裁决动作。"));
+        }
+        if let Some(existing) = self
+            .memory
+            .memory_conflict_decision_by_command(command_id)
+            .await?
+        {
+            if existing == conflict_id {
+                return Ok(self.memory.get_memory_conflict(conflict_id).await?);
+            }
+            return Err(AppError::conflict("commandId 已用于其他冲突裁决。"));
+        }
+        let conflict = self.memory.get_memory_conflict(conflict_id).await?;
+        if conflict.version != expected_version {
+            return Err(AppError::conflict("冲突已经变化，请刷新后再裁决。"));
+        }
+        let chosen = chosen_candidate_id
+            .or_else(|| conflict.candidate_ids.first().map(String::as_str))
+            .ok_or_else(|| AppError::validation("冲突没有可裁决候选。"))?;
+        if !conflict.candidate_ids.iter().any(|id| id == chosen) {
+            return Err(AppError::validation("裁决候选不属于这条冲突。"));
+        }
+        let candidate = self
+            .memory
+            .list_memory_candidates(&conflict.novel_id, &conflict.chapter_id)
+            .await?
+            .into_iter()
+            .find(|candidate| candidate.id == chosen)
+            .ok_or_else(|| AppError::not_found("没有找到冲突候选。"))?;
+        match decision {
+            "confirm_new" | "supersede_with_evidence" => {
+                self.confirm(chosen, candidate.version).await?;
+            }
+            "keep_existing" | "reject_extraction" => {
+                self.reject(chosen, candidate.version, reason).await?;
+            }
+            "mark_disputed" => {
+                self.defer(chosen, candidate.version).await?;
+            }
+            _ => unreachable!(),
+        }
+        Ok(self
+            .memory
+            .resolve_memory_conflict(
+                conflict_id,
+                expected_version,
+                command_id,
+                decision,
+                Some(chosen),
+                reason,
+                operator,
+                self.clock.now_ms(),
+            )
+            .await?)
     }
 
     pub async fn confirm(

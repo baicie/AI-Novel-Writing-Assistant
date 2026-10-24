@@ -208,6 +208,56 @@ pub struct MemoryExtractionJobView {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryConflictView {
+    pub id: String,
+    pub novel_id: String,
+    pub conflict_type: String,
+    pub entity_key: String,
+    pub chapter_id: String,
+    pub chapter_order: i32,
+    pub candidate_ids: Vec<String>,
+    pub fact_ids: Vec<String>,
+    pub status: String,
+    pub version: i64,
+    pub description: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexJobView {
+    pub id: String,
+    pub novel_id: String,
+    pub source_type: String,
+    pub source_id: String,
+    pub source_revision: String,
+    pub index_version: i64,
+    pub status: String,
+    pub attempt_count: i64,
+    pub max_attempts: i64,
+    pub next_run_at: i64,
+    pub last_error_category: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewIndexJob {
+    pub id: String,
+    pub command_id: String,
+    pub novel_id: String,
+    pub source_type: String,
+    pub source_id: String,
+    pub source_revision: String,
+    pub index_version: i64,
+    pub max_attempts: i64,
+    pub now_ms: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewMemoryJob {
     pub id: String,
@@ -510,6 +560,62 @@ pub trait MemoryRepository: Send + Sync {
         value: &str,
         now_ms: i64,
     ) -> Result<MemoryCandidateView, PortError>;
+    async fn sync_memory_conflicts(
+        &self,
+        novel_id: &str,
+        now_ms: i64,
+    ) -> Result<Vec<MemoryConflictView>, PortError>;
+    async fn list_memory_conflicts(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<MemoryConflictView>, PortError>;
+    async fn get_memory_conflict(&self, conflict_id: &str)
+    -> Result<MemoryConflictView, PortError>;
+    async fn resolve_memory_conflict(
+        &self,
+        conflict_id: &str,
+        expected_version: i64,
+        command_id: &str,
+        decision: &str,
+        chosen_candidate_id: Option<&str>,
+        reason: &str,
+        operator: &str,
+        now_ms: i64,
+    ) -> Result<MemoryConflictView, PortError>;
+    async fn memory_conflict_decision_by_command(
+        &self,
+        command_id: &str,
+    ) -> Result<Option<String>, PortError>;
+}
+
+#[async_trait]
+pub trait IndexJobRepository: Send + Sync {
+    async fn enqueue_index_job(&self, job: NewIndexJob) -> Result<IndexJobView, PortError>;
+    async fn list_index_jobs(&self, novel_id: &str) -> Result<Vec<IndexJobView>, PortError>;
+    async fn claim_index_job(
+        &self,
+        job_id: &str,
+        owner: &str,
+        lease_until: i64,
+        now_ms: i64,
+    ) -> Result<Option<IndexJobView>, PortError>;
+    async fn complete_index_job(
+        &self,
+        job_id: &str,
+        owner: &str,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn fail_index_job(
+        &self,
+        job_id: &str,
+        owner: &str,
+        category: &str,
+        error: &str,
+        next_run_at: i64,
+        now_ms: i64,
+    ) -> Result<IndexJobView, PortError>;
+    async fn recover_expired_index_jobs(&self, now_ms: i64)
+    -> Result<Vec<IndexJobView>, PortError>;
 }
 
 #[async_trait]

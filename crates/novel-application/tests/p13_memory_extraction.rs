@@ -292,3 +292,82 @@ async fn same_character_same_chapter_conflict_requires_manual_resolution() {
             .any(|candidate| candidate.id == second.id && candidate.status == "proposed")
     );
 }
+
+#[tokio::test]
+async fn conflicts_are_detected_and_resolved_with_command_idempotency() {
+    let output = serde_json::json!({"facts":[
+        {"factType":"character_state","truthfulness":"narrator_fact","entityName":"林动","value":"林动成为掌门","evidenceQuote":"林动成为掌门","confidence":0.9},
+        {"factType":"character_state","truthfulness":"narrator_fact","entityName":"林动","value":"林动离开山门","evidenceQuote":"林动离开山门","confidence":0.8}
+    ]}).to_string();
+    let (kernel, service, novel, chapter) = fixture(output).await;
+    assert!(
+        service
+            .extract(ExtractMemoryInput {
+                command_id: "conflict-extract".into(),
+                novel_id: novel.clone(),
+                chapter_id: chapter.clone(),
+                provider: "mock".into(),
+                model: "mock".into(),
+                endpoint: "https://api.example.com/v1/chat/completions".into(),
+                allow_localhost_http: false,
+                token_budget: Some(512),
+            })
+            .await
+            .is_ok()
+    );
+    let candidates = service.list_candidates(&novel, &chapter).await.unwrap();
+    assert_eq!(candidates.len(), 2);
+    let conflicts = service.sync_conflicts(&novel).await.unwrap();
+    assert_eq!(conflicts.len(), 1);
+    let conflict = &conflicts[0];
+    assert_eq!(conflict.status, "open");
+    assert_eq!(conflict.candidate_ids.len(), 2);
+    let chosen = candidates
+        .iter()
+        .find(|candidate| candidate.value == "林动成为掌门")
+        .unwrap();
+    let resolved = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "resolve-1",
+            "confirm_new",
+            Some(&chosen.id),
+            "作者确认",
+            "author",
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.status, "resolved");
+    let facts = NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+        .await
+        .unwrap();
+    assert!(facts.iter().any(|fact| fact.body == "林动成为掌门"));
+    // Same command returns the persisted resolution.
+    let again = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "resolve-1",
+            "confirm_new",
+            Some(&chosen.id),
+            "作者确认",
+            "author",
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.status, "resolved");
+    // An old conflict version cannot be resolved again with a new command.
+    let stale = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "resolve-2",
+            "keep_existing",
+            Some(&chosen.id),
+            "重复裁决",
+            "author",
+        )
+        .await;
+    assert!(stale.is_err());
+}

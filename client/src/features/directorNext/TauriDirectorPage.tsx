@@ -15,13 +15,20 @@ import {
   indexKnowledge,
   extractMemory,
   listMemoryCandidates,
+  listMemoryConflicts,
   rejectMemoryCandidate,
+  resolveMemoryConflict,
+  syncMemoryConflicts,
   updateMemoryCandidateValue,
   confirmCandidateAfterEdit,
   getCandidateEditDraft,
   listCandidateEditDrafts,
+  listIndexJobs,
   listReviewOccurrences,
   listStoryFacts,
+  retryIndexJob,
+  retryKnowledgeDocumentWithJob,
+  recoverIndexJobs,
   listCharacters,
   retryKnowledgeDocument,
   upsertCharacterState,
@@ -45,7 +52,9 @@ import {
   type CandidateEditDraftView,
   type GenerationEvent,
   type ReviewOccurrenceView,
+  type IndexJobView,
   type MemoryCandidateView,
+  type MemoryConflictView,
   type StoryFactView,
   type RunDetailView,
 } from "@/platform/desktopTransport";
@@ -125,10 +134,13 @@ export default function TauriDirectorPage() {
   const [memoryExtracting, setMemoryExtracting] = useState(false);
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidateView[]>([]);
   const [memoryCandidateBusy, setMemoryCandidateBusy] = useState<string | null>(null);
+  const [memoryConflicts, setMemoryConflicts] = useState<MemoryConflictView[]>([]);
+  const [memoryConflictBusy, setMemoryConflictBusy] = useState<string | null>(null);
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeBody, setKnowledgeBody] = useState("");
   const [knowledgeEditingId, setKnowledgeEditingId] = useState("");
   const [knowledgeFilter, setKnowledgeFilter] = useState("");
+  const [indexJobs, setIndexJobs] = useState<IndexJobView[]>([]);
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -235,10 +247,27 @@ export default function TauriDirectorPage() {
   });
   const novelKnowledgeDocs = (knowledgeQuery.data ?? []).filter(document => document.novelId === novelId);
   const buildingKnowledgeDocs = novelKnowledgeDocs.filter(document => document.indexStatus !== "ready");
+  const refreshIndexJobs = async () => {
+    try { setIndexJobs(await listIndexJobs({ novelId })); } catch { /* queue listing is optional */ }
+  };
+  useEffect(() => {
+    if (!novelId) return;
+    void recoverIndexJobs().catch(() => undefined);
+    void refreshIndexJobs();
+  }, [novelId]);
   const retryIndex = async (id: string) => {
     try {
-      await retryKnowledgeDocument(id);
+      const document = await getKnowledgeDocument(id);
+      if (document) {
+        await retryKnowledgeDocumentWithJob({
+          novelId, documentId: id, sourceRevision: document.sourceRevision ?? "",
+          indexVersion: document.indexVersion,
+        });
+      } else {
+        await retryKnowledgeDocument(id);
+      }
       await knowledgeQuery.refetch();
+      await refreshIndexJobs();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "重建索引失败，请重试。");
     }
@@ -328,6 +357,11 @@ export default function TauriDirectorPage() {
     return () => { cancelled = true; };
   }, [detail?.chapterId, novelId]);
 
+  useEffect(() => {
+    if (!novelId) return;
+    void syncMemoryConflicts({ novelId }).then(setMemoryConflicts).catch(() => undefined);
+  }, [novelId, detail?.chapterId]);
+
   const runMemoryExtraction = async () => {
     if (!detail?.chapterId || !model) return;
     setMemoryExtracting(true);
@@ -338,10 +372,31 @@ export default function TauriDirectorPage() {
         allowLocalhostHttp: model.allowLocalhostHttp, tokenBudget: null,
       });
       setMemoryCandidates(await listMemoryCandidates({ novelId, chapterId: detail.chapterId }));
+      await refreshConflicts();
       await storyFactsQuery.refetch();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "记忆抽取失败，请检查章节正式正文与模型配置。");
     } finally { setMemoryExtracting(false); }
+  };
+
+  const refreshConflicts = async () => {
+    try { setMemoryConflicts(await listMemoryConflicts({ novelId })); } catch { /* conflict listing is optional */ }
+  };
+
+  const decideConflict = async (conflict: MemoryConflictView, decision: string, reason: string) => {
+    setMemoryConflictBusy(conflict.id);
+    try {
+      await resolveMemoryConflict({
+        conflictId: conflict.id, expectedVersion: conflict.version,
+        commandId: `director-conflict-${Date.now()}`, decision,
+        chosenCandidateId: conflict.candidateIds[0] ?? null,
+        reason, operator: "director-ui",
+      });
+      await refreshConflicts();
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "处理记忆冲突失败，请刷新后重试。");
+    } finally { setMemoryConflictBusy(null); }
   };
 
   const decideMemoryCandidate = async (candidate: MemoryCandidateView, action: "confirm" | "defer" | "reject" | "edit") => {
@@ -670,6 +725,18 @@ export default function TauriDirectorPage() {
                   <Button data-testid="director-retry-knowledge" variant="outline" onClick={() => void retryIndex(document.id)}>重建索引</Button>
                 </li>)}
               </ul> : <p className="text-xs text-muted-foreground">本小说的知识索引均处于可用状态。</p>}
+              <div data-testid="director-index-jobs" className="space-y-2 border-t border-border/50 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium">索引任务</p>
+                  <Button data-testid="director-refresh-index-jobs" variant="outline" onClick={() => void refreshIndexJobs()}>刷新队列</Button>
+                </div>
+                {indexJobs.length ? <ul className="max-h-40 space-y-1 overflow-y-auto text-xs">
+                  {indexJobs.slice(0, 20).map(job => <li key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
+                    <span>{job.status} · {job.sourceType}:{job.sourceId.slice(0, 12)} · 尝试 {job.attemptCount}/{job.maxAttempts}{job.lastError ? ` · ${job.lastError}` : ""}</span>
+                    {(job.status === "retry_wait" || job.status === "failed" || job.status === "pending") ? <Button data-testid="director-retry-index-job" variant="outline" onClick={() => void retryIndexJob({ jobId: job.id }).then(refreshIndexJobs).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "重试索引任务失败。"))}>重试任务</Button> : null}
+                  </li>)}
+                </ul> : <p className="text-xs text-muted-foreground">索引队列为空。</p>}
+              </div>
               <div className="space-y-2 border-t border-border/50 pt-3">
                 <input data-testid="director-knowledge-filter" className="w-full rounded-md border border-input bg-background p-2 text-xs" value={knowledgeFilter} onChange={(event) => setKnowledgeFilter(event.target.value)} placeholder="按标题筛选知识条目" />
                 <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
@@ -699,6 +766,22 @@ export default function TauriDirectorPage() {
                   <p className="mt-1 text-muted-foreground">来源版本：{fact.sourceRevision ?? "未标注"}</p>
                 </li>)}
               </ul> : <p className="text-xs text-muted-foreground">当前章节之前还没有已确认的人物状态、时间线或伏笔事实。</p>}
+              <div data-testid="director-memory-conflicts" className="space-y-2 border-t border-border/50 pt-3">
+                <p className="text-xs font-medium">记忆冲突</p>
+                {memoryConflicts.filter(conflict => conflict.status === "open").length ? <ul className="space-y-2 text-xs">
+                  {memoryConflicts.filter(conflict => conflict.status === "open").map(conflict => <li key={conflict.id} className="rounded-md bg-destructive/5 px-3 py-2">
+                    <p className="leading-5">{conflict.description}</p>
+                    <p className="mt-1 text-muted-foreground">{conflict.conflictType} · 章节 {conflict.chapterOrder} · 候选 {conflict.candidateIds.length}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button data-testid="director-conflict-confirm-new" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "confirm_new", "采用新事实")}>采用新事实</Button>
+                      <Button data-testid="director-conflict-keep-existing" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "keep_existing", "保留现有事实")}>保留现有</Button>
+                      <Button data-testid="director-conflict-dispute" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "mark_disputed", "标记为争议")}>标记争议</Button>
+                      <Button data-testid="director-conflict-reject" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "reject_extraction", "拒绝抽取")}>拒绝抽取</Button>
+                    </div>
+                  </li>)}
+                </ul> : <p className="text-xs text-muted-foreground">当前没有待裁决冲突。</p>}
+                {memoryConflicts.some(conflict => conflict.status === "resolved") ? <p className="text-xs text-muted-foreground">已裁决冲突 {memoryConflicts.filter(conflict => conflict.status === "resolved").length} 条，历史已保留。</p> : null}
+              </div>
               <div className="space-y-2 border-t border-border/50 pt-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">从本章正式正文抽取记忆候选，确认后才进入 Context。</p>

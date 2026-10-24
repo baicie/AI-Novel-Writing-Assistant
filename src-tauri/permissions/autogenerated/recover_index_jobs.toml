@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recover-index-jobs"
+description = "Enables the recover_index_jobs command without any pre-configured scope."
+commands.allow = ["recover_index_jobs"]
+
+[[permission]]
+identifier = "deny-recover-index-jobs"
+description = "Denies the recover_index_jobs command without any pre-configured scope."
+commands.deny = ["recover_index_jobs"]

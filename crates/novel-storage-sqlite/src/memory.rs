@@ -2,8 +2,8 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    MemoryCandidateView, MemoryExtractionJobView, MemoryRepository, NewMemoryCandidate,
-    NewMemoryJob, PortError,
+    MemoryCandidateView, MemoryConflictView, MemoryExtractionJobView, MemoryRepository,
+    NewMemoryCandidate, NewMemoryJob, PortError,
 };
 use sqlx::Row;
 
@@ -350,6 +350,205 @@ impl MemoryRepository for SqliteKernel {
         .map_err(map_sql)?;
         candidate_from_row(&row)
     }
+
+    async fn sync_memory_conflicts(
+        &self,
+        novel_id: &str,
+        now_ms: i64,
+    ) -> Result<Vec<MemoryConflictView>, PortError> {
+        let groups = sqlx::query(
+            "SELECT c.chapter_id, c.fact_type,
+                    COALESCE(c.entity_id, c.entity_name, '') AS entity_key,
+                    MIN(ch.sort_order) AS chapter_order,
+                    GROUP_CONCAT(c.id) AS candidate_ids,
+                    GROUP_CONCAT(c.value, ' || ') AS values_text
+             FROM memory_extraction_candidate c
+             JOIN chapter ch ON ch.id = c.chapter_id
+             WHERE c.novel_id = ? AND c.status IN ('proposed','deferred')
+             GROUP BY c.chapter_id, c.fact_type, entity_key
+             HAVING COUNT(DISTINCT c.value) > 1",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        for row in &groups {
+            let chapter_id: String = row.try_get("chapter_id").map_err(map_sql)?;
+            let fact_type: String = row.try_get("fact_type").map_err(map_sql)?;
+            let entity_key: String = row.try_get("entity_key").map_err(map_sql)?;
+            let chapter_order: i32 = row.try_get("chapter_order").map_err(map_sql)?;
+            let ids: String = row.try_get("candidate_ids").map_err(map_sql)?;
+            let values: String = row.try_get("values_text").map_err(map_sql)?;
+            let conflict_id = conflict_id(
+                "candidate",
+                novel_id,
+                &chapter_id,
+                &fact_type,
+                &entity_key,
+                &ids,
+            );
+            sqlx::query(
+                "INSERT INTO memory_conflict
+                   (id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at)
+                 VALUES (?, ?, 'candidate_value', ?, ?, ?, ?, '[]', 'open', 0, ?, ?, ?)
+                 ON CONFLICT(id) DO NOTHING",
+            ).bind(&conflict_id).bind(novel_id).bind(&entity_key).bind(&chapter_id)
+            .bind(chapter_order).bind(serde_json::json!(ids.split(',').collect::<Vec<_>>()).to_string())
+            .bind(format!("{fact_type} 在同一章节存在不一致候选：{values}"))
+            .bind(now_ms).bind(now_ms).execute(&self.pool).await.map_err(map_sql)?;
+        }
+        let stale = sqlx::query(
+            "SELECT c.chapter_id, c.fact_type, COALESCE(c.entity_id, c.entity_name, '') AS entity_key,
+                    MIN(ch.sort_order) AS chapter_order, GROUP_CONCAT(c.id) AS candidate_ids,
+                    GROUP_CONCAT(c.value, ' || ') AS values_text
+             FROM memory_extraction_candidate c
+             JOIN chapter ch ON ch.id = c.chapter_id
+             JOIN chapter_revision r ON r.id = ch.official_revision_id
+             WHERE c.novel_id = ? AND c.status IN ('proposed','deferred')
+               AND c.chapter_version != r.version
+             GROUP BY c.chapter_id, c.fact_type, entity_key",
+        ).bind(novel_id).fetch_all(&self.pool).await.map_err(map_sql)?;
+        for row in &stale {
+            let chapter_id: String = row.try_get("chapter_id").map_err(map_sql)?;
+            let fact_type: String = row.try_get("fact_type").map_err(map_sql)?;
+            let entity_key: String = row.try_get("entity_key").map_err(map_sql)?;
+            let chapter_order: i32 = row.try_get("chapter_order").map_err(map_sql)?;
+            let ids: String = row.try_get("candidate_ids").map_err(map_sql)?;
+            let values: String = row.try_get("values_text").map_err(map_sql)?;
+            let conflict_id = conflict_id(
+                "stale",
+                novel_id,
+                &chapter_id,
+                &fact_type,
+                &entity_key,
+                &ids,
+            );
+            sqlx::query(
+                "INSERT INTO memory_conflict
+                   (id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at)
+                 VALUES (?, ?, 'stale_revision', ?, ?, ?, ?, '[]', 'open', 0, ?, ?, ?)
+                 ON CONFLICT(id) DO NOTHING",
+            ).bind(&conflict_id).bind(novel_id).bind(&entity_key).bind(&chapter_id)
+            .bind(chapter_order).bind(serde_json::json!(ids.split(',').collect::<Vec<_>>()).to_string())
+            .bind(format!("{fact_type} 的候选来自旧章节修订：{values}"))
+            .bind(now_ms).bind(now_ms).execute(&self.pool).await.map_err(map_sql)?;
+        }
+        self.list_memory_conflicts(novel_id).await
+    }
+
+    async fn list_memory_conflicts(
+        &self,
+        novel_id: &str,
+    ) -> Result<Vec<MemoryConflictView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at
+             FROM memory_conflict WHERE novel_id = ? ORDER BY status = 'open' DESC, created_at DESC, id",
+        ).bind(novel_id).fetch_all(&self.pool).await.map_err(map_sql)?;
+        rows.iter().map(conflict_from_row).collect()
+    }
+
+    async fn get_memory_conflict(
+        &self,
+        conflict_id: &str,
+    ) -> Result<MemoryConflictView, PortError> {
+        let row = sqlx::query(
+            "SELECT id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at
+             FROM memory_conflict WHERE id = ?",
+        ).bind(conflict_id).fetch_optional(&self.pool).await.map_err(map_sql)?
+            .ok_or_else(|| PortError::NotFound("没有找到这条记忆冲突。".into()))?;
+        conflict_from_row(&row)
+    }
+
+    async fn memory_conflict_decision_by_command(
+        &self,
+        command_id: &str,
+    ) -> Result<Option<String>, PortError> {
+        sqlx::query_scalar("SELECT conflict_id FROM memory_conflict_decision WHERE command_id = ?")
+            .bind(command_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)
+    }
+
+    async fn resolve_memory_conflict(
+        &self,
+        conflict_id: &str,
+        expected_version: i64,
+        command_id: &str,
+        decision: &str,
+        chosen_candidate_id: Option<&str>,
+        reason: &str,
+        operator: &str,
+        now_ms: i64,
+    ) -> Result<MemoryConflictView, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let row = sqlx::query(
+            "SELECT id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at
+             FROM memory_conflict WHERE id = ?",
+        ).bind(conflict_id).fetch_optional(tx.deref_mut()).await.map_err(map_sql)?
+            .ok_or_else(|| PortError::NotFound("没有找到这条记忆冲突。".into()))?;
+        let conflict = conflict_from_row(&row)?;
+        if let Some(existing) = sqlx::query_scalar::<_, String>(
+            "SELECT conflict_id FROM memory_conflict_decision WHERE command_id = ?",
+        )
+        .bind(command_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        {
+            if existing == conflict_id {
+                tx.commit().await.map_err(map_sql)?;
+                return self.get_memory_conflict(conflict_id).await;
+            }
+            return Err(PortError::Conflict("commandId 已用于其他冲突裁决。".into()));
+        }
+        if conflict.status != "open" {
+            return Err(PortError::Conflict("这条冲突已经裁决。".into()));
+        }
+        if conflict.version != expected_version {
+            return Err(PortError::Conflict("冲突已经变化，请刷新后再裁决。".into()));
+        }
+        if let Some(chosen) = chosen_candidate_id
+            && !conflict.candidate_ids.iter().any(|id| id == chosen)
+        {
+            return Err(PortError::Integrity("裁决候选不属于这条冲突。".into()));
+        }
+        sqlx::query(
+            "INSERT INTO memory_conflict_decision
+               (id, conflict_id, command_id, decision, chosen_candidate_id, reason, operator,
+                conflict_version, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(format!("decision-{command_id}"))
+        .bind(conflict_id)
+        .bind(command_id)
+        .bind(decision)
+        .bind(chosen_candidate_id)
+        .bind(reason)
+        .bind(operator)
+        .bind(expected_version)
+        .bind(now_ms)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        sqlx::query(
+            "UPDATE memory_conflict SET status = 'resolved', version = version + 1, updated_at = ?
+             WHERE id = ? AND version = ?",
+        )
+        .bind(now_ms)
+        .bind(conflict_id)
+        .bind(expected_version)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        self.get_memory_conflict(conflict_id).await
+    }
 }
 
 impl SqliteKernel {
@@ -426,6 +625,47 @@ fn candidate_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<MemoryCandidateVi
         ambiguous: row.try_get::<i64, _>("ambiguous").map_err(map_sql)? != 0,
         version: row.try_get("version").map_err(map_sql)?,
         decision_reason: row.try_get("decision_reason").map_err(map_sql)?,
+        created_at: row.try_get("created_at").map_err(map_sql)?,
+        updated_at: row.try_get("updated_at").map_err(map_sql)?,
+    })
+}
+
+fn conflict_id(
+    kind: &str,
+    novel: &str,
+    chapter: &str,
+    fact_type: &str,
+    entity: &str,
+    ids: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut sorted = ids.split(',').collect::<Vec<_>>();
+    sorted.sort_unstable();
+    let digest = Sha256::digest(
+        format!(
+            "{kind}\u{1f}{novel}\u{1f}{chapter}\u{1f}{fact_type}\u{1f}{entity}\u{1f}{}",
+            sorted.join(",")
+        )
+        .as_bytes(),
+    );
+    format!("conflict-{}", &hex::encode(digest)[..32])
+}
+
+fn conflict_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<MemoryConflictView, PortError> {
+    let candidate_ids: String = row.try_get("candidate_ids_json").map_err(map_sql)?;
+    let fact_ids: String = row.try_get("fact_ids_json").map_err(map_sql)?;
+    Ok(MemoryConflictView {
+        id: row.try_get("id").map_err(map_sql)?,
+        novel_id: row.try_get("novel_id").map_err(map_sql)?,
+        conflict_type: row.try_get("conflict_type").map_err(map_sql)?,
+        entity_key: row.try_get("entity_key").map_err(map_sql)?,
+        chapter_id: row.try_get("chapter_id").map_err(map_sql)?,
+        chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
+        candidate_ids: serde_json::from_str(&candidate_ids).unwrap_or_default(),
+        fact_ids: serde_json::from_str(&fact_ids).unwrap_or_default(),
+        status: row.try_get("status").map_err(map_sql)?,
+        version: row.try_get("version").map_err(map_sql)?,
+        description: row.try_get("description").map_err(map_sql)?,
         created_at: row.try_get("created_at").map_err(map_sql)?,
         updated_at: row.try_get("updated_at").map_err(map_sql)?,
     })
