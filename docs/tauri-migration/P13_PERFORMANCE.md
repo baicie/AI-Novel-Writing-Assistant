@@ -49,3 +49,5 @@ Candidate Journal SIGKILL crash + restart 1 passing
 - 并发检索
 - 真实 Embedding 模型
 - Native UI 端到端性能
+
+最终构建：`.app` 20.54 MiB；DMG 9.2 MiB；Tauri release audit PASS。

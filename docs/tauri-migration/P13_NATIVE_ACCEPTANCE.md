@@ -37,3 +37,14 @@ Candidate Journal SIGKILL + restart 1 passing
 - 原生知识库管理 UI 新增/编辑/删除验收
 - 真双窗口
 - 知识删除命令 UI
+
+
+## 最终 Native 回归（本轮）
+
+```text
+Director 4 passing
+Editor 2 passing
+Candidate Journal SIGKILL crash + restart 1 passing
+```
+
+知识库管理 UI 未做 Native 新增/编辑/删除验收，保持 PARTIAL。
