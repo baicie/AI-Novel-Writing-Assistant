@@ -56,3 +56,12 @@ Candidate Journal SIGKILL crash + restart 1 passing
 - upsert_timeline_event
 - upsert_plot_thread
 - list_story_facts
+
+
+第 2 轮最新构建实测：
+
+```text
+Director 4 passing
+```
+
+Editor 2 passing / Candidate Journal SIGKILL + restart 1 passing 来自同一 UI 面的上一构建；故事事实写入只新增 Tauri Command，未改 UI。

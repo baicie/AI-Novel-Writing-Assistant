@@ -151,3 +151,6 @@
 
 - P13.2 写入 Command 已有，记忆管理 UI 与重新抽取未完成。
 - P13.3 仅有小型确定性 adversarial fixture，无大规模标注集/真实模型指标。
+
+- P13.2 故事事实写入与章节修改失效已实现；记忆管理 Native UI/重新抽取未完成。
+- P13.4 最新 Director E2E 4 passing；知识库管理 UI 与真实双窗口仍未验收。
