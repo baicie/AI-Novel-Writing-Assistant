@@ -72,3 +72,12 @@ Editor 2 passing / Candidate Journal SIGKILL + restart 1 passing 来自同一 UI
 - Director 只读“长篇记忆”面板；
 - 索引重试 Tauri Command；
 - 尚未做知识库索引状态/重试 UI 验收。
+
+
+第 3 轮最新构建：
+
+```text
+Director 4 passing（含长篇记忆只读面板）
+```
+
+知识库索引状态/重试 UI 与记忆编辑 UI 未验收。
