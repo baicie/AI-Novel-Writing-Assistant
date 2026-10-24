@@ -2,6 +2,7 @@ mod db;
 mod knowledge;
 mod legacy_import;
 mod lookups;
+mod memory;
 mod model;
 mod novels;
 mod tasks;

@@ -117,6 +117,22 @@ impl Worker {
         self.renewal_enabled = false;
     }
 
+    pub fn llm(&self) -> Arc<dyn LlmProvider> {
+        self.llm.clone()
+    }
+
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
+    }
+
+    pub fn ids(&self) -> Arc<dyn Ids> {
+        self.ids.clone()
+    }
+
+    pub fn secrets(&self) -> Arc<dyn ModelSecrets> {
+        self.secrets.clone()
+    }
+
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
     }

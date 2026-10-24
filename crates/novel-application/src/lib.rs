@@ -12,6 +12,7 @@ mod http_routes;
 mod hub;
 mod integration_tests;
 mod knowledge;
+mod memory;
 mod ports;
 mod runtime;
 mod services_chapter;
@@ -41,11 +42,13 @@ pub use error::{AppError, AppErrorCode, PortError};
 pub use hash::{json_hash, sha256_hex};
 pub use hub::EventHub;
 pub use knowledge::assemble_context;
+pub use memory::{ExtractMemoryInput, MemoryService};
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
     DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LeaseFence, LookupRepository,
-    ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewCharacter,
-    NewCharacterState, NewDocument, NewEmbedding, NewInvocation, NewNovel, NewPlotThread,
+    MemoryCandidateView, MemoryExtractionJobView, MemoryRepository, ModelSecrets, NewArtifact,
+    NewAttempt, NewCandidate, NewChapter, NewCharacter, NewCharacterState, NewDocument,
+    NewEmbedding, NewInvocation, NewMemoryCandidate, NewMemoryJob, NewNovel, NewPlotThread,
     NewQualityDebt, NewReviewOccurrence, NewTimelineEvent, NewVolume, NewWorld, NoFault,
     NoModelSecrets, NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace,
     SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord, SearchHit,

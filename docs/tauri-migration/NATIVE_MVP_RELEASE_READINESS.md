@@ -181,3 +181,8 @@ pnpm --filter @ai-novel/client test
 - 旧 Worker 在 Lease 丢失后不能写入 Candidate/Attempt/Invocation/Debt/Control/Revision。
 - Fencing 使用 Owner + Control Version + Lease + Status，事务内校验。
 - 两 Worker 真实 HTTP/SSE 竞争测试通过。
+
+## P13.5
+
+- AI 记忆抽取采用正式章节 → 候选 → 人工确认 → 正式记忆，AI 不会直接写 confirmed 事实。
+- 传闻/人物宣称/推测即使确认也只写 disputed，不进入 Context。

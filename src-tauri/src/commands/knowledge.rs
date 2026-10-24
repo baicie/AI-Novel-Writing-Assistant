@@ -263,3 +263,103 @@ pub async fn retry_knowledge_document(
         .await
         .map_err(AppError::from)
 }
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractMemoryRequest {
+    pub command_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub provider: String,
+    pub model: String,
+    pub endpoint: String,
+    pub allow_localhost_http: bool,
+    pub token_budget: Option<u64>,
+}
+
+fn memory_service(state: &AppState) -> novel_application::MemoryService {
+    novel_application::MemoryService::new(
+        state.kernel.clone(),
+        state.kernel.clone(),
+        state.runtime.worker.llm(),
+        state.runtime.worker.clock(),
+        state.runtime.worker.ids(),
+        state.runtime.worker.secrets(),
+    )
+}
+
+#[tauri::command]
+pub async fn extract_memory(
+    state: State<'_, AppState>,
+    request: ExtractMemoryRequest,
+) -> Result<novel_application::MemoryExtractionJobView, AppError> {
+    memory_service(&state)
+        .extract(novel_application::ExtractMemoryInput {
+            command_id: request.command_id,
+            novel_id: request.novel_id,
+            chapter_id: request.chapter_id,
+            provider: request.provider,
+            model: request.model,
+            endpoint: request.endpoint,
+            allow_localhost_http: request.allow_localhost_http,
+            token_budget: request.token_budget,
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn list_memory_candidates(
+    state: State<'_, AppState>,
+    novel_id: String,
+    chapter_id: String,
+) -> Result<Vec<novel_application::MemoryCandidateView>, AppError> {
+    memory_service(&state)
+        .list_candidates(&novel_id, &chapter_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn confirm_memory_candidate(
+    state: State<'_, AppState>,
+    candidate_id: String,
+    expected_version: i64,
+) -> Result<novel_application::MemoryCandidateView, AppError> {
+    memory_service(&state)
+        .confirm(&candidate_id, expected_version)
+        .await
+}
+
+#[tauri::command]
+pub async fn reject_memory_candidate(
+    state: State<'_, AppState>,
+    candidate_id: String,
+    expected_version: i64,
+    reason: String,
+) -> Result<novel_application::MemoryCandidateView, AppError> {
+    memory_service(&state)
+        .reject(&candidate_id, expected_version, &reason)
+        .await
+}
+
+#[tauri::command]
+pub async fn defer_memory_candidate(
+    state: State<'_, AppState>,
+    candidate_id: String,
+    expected_version: i64,
+) -> Result<novel_application::MemoryCandidateView, AppError> {
+    memory_service(&state)
+        .defer(&candidate_id, expected_version)
+        .await
+}
+
+#[tauri::command]
+pub async fn update_memory_candidate_value(
+    state: State<'_, AppState>,
+    candidate_id: String,
+    expected_version: i64,
+    value: String,
+) -> Result<novel_application::MemoryCandidateView, AppError> {
+    memory_service(&state)
+        .update_value(&candidate_id, expected_version, &value)
+        .await
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-memory-candidate"
+description = "Enables the confirm_memory_candidate command without any pre-configured scope."
+commands.allow = ["confirm_memory_candidate"]
+
+[[permission]]
+identifier = "deny-confirm-memory-candidate"
+description = "Denies the confirm_memory_candidate command without any pre-configured scope."
+commands.deny = ["confirm_memory_candidate"]

@@ -8,7 +8,13 @@ import {
   approveRun,
   cancelRun,
   clearCandidateEditDraft,
+  confirmMemoryCandidate,
   createCharacter,
+  deferMemoryCandidate,
+  extractMemory,
+  listMemoryCandidates,
+  rejectMemoryCandidate,
+  updateMemoryCandidateValue,
   confirmCandidateAfterEdit,
   getCandidateEditDraft,
   listCandidateEditDrafts,
@@ -36,6 +42,7 @@ import {
   type CandidateEditDraftView,
   type GenerationEvent,
   type ReviewOccurrenceView,
+  type MemoryCandidateView,
   type StoryFactView,
   type RunDetailView,
 } from "@/platform/desktopTransport";
@@ -112,6 +119,9 @@ export default function TauriDirectorPage() {
   const [stateBody, setStateBody] = useState("");
   const [stateSaving, setStateSaving] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState("");
+  const [memoryExtracting, setMemoryExtracting] = useState(false);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidateView[]>([]);
+  const [memoryCandidateBusy, setMemoryCandidateBusy] = useState<string | null>(null);
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -282,6 +292,53 @@ export default function TauriDirectorPage() {
     setCandidateDraftStatus("restored");
     setCandidateDraftChoices([]);
     setError(null);
+  };
+
+  useEffect(() => {
+    if (!detail?.chapterId || !novelId) return;
+    let cancelled = false;
+    void listMemoryCandidates({ novelId, chapterId: detail.chapterId })
+      .then(rows => { if (!cancelled) setMemoryCandidates(rows); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [detail?.chapterId, novelId]);
+
+  const runMemoryExtraction = async () => {
+    if (!detail?.chapterId || !model) return;
+    setMemoryExtracting(true);
+    try {
+      await extractMemory({
+        commandId: `director-memory-${Date.now()}`, novelId, chapterId: detail.chapterId,
+        provider: "openai-compatible", model: model.model, endpoint: model.endpoint,
+        allowLocalhostHttp: model.allowLocalhostHttp, tokenBudget: null,
+      });
+      setMemoryCandidates(await listMemoryCandidates({ novelId, chapterId: detail.chapterId }));
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "记忆抽取失败，请检查章节正式正文与模型配置。");
+    } finally { setMemoryExtracting(false); }
+  };
+
+  const decideMemoryCandidate = async (candidate: MemoryCandidateView, action: "confirm" | "defer" | "reject" | "edit") => {
+    setMemoryCandidateBusy(candidate.id);
+    try {
+      if (action === "confirm") await confirmMemoryCandidate({ candidateId: candidate.id, expectedVersion: candidate.version });
+      if (action === "defer") await deferMemoryCandidate({ candidateId: candidate.id, expectedVersion: candidate.version });
+      if (action === "reject") {
+        const reason = window.prompt("拒绝原因", "人工判断不成立");
+        if (!reason) return;
+        await rejectMemoryCandidate({ candidateId: candidate.id, expectedVersion: candidate.version, reason });
+      }
+      if (action === "edit") {
+        const value = window.prompt("修改候选事实", candidate.value);
+        if (!value) return;
+        await updateMemoryCandidateValue({ candidateId: candidate.id, expectedVersion: candidate.version, value });
+      }
+      if (detail?.chapterId) setMemoryCandidates(await listMemoryCandidates({ novelId, chapterId: detail.chapterId }));
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "处理记忆候选失败，请刷新后重试。");
+    } finally { setMemoryCandidateBusy(null); }
   };
 
   const candidateDiffLines = useMemo(
@@ -599,6 +656,26 @@ export default function TauriDirectorPage() {
                   <p className="mt-1 text-muted-foreground">来源版本：{fact.sourceRevision ?? "未标注"}</p>
                 </li>)}
               </ul> : <p className="text-xs text-muted-foreground">当前章节之前还没有已确认的人物状态、时间线或伏笔事实。</p>}
+              <div className="space-y-2 border-t border-border/50 pt-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">从本章正式正文抽取记忆候选，确认后才进入 Context。</p>
+                  <Button data-testid="director-extract-memory" variant="outline" onClick={() => void runMemoryExtraction()} disabled={memoryExtracting || !detail?.chapterId}>{memoryExtracting ? "抽取中…" : "从本章提取记忆"}</Button>
+                </div>
+                {memoryCandidates.length ? <ul className="space-y-2 text-xs">
+                  {memoryCandidates.map(candidate => <li key={candidate.id} className="rounded-md bg-background/60 px-3 py-2">
+                    <p><span className="text-muted-foreground">{candidate.factType} · {candidate.truthfulness} · v{candidate.chapterVersion} · {candidate.status}{candidate.ambiguous ? " · 身份待确认" : ""}</span></p>
+                    <p className="mt-1 leading-5">{candidate.value}</p>
+                    <p className="mt-1 text-muted-foreground">证据：{candidate.evidenceQuote}</p>
+                    {candidate.decisionReason ? <p className="mt-1 text-muted-foreground">处理原因：{candidate.decisionReason}</p> : null}
+                    {(candidate.status === "proposed" || candidate.status === "deferred") ? <div className="mt-2 flex flex-wrap gap-2">
+                      <Button data-testid="director-confirm-memory-candidate" variant="outline" disabled={memoryCandidateBusy === candidate.id || candidate.ambiguous} onClick={() => void decideMemoryCandidate(candidate, "confirm")}>确认</Button>
+                      <Button data-testid="director-edit-memory-candidate" variant="outline" disabled={memoryCandidateBusy === candidate.id} onClick={() => void decideMemoryCandidate(candidate, "edit")}>修改</Button>
+                      <Button data-testid="director-defer-memory-candidate" variant="outline" disabled={memoryCandidateBusy === candidate.id} onClick={() => void decideMemoryCandidate(candidate, "defer")}>稍后</Button>
+                      <Button data-testid="director-reject-memory-candidate" variant="outline" disabled={memoryCandidateBusy === candidate.id} onClick={() => void decideMemoryCandidate(candidate, "reject")}>拒绝</Button>
+                    </div> : null}
+                  </li>)}
+                </ul> : <p className="text-xs text-muted-foreground">还没有记忆候选。</p>}
+              </div>
               {memoryPreviousChapter ? <form className="space-y-2 border-t border-border/50 pt-3" onSubmit={(event) => { event.preventDefault(); void saveTimelineMemory(); }}>
                 <p className="text-xs text-muted-foreground">记录到第{memoryPreviousChapter.sortOrder}章时间线（作者确认）</p>
                 <textarea data-testid="director-memory-input" className="min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm" value={memoryBody} onChange={(event) => setMemoryBody(event.target.value)} placeholder="例如：林动在祖祠发现封印。" />

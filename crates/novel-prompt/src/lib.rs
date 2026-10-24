@@ -65,6 +65,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题和已确认上下文修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
         },
         PromptAsset {
+            id: "memory_extraction",
+            version: "memory-extraction-v1",
+            family: "memory",
+            template: "STEP:memory_extraction\n你是小说连续性编辑。只依据下面已确认的章节正文抽取长期记忆候选，不要补充正文没有的事实。严格输出 JSON：{\"facts\":[{\"factType\":\"character_state|timeline_event|plot_thread\",\"truthfulness\":\"narrator_fact|character_claim|rumor|hypothesis|plan|author_asserted\",\"entityName\":\"人物名或伏笔名\",\"value\":\"事实正文\",\"evidenceQuote\":\"必须逐字来自正文的原文片段\",\"confidence\":0.0}]}。传闻/人物宣称/推测/未来计划不得标为 narrator_fact。不要输出 Markdown。\n已知人物：{{characters}}\n章节标题：{{title}}\n章节正文：\n{{content}}",
+        },
+        PromptAsset {
             id: "consistency_review",
             version: "consistency-review-v1",
             family: "director",

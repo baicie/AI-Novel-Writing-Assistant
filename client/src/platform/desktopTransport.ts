@@ -186,6 +186,46 @@ export function upsertPlotThread(input: {
   return invoke("upsert_plot_thread", { request: input });
 }
 
+export interface MemoryCandidateView {
+  id: string; jobId: string; novelId: string; chapterId: string; chapterVersion: number;
+  sourceContentHash: string; factType: string; truthfulness: string;
+  entityName?: string | null; entityId?: string | null; value: string; evidenceQuote: string;
+  evidenceStart?: number | null; confidence?: number | null; status: string; ambiguous: boolean;
+  version: number; decisionReason?: string | null; createdAt: number; updatedAt: number;
+}
+
+export interface MemoryExtractionJobView {
+  id: string; commandId: string; novelId: string; chapterId: string;
+  chapterVersion: number; status: string; error?: string | null; createdAt: number;
+}
+
+export function extractMemory(input: {
+  commandId: string; novelId: string; chapterId: string; provider: string;
+  model: string; endpoint: string; allowLocalhostHttp: boolean; tokenBudget?: number | null;
+}): Promise<MemoryExtractionJobView> {
+  return invoke("extract_memory", { request: input });
+}
+
+export function listMemoryCandidates(input: { novelId: string; chapterId: string }): Promise<MemoryCandidateView[]> {
+  return invoke("list_memory_candidates", input);
+}
+
+export function confirmMemoryCandidate(input: { candidateId: string; expectedVersion: number }): Promise<MemoryCandidateView> {
+  return invoke("confirm_memory_candidate", input);
+}
+
+export function rejectMemoryCandidate(input: { candidateId: string; expectedVersion: number; reason: string }): Promise<MemoryCandidateView> {
+  return invoke("reject_memory_candidate", input);
+}
+
+export function deferMemoryCandidate(input: { candidateId: string; expectedVersion: number }): Promise<MemoryCandidateView> {
+  return invoke("defer_memory_candidate", input);
+}
+
+export function updateMemoryCandidateValue(input: { candidateId: string; expectedVersion: number; value: string }): Promise<MemoryCandidateView> {
+  return invoke("update_memory_candidate_value", input);
+}
+
 export function upsertTimelineEvent(input: {
   id: string; novelId: string; chapterOrder: number; body: string;
   sourceChapterId: string; sourceRevision: string; status: string;

@@ -170,6 +170,79 @@ pub struct NewAttempt {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCandidateView {
+    pub id: String,
+    pub job_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_version: i64,
+    pub source_content_hash: String,
+    pub fact_type: String,
+    pub truthfulness: String,
+    pub entity_name: Option<String>,
+    pub entity_id: Option<String>,
+    pub value: String,
+    pub evidence_quote: String,
+    pub evidence_start: Option<i64>,
+    pub confidence: Option<f64>,
+    pub status: String,
+    pub ambiguous: bool,
+    pub version: i64,
+    pub decision_reason: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryExtractionJobView {
+    pub id: String,
+    pub command_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_version: i64,
+    pub status: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewMemoryJob {
+    pub id: String,
+    pub command_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_version: i64,
+    pub source_content_hash: String,
+    pub extraction_version: String,
+    pub provider: String,
+    pub model: String,
+    pub endpoint: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewMemoryCandidate {
+    pub id: String,
+    pub job_id: String,
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub chapter_version: i64,
+    pub source_content_hash: String,
+    pub fact_type: String,
+    pub truthfulness: String,
+    pub entity_name: Option<String>,
+    pub entity_id: Option<String>,
+    pub value: String,
+    pub evidence_quote: String,
+    pub evidence_start: Option<i64>,
+    pub confidence: Option<f64>,
+    pub ambiguous: bool,
+    pub now_ms: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewCharacterState {
     pub id: String,
@@ -374,6 +447,56 @@ impl FaultInjector for NoFault {
     async fn fail_after_candidate(&self, _step_id: &str) -> bool {
         false
     }
+}
+
+#[async_trait]
+pub trait MemoryRepository: Send + Sync {
+    async fn memory_job_by_command(
+        &self,
+        command_id: &str,
+    ) -> Result<Option<MemoryExtractionJobView>, PortError>;
+    async fn create_memory_job(
+        &self,
+        job: NewMemoryJob,
+        candidates: &[NewMemoryCandidate],
+    ) -> Result<MemoryExtractionJobView, PortError>;
+    async fn fail_memory_job(
+        &self,
+        job_id: &str,
+        error: &str,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn list_memory_candidates(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<Vec<MemoryCandidateView>, PortError>;
+    async fn confirm_memory_candidate(
+        &self,
+        candidate_id: &str,
+        expected_version: i64,
+        now_ms: i64,
+    ) -> Result<MemoryCandidateView, PortError>;
+    async fn reject_memory_candidate(
+        &self,
+        candidate_id: &str,
+        expected_version: i64,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<MemoryCandidateView, PortError>;
+    async fn defer_memory_candidate(
+        &self,
+        candidate_id: &str,
+        expected_version: i64,
+        now_ms: i64,
+    ) -> Result<MemoryCandidateView, PortError>;
+    async fn update_memory_candidate_value(
+        &self,
+        candidate_id: &str,
+        expected_version: i64,
+        value: &str,
+        now_ms: i64,
+    ) -> Result<MemoryCandidateView, PortError>;
 }
 
 #[async_trait]

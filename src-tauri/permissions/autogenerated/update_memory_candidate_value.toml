@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-memory-candidate-value"
+description = "Enables the update_memory_candidate_value command without any pre-configured scope."
+commands.allow = ["update_memory_candidate_value"]
+
+[[permission]]
+identifier = "deny-update-memory-candidate-value"
+description = "Denies the update_memory_candidate_value command without any pre-configured scope."
+commands.deny = ["update_memory_candidate_value"]
