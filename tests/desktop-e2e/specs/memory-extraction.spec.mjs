@@ -21,6 +21,10 @@ describe("AI memory extraction review", () => {
     await confirm.waitForDisplayed({ timeout: 10_000 });
     await confirm.click();
     await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("E2E 记忆抽取事实"), { timeout: 20_000 });
+    await browser.waitUntil(async () => {
+      const facts = await invoke("list_story_facts", { novelId: novel.id, beforeChapterOrder: 2 });
+      return facts.some(fact => fact.body.includes("E2E 记忆抽取事实"));
+    }, { timeout: 20_000, timeoutMsg: "confirmed memory fact was not visible to Context" });
     const facts = await invoke("list_story_facts", { novelId: novel.id, beforeChapterOrder: 2 });
     expect(facts.some(fact => fact.body.includes("E2E 记忆抽取事实"))).toBe(true);
   });
