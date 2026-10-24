@@ -12,6 +12,7 @@ import {
   getCandidateEditDraft,
   listCandidateEditDrafts,
   listReviewOccurrences,
+  listStoryFacts,
   regenerateRun,
   saveCandidateEditDraft,
   rejectRun,
@@ -28,6 +29,7 @@ import {
   type CandidateEditDraftView,
   type GenerationEvent,
   type ReviewOccurrenceView,
+  type StoryFactView,
   type RunDetailView,
 } from "@/platform/desktopTransport";
 
@@ -118,6 +120,12 @@ export default function TauriDirectorPage() {
   const detail = detailQuery.data;
   const chapters = chaptersQuery.data ?? [];
   const latestCandidate = detail?.latestCandidate ?? null;
+  const targetChapterOrder = chapters.find(chapter => chapter.id === (detail?.chapterId ?? ""))?.sortOrder ?? 1;
+  const storyFactsQuery = useQuery<StoryFactView[]>({
+    queryKey: ["tauri-director", novelId, "story-facts", detail?.chapterId ?? "", targetChapterOrder],
+    queryFn: () => listStoryFacts({ novelId, beforeChapterOrder: targetChapterOrder }),
+    enabled: !!novelId && !!runId,
+  });
   const chapterApprovalGate = detail?.gate?.artifactTypes.includes("chapter_approval") ?? false;
   useEffect(() => {
     if (!editingCandidate || !latestCandidate || !runId || !detail?.gate?.id) return;
@@ -467,6 +475,17 @@ export default function TauriDirectorPage() {
               <h2 className="text-sm font-semibold">运行历史</h2>
               <ol className="mt-3 space-y-2 text-xs">{(historyQuery.data ?? []).slice(0, 8).map(run => <li key={run.id} className="flex items-center justify-between gap-2"><span className={run.id === runId ? "font-medium text-foreground" : "text-muted-foreground"}>{statusLabel(run.state)} · {run.chapterTitle || "未命名章节"}</span><span className="text-muted-foreground">{new Date(run.updatedAt).toLocaleDateString()}</span></li>)}</ol>
             </section>
+            <section data-testid="director-story-memory" className="space-y-2 rounded-md bg-muted/20 p-4">
+              <h2 className="text-sm font-semibold">长篇记忆</h2>
+              {(storyFactsQuery.data ?? []).length ? <ul className="space-y-2 text-xs">
+                {storyFactsQuery.data!.map((fact) => <li key={`${fact.factType}-${fact.id}`} className="rounded-md bg-background/60 px-3 py-2">
+                  <p><span className="text-muted-foreground">{fact.factType === "character_state" ? "人物状态" : fact.factType === "timeline_event" ? "时间线" : "伏笔"} · 第{fact.chapterOrder}章 · {fact.status}</span></p>
+                  <p className="mt-1 leading-5">{fact.body}</p>
+                  <p className="mt-1 text-muted-foreground">来源版本：{fact.sourceRevision ?? "未标注"}</p>
+                </li>)}
+              </ul> : <p className="text-xs text-muted-foreground">当前章节之前还没有已确认的人物状态、时间线或伏笔事实。</p>}
+            </section>
+
             <section className="rounded-md bg-muted/20 p-4 text-xs text-muted-foreground">
               <h2 className="text-sm font-semibold text-foreground">暂未支持</h2>
               <p className="mt-2 leading-5">多章节批量、世界模式、自定义 driver、handoff 和修改后确认的编辑界面仍待接入；不会把未接入能力显示为可执行按钮。</p>

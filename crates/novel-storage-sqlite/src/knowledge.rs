@@ -5,7 +5,7 @@ use novel_application::{
     KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, PortError, RetrievalTrace,
     SearchHit,
 };
-use novel_context::{cosine, decode_f32, encode_f32};
+use novel_context::{Lexicon, cosine, decode_f32, encode_f32, fts_query, tokenize};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 
@@ -171,6 +171,47 @@ impl KnowledgeRepository for SqliteKernel {
             .await
             .map_err(map_sql)?;
         tx.commit().await.map_err(map_sql)?;
+        Ok(true)
+    }
+
+    async fn retry_index_document(&self, document_id: &str) -> Result<bool, PortError> {
+        let row = sqlx::query(
+            "SELECT novel_id, owner_type, title, body, source_revision, source_content_hash,
+                    index_status
+             FROM knowledge_document WHERE id = ?",
+        )
+        .bind(document_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        let Some(row) = row else {
+            return Ok(false);
+        };
+        let status: String = row.try_get("index_status").map_err(map_sql)?;
+        if status == "ready" {
+            return Ok(false);
+        }
+        let source_revision: Option<String> = row.try_get("source_revision").map_err(map_sql)?;
+        let terms = fts_query(&novel_context::tokenize(
+            &row.try_get::<String, _>("body").map_err(map_sql)?,
+            &novel_context::Lexicon::default(),
+        ));
+        self.index_document(NewDocument {
+            id: document_id.to_string(),
+            novel_id: row.try_get("novel_id").map_err(map_sql)?,
+            owner_type: row.try_get("owner_type").map_err(map_sql)?,
+            title: row.try_get("title").map_err(map_sql)?,
+            body: row.try_get("body").map_err(map_sql)?,
+            terms,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64)
+                .unwrap_or(0),
+            source_revision,
+            source_content_hash: row.try_get("source_content_hash").map_err(map_sql)?,
+            embedding: None,
+        })
+        .await?;
         Ok(true)
     }
 

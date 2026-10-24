@@ -1,7 +1,6 @@
 use novel_application::{KnowledgeRepository, NewDocument, NewNovel, NovelRepository};
 use novel_context::ChunkRef;
 use novel_context::{Lexicon, assemble, fts_query, tokenize};
-use novel_domain::ArtifactStatus;
 use novel_storage_sqlite::SqliteKernel;
 
 async fn index(kernel: &SqliteKernel, id: &str, owner: &str, body: &str, revision: &str) {
@@ -83,6 +82,8 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
         ("存活", "fact:0"),
     ];
     let mut mrr = 0.0;
+    let mut ndcg = 0.0;
+    let mut precision = 0.0;
     let mut correct = 0;
     for (query, expected) in cases {
         let hits = KnowledgeRepository::search_keyword(
@@ -98,6 +99,14 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
             .position(|hit| hit.chunk_id == expected)
             .map(|index| index + 1);
         mrr += rank.map(|rank| 1.0 / rank as f64).unwrap_or(0.0);
+        ndcg += rank
+            .map(|rank| 1.0 / (1.0 + (rank as f64).log2()))
+            .unwrap_or(0.0);
+        precision += if hits.is_empty() {
+            0.0
+        } else {
+            1.0 / hits.len() as f64
+        };
         correct += usize::from(rank.is_some());
         assert!(
             rank.is_some(),
@@ -105,7 +114,10 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
         );
         assert!(hits.iter().all(|hit| hit.source_revision.is_some()));
     }
-    mrr /= cases.len() as f64;
+    let n = cases.len() as f64;
+    mrr /= n;
+    ndcg /= n;
+    precision /= n;
     // Future planning can be a goal but must not be assembled as confirmed character fact.
     let chunks = vec![ChunkRef {
         id: "future:0".into(),
@@ -125,8 +137,9 @@ async fn adversarial_retrieval_keeps_same_name_rumor_and_future_separate() {
         "future planning leaked into confirmed facts"
     );
     println!(
-        "P13 adversarial: cases={} correct={} mrr={mrr:.2} future_leak=0",
+        "P13 adversarial: dataset=p13-adversarial-v1 cases={} correct={} recall={:.2} precision={precision:.2} mrr={mrr:.2} ndcg={ndcg:.2} source_revision_accuracy=1.00 future_leak=0",
         cases.len(),
-        correct
+        correct,
+        correct as f64 / n
     );
 }

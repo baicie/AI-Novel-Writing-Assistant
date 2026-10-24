@@ -159,6 +159,19 @@ export interface RunUsageView {
   completionTokens: number;
 }
 
+export interface StoryFactView {
+  id: string;
+  factType: string;
+  body: string;
+  chapterOrder: number;
+  sourceRevision?: string | null;
+  status: string;
+}
+
+export function listStoryFacts(input: { novelId: string; beforeChapterOrder: number }): Promise<StoryFactView[]> {
+  return invoke("list_story_facts", input);
+}
+
 export interface RunDetailView {
   id: string;
   novelId: string;

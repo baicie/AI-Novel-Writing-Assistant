@@ -25,7 +25,9 @@
 | Accepted 后问题再次出现 | 不静默重新 open |
 
 ```text
-P13 adversarial: cases=4 correct=4 mrr=1.00 future_leak=0
+P13 adversarial: dataset=p13-adversarial-v1 cases=4 correct=4
+recall=1.00 precision=0.88 mrr=1.00 ndcg=1.00
+source_revision_accuracy=1.00 future_leak=0
 ```
 
 ## Quality debt identity

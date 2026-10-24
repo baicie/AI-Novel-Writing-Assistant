@@ -251,3 +251,15 @@ pub async fn list_story_facts(
         .await
         .map_err(AppError::from)
 }
+
+#[tauri::command]
+pub async fn retry_knowledge_document(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<bool, AppError> {
+    state
+        .kernel
+        .retry_index_document(&document_id)
+        .await
+        .map_err(AppError::from)
+}

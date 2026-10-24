@@ -62,3 +62,17 @@ cargo test -p novel-storage-sqlite --test knowledge_lifecycle
 - 章节索引 source_revision 记录 revision id + version。
 
 测试：`confirmed_chapter_revision_updates_and_deletes_chapter_index`。
+
+
+## 失败重试
+
+新增 `retry_index_document`：
+
+- 读取已有 body/title/sourceRevision；
+- 对 `index_status='building'` 的文档重建 FTS/chunk；
+- 成功后 ready 并可检索；
+- 已 ready 文档返回 false。
+
+Tauri Command：`retry_knowledge_document`。
+
+测试：`failed_index_attempt_can_be_retried` PASS。

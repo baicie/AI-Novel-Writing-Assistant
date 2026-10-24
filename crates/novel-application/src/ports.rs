@@ -833,6 +833,8 @@ pub trait WorkflowRepository: Send + Sync {
 pub trait KnowledgeRepository: Send + Sync {
     async fn index_document(&self, document: NewDocument) -> Result<(), PortError>;
     async fn delete_document(&self, document_id: &str) -> Result<bool, PortError>;
+    /// Rebuild a document whose previous index attempt failed or was interrupted.
+    async fn retry_index_document(&self, document_id: &str) -> Result<bool, PortError>;
     async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError>;
     async fn search_keyword(
         &self,

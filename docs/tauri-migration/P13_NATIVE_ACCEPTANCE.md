@@ -65,3 +65,10 @@ Director 4 passing
 ```
 
 Editor 2 passing / Candidate Journal SIGKILL + restart 1 passing 来自同一 UI 面的上一构建；故事事实写入只新增 Tauri Command，未改 UI。
+
+
+第 3 轮新增：
+
+- Director 只读“长篇记忆”面板；
+- 索引重试 Tauri Command；
+- 尚未做知识库索引状态/重试 UI 验收。

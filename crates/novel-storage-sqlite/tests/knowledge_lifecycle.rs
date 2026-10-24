@@ -271,3 +271,58 @@ async fn confirmed_chapter_revision_updates_and_deletes_chapter_index() {
     .unwrap();
     assert!(deleted.is_empty(), "deleted chapter must leave the index");
 }
+
+#[tokio::test]
+async fn failed_index_attempt_can_be_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("retry.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n".into(),
+            title: "重试书".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    KnowledgeRepository::index_document(&kernel, doc("retrydoc", "林动在祖祠", "rev1", "hash1"))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE knowledge_document SET index_status='building' WHERE id='retrydoc'")
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    let before = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("祖祠", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert!(before.is_empty());
+    assert!(
+        KnowledgeRepository::retry_index_document(&kernel, "retrydoc")
+            .await
+            .unwrap()
+    );
+    let after = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("祖祠", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].source_revision.as_deref(), Some("rev1"));
+    assert!(
+        !KnowledgeRepository::retry_index_document(&kernel, "retrydoc")
+            .await
+            .unwrap()
+    );
+}
