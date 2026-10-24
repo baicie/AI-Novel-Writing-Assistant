@@ -7,12 +7,13 @@
 ```text
 P13 performance:
 chapters=1000
-build_ms=1254
-context_p50_us=13031
-context_p95_us=13607
-index_200_ms=125
-search_p50_us=154
-search_p95_us=306
+build_ms=2695
+context_p50_us=18439
+context_p95_us=24364
+incremental_update_ms=6
+index_200_ms=204
+search_p50_us=166
+search_p95_us=289
 db_mb=1.74
 ```
 
@@ -57,3 +58,13 @@ Candidate Journal SIGKILL crash + restart 1 passing
 
 
 1000 章 build_ms 已包含章节正式修订同步写入知识索引的耗时。
+
+
+## 增量索引收敛
+
+修改第 500 章正式正文后：
+
+- `incremental_update_ms=6`
+- 新正文立即进入 `chapter:ch500:0`
+- 旧正文 revision 不再命中
+- 与章节保存同一事务完成

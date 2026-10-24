@@ -113,7 +113,38 @@ async fn thousand_chapter_context_and_index_baseline() {
         assert!(assembly.prompt_text.chars().count() <= 24_000);
         context_samples.push(start.elapsed().as_micros());
     }
+    let update_start = Instant::now();
+    NovelRepository::save_user_chapter(
+        kernel.as_ref(),
+        novel_application::SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "ch500".into(),
+            expected_version: 1,
+            title: "第500章".into(),
+            content: "第500章新正文 专属收敛词".into(),
+            revision_id: "incremental-rev".into(),
+            artifact_id: "incremental-art".into(),
+            content_sha256: "incremental-hash".into(),
+            now_ms: 5_000,
+        },
+    )
+    .await
+    .unwrap();
+    let incremental_ms = update_start.elapsed().as_millis();
     let lexicon = Lexicon::default();
+    let converged = KnowledgeRepository::search_keyword(
+        kernel.as_ref(),
+        "n",
+        &fts_query(&tokenize("专属收敛词", &lexicon)),
+        5,
+    )
+    .await
+    .unwrap();
+    assert!(
+        !converged.is_empty(),
+        "chapter revision must converge into index synchronously"
+    );
+    assert_eq!(converged[0].chunk_id, "chapter:ch500:0");
     let index_start = Instant::now();
     for i in 0..200 {
         let body = format!("知识条目 {i}：林动在宗门记录事实{i}。无关干扰段落{i}。");
@@ -167,6 +198,6 @@ async fn thousand_chapter_context_and_index_baseline() {
     assert!(context_p95 < 2_000_000, "context p95 too slow");
     assert!(search_p95 < 500_000, "search p95 too slow");
     println!(
-        "P13 performance: chapters=1000 build_ms={build_ms} context_p50_us={context_p50} context_p95_us={context_p95} index_200_ms={index_ms} search_p50_us={search_p50} search_p95_us={search_p95} db_mb={db_mb:.2}"
+        "P13 performance: chapters=1000 build_ms={build_ms} context_p50_us={context_p50} context_p95_us={context_p95} incremental_update_ms={incremental_ms} index_200_ms={index_ms} search_p50_us={search_p50} search_p95_us={search_p95} db_mb={db_mb:.2}"
     );
 }
