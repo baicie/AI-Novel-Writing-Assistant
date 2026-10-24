@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-story-facts"
+description = "Enables the list_story_facts command without any pre-configured scope."
+commands.allow = ["list_story_facts"]
+
+[[permission]]
+identifier = "deny-list-story-facts"
+description = "Denies the list_story_facts command without any pre-configured scope."
+commands.deny = ["list_story_facts"]

@@ -666,6 +666,13 @@ impl NovelRepository for SqliteKernel {
             .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
+        invalidate_story_facts(
+            &mut tx,
+            &input.chapter_id,
+            &format!("{}@v{}", input.revision_id, next_version),
+            input.now_ms,
+        )
+        .await?;
         insert_artifact(
             &mut tx,
             &input.artifact_id,
@@ -924,6 +931,7 @@ impl NovelRepository for SqliteKernel {
                 "章节内容已经变化，请重新打开后再删除。".into(),
             ));
         }
+        invalidate_story_facts(&mut tx, &input.chapter_id, "", novel_platform_now()).await?;
         delete_chapter_knowledge(&mut tx, &input.chapter_id).await?;
         sqlx::query("DELETE FROM chapter_candidate WHERE chapter_id = ?")
             .bind(&input.chapter_id)
@@ -1153,6 +1161,97 @@ impl NovelRepository for SqliteKernel {
         Ok(facts)
     }
 
+    async fn upsert_character_state(
+        &self,
+        state: novel_application::NewCharacterState,
+    ) -> Result<(), PortError> {
+        sqlx::query(
+            "INSERT INTO character_state
+               (id, character_id, chapter_order, body, created_at, source_revision, status,
+                updated_at, source_chapter_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               chapter_order = excluded.chapter_order, body = excluded.body,
+               source_revision = excluded.source_revision, status = excluded.status,
+               updated_at = excluded.updated_at, source_chapter_id = excluded.source_chapter_id",
+        )
+        .bind(&state.id)
+        .bind(&state.character_id)
+        .bind(state.chapter_order)
+        .bind(&state.body)
+        .bind(state.now_ms)
+        .bind(&state.source_revision)
+        .bind(&state.status)
+        .bind(state.now_ms)
+        .bind(&state.source_chapter_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn upsert_timeline_event(
+        &self,
+        event: novel_application::NewTimelineEvent,
+    ) -> Result<(), PortError> {
+        sqlx::query(
+            "INSERT INTO timeline_event
+               (id, novel_id, chapter_order, body, created_at, source_revision, status,
+                updated_at, source_chapter_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               chapter_order = excluded.chapter_order, body = excluded.body,
+               source_revision = excluded.source_revision, status = excluded.status,
+               updated_at = excluded.updated_at, source_chapter_id = excluded.source_chapter_id",
+        )
+        .bind(&event.id)
+        .bind(&event.novel_id)
+        .bind(event.chapter_order)
+        .bind(&event.body)
+        .bind(event.now_ms)
+        .bind(&event.source_revision)
+        .bind(&event.status)
+        .bind(event.now_ms)
+        .bind(&event.source_chapter_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(())
+    }
+
+    async fn upsert_plot_thread(
+        &self,
+        thread: novel_application::NewPlotThread,
+    ) -> Result<(), PortError> {
+        sqlx::query(
+            "INSERT INTO plot_thread
+               (id, novel_id, title, body, opened_chapter_order, resolved_chapter_order,
+                status, source_revision, evidence_json, created_at, updated_at, source_chapter_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               title = excluded.title, body = excluded.body,
+               opened_chapter_order = excluded.opened_chapter_order,
+               resolved_chapter_order = excluded.resolved_chapter_order,
+               status = excluded.status, source_revision = excluded.source_revision,
+               updated_at = excluded.updated_at, source_chapter_id = excluded.source_chapter_id",
+        )
+        .bind(&thread.id)
+        .bind(&thread.novel_id)
+        .bind(&thread.title)
+        .bind(&thread.body)
+        .bind(thread.opened_chapter_order)
+        .bind(thread.resolved_chapter_order)
+        .bind(&thread.status)
+        .bind(&thread.source_revision)
+        .bind(thread.now_ms)
+        .bind(thread.now_ms)
+        .bind(&thread.source_chapter_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        Ok(())
+    }
+
     async fn create_volume(&self, volume: NewVolume) -> Result<VolumeSnapshot, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         ensure_novel_exists(&mut tx, &volume.novel_id).await?;
@@ -1315,6 +1414,13 @@ impl NovelRepository for SqliteKernel {
             .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
+        invalidate_story_facts(
+            &mut tx,
+            chapter_id,
+            &format!("{}@v{}", revision_id, version),
+            now_ms,
+        )
+        .await?;
         let content: String = candidate.try_get("content").map_err(map_sql)?;
         let chapter_title: String = sqlx::query_scalar("SELECT title FROM chapter WHERE id = ?")
             .bind(chapter_id)
@@ -1418,6 +1524,45 @@ impl NovelRepository for SqliteKernel {
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }
+}
+
+async fn invalidate_story_facts(
+    tx: &mut crate::db::Tx<'_>,
+    chapter_id: &str,
+    new_revision: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    sqlx::query(
+        "UPDATE character_state SET status = 'superseded', updated_at = ?
+         WHERE source_chapter_id = ? AND status = 'confirmed' AND source_revision != ?",
+    )
+    .bind(now_ms)
+    .bind(chapter_id)
+    .bind(new_revision)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    sqlx::query(
+        "UPDATE timeline_event SET status = 'superseded', updated_at = ?
+         WHERE source_chapter_id = ? AND status = 'confirmed' AND source_revision != ?",
+    )
+    .bind(now_ms)
+    .bind(chapter_id)
+    .bind(new_revision)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    sqlx::query(
+        "UPDATE plot_thread SET status = 'superseded', updated_at = ?
+         WHERE source_chapter_id = ? AND status = 'confirmed' AND source_revision != ?",
+    )
+    .bind(now_ms)
+    .bind(chapter_id)
+    .bind(new_revision)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    Ok(())
 }
 
 async fn sync_chapter_knowledge(

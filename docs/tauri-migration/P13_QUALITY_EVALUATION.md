@@ -45,3 +45,6 @@ P13 adversarial: cases=4 correct=4 mrr=1.00 future_leak=0
 ```
 
 这是小型确定性 fixture，不代表完整 50 章伏笔/不可靠叙述者评测。
+
+
+完整报告见 `P13_ADVERSARIAL_REPORT.md`。

@@ -11,11 +11,19 @@
 - 时间线事件与未回收伏笔按目标章节过滤。
 - 30 章合成测试：目标第 20 章使用“掌门”状态，不使用早期“外门弟子”、不使用未来“死亡”和未来事件；目标第 30 章可看到死亡与大战事实。
 
+已实现写入 API：
+
+- `upsert_character_state`
+- `upsert_timeline_event`
+- `upsert_plot_thread`
+- `list_story_facts`
+- 作者修改正式章节时，旧 source_chapter/Revision 派生事实标记 superseded，Context 不再读取。
+
 仍未完成：
 
-- 写入 Command/UI 与 AI 抽取链路。
+- 记忆管理 Native UI 与 AI 抽取确认链路。
 - proposed / disputed / superseded 状态流转。
-- 作者修改早期章节后的派生事实失效/重核对。
+- 已实现章节修改后的派生事实 superseded；仍缺重新抽取/人工核对 UI。
 - 地点迁移、能力限制、关系变更的完整领域字段。
 - 别名/同名人物解析。
 

@@ -111,4 +111,48 @@ async fn story_memory_respects_chapter_time_and_does_not_use_future_facts() {
         "P13 story-memory: at20=掌门/no-future at30=death+battle facts={} sources=3",
         facts30.len()
     );
+
+    // Writing a confirmed fact, then editing its source chapter, must supersede it.
+    NovelRepository::upsert_character_state(
+        kernel.as_ref(),
+        novel_application::NewCharacterState {
+            id: "s4".into(),
+            character_id: "c1".into(),
+            chapter_order: 18,
+            body: "状态：受伤".into(),
+            source_chapter_id: "ch18".into(),
+            source_revision: "fact-rev1".into(),
+            status: "confirmed".into(),
+            now_ms: 18,
+        },
+    )
+    .await
+    .unwrap();
+    let before_edit = NovelRepository::list_story_facts(kernel.as_ref(), "n", 20)
+        .await
+        .unwrap();
+    assert!(before_edit.iter().any(|fact| fact.body == "状态：受伤"));
+    NovelRepository::save_user_chapter(
+        kernel.as_ref(),
+        novel_application::SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "ch18".into(),
+            expected_version: 0,
+            title: "第18章".into(),
+            content: "第18章正式正文：状态改变。".into(),
+            revision_id: "chapter18-rev1".into(),
+            artifact_id: "chapter18-art".into(),
+            content_sha256: "chapter18-hash".into(),
+            now_ms: 50,
+        },
+    )
+    .await
+    .unwrap();
+    let after_edit = NovelRepository::list_story_facts(kernel.as_ref(), "n", 20)
+        .await
+        .unwrap();
+    assert!(
+        !after_edit.iter().any(|fact| fact.body == "状态：受伤"),
+        "edited chapter facts must be superseded"
+    );
 }

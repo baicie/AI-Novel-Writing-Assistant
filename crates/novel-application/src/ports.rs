@@ -161,6 +161,44 @@ pub struct NewAttempt {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct NewCharacterState {
+    pub id: String,
+    pub character_id: String,
+    pub chapter_order: i32,
+    pub body: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+    pub status: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewTimelineEvent {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_order: i32,
+    pub body: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+    pub status: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewPlotThread {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub body: String,
+    pub opened_chapter_order: i32,
+    pub resolved_chapter_order: Option<i32>,
+    pub status: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+    pub now_ms: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryFactView {
@@ -381,6 +419,9 @@ pub trait NovelRepository: Send + Sync {
         novel_id: &str,
         before_chapter_order: i32,
     ) -> Result<Vec<StoryFactView>, PortError>;
+    async fn upsert_character_state(&self, state: NewCharacterState) -> Result<(), PortError>;
+    async fn upsert_timeline_event(&self, event: NewTimelineEvent) -> Result<(), PortError>;
+    async fn upsert_plot_thread(&self, thread: NewPlotThread) -> Result<(), PortError>;
     async fn get_chapter(
         &self,
         novel_id: &str,

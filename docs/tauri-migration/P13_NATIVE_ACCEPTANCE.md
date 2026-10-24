@@ -48,3 +48,11 @@ Candidate Journal SIGKILL crash + restart 1 passing
 ```
 
 知识库管理 UI 未做 Native 新增/编辑/删除验收，保持 PARTIAL。
+
+
+新增 Tauri 命令但未做 UI：
+
+- upsert_character_state
+- upsert_timeline_event
+- upsert_plot_thread
+- list_story_facts

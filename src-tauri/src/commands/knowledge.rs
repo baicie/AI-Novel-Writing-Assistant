@@ -1,5 +1,6 @@
 use novel_application::{
-    AppError, KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, NewEmbedding, SearchHit,
+    AppError, KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, NewEmbedding,
+    NovelRepository, SearchHit,
 };
 use novel_context::{Lexicon, fts_query, tokenize};
 use serde::Deserialize;
@@ -125,6 +126,128 @@ pub async fn delete_knowledge_document(
     state
         .kernel
         .delete_document(&document_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertCharacterStateRequest {
+    pub id: String,
+    pub character_id: String,
+    pub chapter_order: i32,
+    pub body: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub async fn upsert_character_state(
+    state: State<'_, AppState>,
+    request: UpsertCharacterStateRequest,
+) -> Result<(), AppError> {
+    if !matches!(
+        request.status.as_str(),
+        "confirmed" | "proposed" | "disputed" | "superseded"
+    ) {
+        return Err(AppError::validation("人物状态类型不受支持。"));
+    }
+    state
+        .kernel
+        .upsert_character_state(novel_application::NewCharacterState {
+            id: request.id,
+            character_id: request.character_id,
+            chapter_order: request.chapter_order,
+            body: request.body,
+            source_chapter_id: request.source_chapter_id,
+            source_revision: request.source_revision,
+            status: request.status,
+            now_ms: novel_platform::now_ms(),
+        })
+        .await
+        .map_err(AppError::from)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertTimelineEventRequest {
+    pub id: String,
+    pub novel_id: String,
+    pub chapter_order: i32,
+    pub body: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+    pub status: String,
+}
+
+#[tauri::command]
+pub async fn upsert_timeline_event(
+    state: State<'_, AppState>,
+    request: UpsertTimelineEventRequest,
+) -> Result<(), AppError> {
+    state
+        .kernel
+        .upsert_timeline_event(novel_application::NewTimelineEvent {
+            id: request.id,
+            novel_id: request.novel_id,
+            chapter_order: request.chapter_order,
+            body: request.body,
+            source_chapter_id: request.source_chapter_id,
+            source_revision: request.source_revision,
+            status: request.status,
+            now_ms: novel_platform::now_ms(),
+        })
+        .await
+        .map_err(AppError::from)
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertPlotThreadRequest {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub body: String,
+    pub opened_chapter_order: i32,
+    pub resolved_chapter_order: Option<i32>,
+    pub status: String,
+    pub source_chapter_id: String,
+    pub source_revision: String,
+}
+
+#[tauri::command]
+pub async fn upsert_plot_thread(
+    state: State<'_, AppState>,
+    request: UpsertPlotThreadRequest,
+) -> Result<(), AppError> {
+    state
+        .kernel
+        .upsert_plot_thread(novel_application::NewPlotThread {
+            id: request.id,
+            novel_id: request.novel_id,
+            title: request.title,
+            body: request.body,
+            opened_chapter_order: request.opened_chapter_order,
+            resolved_chapter_order: request.resolved_chapter_order,
+            status: request.status,
+            source_chapter_id: request.source_chapter_id,
+            source_revision: request.source_revision,
+            now_ms: novel_platform::now_ms(),
+        })
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub async fn list_story_facts(
+    state: State<'_, AppState>,
+    novel_id: String,
+    before_chapter_order: i32,
+) -> Result<Vec<novel_application::StoryFactView>, AppError> {
+    state
+        .kernel
+        .list_story_facts(&novel_id, before_chapter_order)
         .await
         .map_err(AppError::from)
 }
