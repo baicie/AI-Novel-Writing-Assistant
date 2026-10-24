@@ -1,6 +1,6 @@
 # P13 Acceptance
 
-基线：`70b03f61`（P13.8/P13.9 测试与文档提交后）。
+基线：`5dbe47e3`。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
@@ -25,6 +25,8 @@ p13_large_benchmark                   1 passed
 p13_scale_baseline                    1 passed
 p13_story_memory                      通过
 cargo test --workspace --exclude novel-http  264 passed, 0 failed（1345.54s）
+clean worktree all-targets --no-run              PASS
+current worktree all-targets                     BLOCKED by preserved untracked integration_runs.rs (不修改)
 p13_adversarial_retrieval             1 passed
 knowledge_lifecycle                   3 passed
 memory-extraction WDIO                1 passing

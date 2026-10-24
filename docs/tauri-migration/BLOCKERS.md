@@ -187,3 +187,5 @@
 - P13.7：Native 知识 CRUD/重建/删除已实现并 WDIO；持久化索引任务、重试计数/next_run_at、重启恢复、归档未完成。
 - P13.8：50 章/50 问题 p13-large-v1 已完成 Lexical 指标；Vector/Hybrid/RRF/Context Policy 对照、人工语义标注、生成质量合同未完成。
 - P13.9：100/500/1000 章 1.4k 字正文与 8×10 并发检索已测；内存峰值、冷启动/预热、真实双窗口、系统输入法未验收。
+
+- 当前工作树的 `cargo test --all-targets` 会编译用户保留的未跟踪 `crates/novel-http/tests/integration_runs.rs`，该文件引用旧测试辅助 API 而失败；按约束不修改/不删除。干净 worktree all-targets 已通过。
