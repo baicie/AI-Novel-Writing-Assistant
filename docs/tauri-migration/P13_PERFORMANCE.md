@@ -68,3 +68,6 @@ Candidate Journal SIGKILL crash + restart 1 passing
 - 新正文立即进入 `chapter:ch500:0`
 - 旧正文 revision 不再命中
 - 与章节保存同一事务完成
+
+
+第 5 轮构建：`.app` 20.72 MiB；DMG 9.3 MiB；audit PASS。
