@@ -75,7 +75,8 @@ async fn fixture(output: String) -> (Arc<SqliteKernel>, MemoryService, String, S
             chapter_id: "ch1".into(),
             expected_version: 0,
             title: "第一章".into(),
-            content: "林动成为掌门。传闻陆沉已死。祖祠封印尚未解除。无名人物出现。".into(),
+            content: "林动成为掌门。林动离开山门。传闻陆沉已死。祖祠封印尚未解除。无名人物出现。"
+                .into(),
             revision_id: "rev1".into(),
             artifact_id: "art1".into(),
             content_sha256: "hash1".into(),
@@ -245,4 +246,49 @@ async fn invalid_model_output_fails_without_candidates() {
     .await
     .unwrap();
     assert_eq!(failed, 1);
+}
+
+#[tokio::test]
+async fn same_character_same_chapter_conflict_requires_manual_resolution() {
+    let conflict_output = serde_json::json!({"facts":[
+        {"factType":"character_state","truthfulness":"narrator_fact","entityName":"林动","value":"林动成为掌门","evidenceQuote":"林动成为掌门","confidence":0.9},
+        {"factType":"character_state","truthfulness":"narrator_fact","entityName":"林动","value":"林动离开山门","evidenceQuote":"林动离开山门","confidence":0.8}
+    ]}).to_string();
+    let (_kernel, service, novel, chapter) = fixture(conflict_output).await;
+    assert!(
+        service
+            .extract(ExtractMemoryInput {
+                command_id: "conflict".into(),
+                novel_id: novel.clone(),
+                chapter_id: chapter.clone(),
+                provider: "mock".into(),
+                model: "mock".into(),
+                endpoint: "https://api.example.com/v1/chat/completions".into(),
+                allow_localhost_http: false,
+                token_budget: Some(512),
+            })
+            .await
+            .is_ok()
+    );
+    let candidates = service.list_candidates(&novel, &chapter).await.unwrap();
+    let first = candidates
+        .iter()
+        .find(|candidate| candidate.value == "林动成为掌门")
+        .unwrap();
+    let second = candidates
+        .iter()
+        .find(|candidate| candidate.value == "林动离开山门")
+        .unwrap();
+    service.confirm(&first.id, first.version).await.unwrap();
+    let conflict = service.confirm(&second.id, second.version).await;
+    assert!(
+        conflict.is_err(),
+        "incompatible same-chapter character state must require manual resolution"
+    );
+    let remaining = service.list_candidates(&novel, &chapter).await.unwrap();
+    assert!(
+        remaining
+            .iter()
+            .any(|candidate| candidate.id == second.id && candidate.status == "proposed")
+    );
 }

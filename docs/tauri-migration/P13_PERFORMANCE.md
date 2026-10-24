@@ -7,14 +7,17 @@
 ```text
 P13 performance:
 chapters=1000
-build_ms=2695
-context_p50_us=18439
-context_p95_us=24364
+chars_min=1412 chars_avg=1415 chars_max=1416
+content_bytes=1414382 revisions=1000 chunks=1199 fts_rows=1199 vectors=0
+build_ms=2581
+context_p50_us=19388
+context_p95_us=19786
 incremental_update_ms=6
-index_200_ms=204
-search_p50_us=166
-search_p95_us=289
-db_mb=1.74
+index_200_ms=118
+search_p50_us=226
+search_p95_us=435
+db_mb=48.62
+parallelism=8
 ```
 
 条件：本机、单进程 SQLite、Mock/合成正文、无并发负载。

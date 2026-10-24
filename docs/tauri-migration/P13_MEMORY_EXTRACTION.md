@@ -89,3 +89,20 @@ cargo test -p novel-application --test p13_memory_extraction
 - 未记录独立 memory invocation/usage 表（job 保留 provider/model/endpoint）。
 - Native 抽取按钮尚未 WDIO。
 - 未接真实付费模型。
+
+
+## Native 抽取 WDIO（本轮）
+
+```text
+test:memory-extraction 1 passing
+```
+
+流程：
+
+1. 创建小说/章节并保存正式正文；
+2. Director 启动；
+3. 点击“从本章提取记忆”；
+4. E2E Mock Provider 返回 timeline 候选；
+5. UI 显示候选；
+6. 点击确认；
+7. `list_story_facts` 返回确认事实。

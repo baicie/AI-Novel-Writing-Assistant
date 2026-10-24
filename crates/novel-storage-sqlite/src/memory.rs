@@ -197,6 +197,26 @@ impl MemoryRepository for SqliteKernel {
             "disputed"
         };
         let fact_id = format!("memory-{}", candidate.id);
+        if candidate.fact_type == "character_state"
+            && let Some(entity_id) = candidate.entity_id.as_deref()
+        {
+            let conflict: Option<String> = sqlx::query_scalar(
+                "SELECT body FROM character_state
+                 WHERE character_id = ? AND chapter_order = ? AND status = 'confirmed' AND body != ?
+                 LIMIT 1",
+            )
+            .bind(entity_id)
+            .bind(chapter_order)
+            .bind(&candidate.value)
+            .fetch_optional(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+            if conflict.is_some() {
+                return Err(PortError::Conflict(
+                    "同一人物在同一剧情位置存在不兼容状态，需人工裁决后再确认。".into(),
+                ));
+            }
+        }
         match candidate.fact_type.as_str() {
             "character_state" => {
                 sqlx::query(

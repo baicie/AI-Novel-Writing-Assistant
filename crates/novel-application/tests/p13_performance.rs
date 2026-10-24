@@ -46,6 +46,7 @@ async fn thousand_chapter_context_and_index_baseline() {
     .await
     .unwrap();
     let create_start = Instant::now();
+    let mut chapter_lengths = Vec::new();
     for order in 1..=1000 {
         let id = format!("ch{order}");
         NovelRepository::create_chapter(
@@ -62,6 +63,11 @@ async fn thousand_chapter_context_and_index_baseline() {
         .await
         .unwrap();
         if order < 1000 {
+            let content = format!(
+                "第{order}章正文。{}事实节点{order}。",
+                "林动在宗门中推进主线，人物关系、地点与长期伏笔持续变化。".repeat(50)
+            );
+            chapter_lengths.push(content.chars().count());
             NovelRepository::save_user_chapter(
                 kernel.as_ref(),
                 novel_application::SaveChapterRecord {
@@ -69,7 +75,7 @@ async fn thousand_chapter_context_and_index_baseline() {
                     chapter_id: id,
                     expected_version: 0,
                     title: format!("第{order}章"),
-                    content: format!("第{order}章正文 林动推进主线 事实{order}"),
+                    content,
                     revision_id: format!("r{order}"),
                     artifact_id: format!("a{order}"),
                     content_sha256: format!("h{order}"),
@@ -191,6 +197,30 @@ async fn thousand_chapter_context_and_index_baseline() {
         .unwrap();
     let db_mb = (page_count * page_size) as f64 / 1_048_576.0;
     let build_ms = create_start.elapsed().as_millis();
+    let total_content_bytes: i64 =
+        sqlx::query_scalar("SELECT COALESCE(SUM(LENGTH(content)),0) FROM chapter_revision")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    let revisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapter_revision")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let chunks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_chunk")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let fts_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM knowledge_fts")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let vectors: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM embedding")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let min_chars = chapter_lengths.iter().min().copied().unwrap_or(0);
+    let max_chars = chapter_lengths.iter().max().copied().unwrap_or(0);
+    let avg_chars = chapter_lengths.iter().sum::<usize>() / chapter_lengths.len().max(1);
     let context_p50 = pct(&mut context_samples, 50);
     let context_p95 = pct(&mut context_samples, 95);
     let search_p50 = pct(&mut search_samples, 50);
@@ -198,6 +228,9 @@ async fn thousand_chapter_context_and_index_baseline() {
     assert!(context_p95 < 2_000_000, "context p95 too slow");
     assert!(search_p95 < 500_000, "search p95 too slow");
     println!(
-        "P13 performance: chapters=1000 build_ms={build_ms} context_p50_us={context_p50} context_p95_us={context_p95} incremental_update_ms={incremental_ms} index_200_ms={index_ms} search_p50_us={search_p50} search_p95_us={search_p95} db_mb={db_mb:.2}"
+        "P13 performance: chapters=1000 chars_min={min_chars} chars_avg={avg_chars} chars_max={max_chars} content_bytes={total_content_bytes} revisions={revisions} chunks={chunks} fts_rows={fts_rows} vectors={vectors} build_ms={build_ms} context_p50_us={context_p50} context_p95_us={context_p95} incremental_update_ms={incremental_ms} index_200_ms={index_ms} search_p50_us={search_p50} search_p95_us={search_p95} db_mb={db_mb:.2} parallelism={}",
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0)
     );
 }

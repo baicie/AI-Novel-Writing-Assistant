@@ -132,3 +132,10 @@ Director 4 passing（上一构建同一 UI 面）
 ```
 
 `.app` 20.74 MiB；DMG 9.3 MiB；audit PASS；Tauri Commands 75。
+
+
+第 9 轮新增：
+
+```text
+test:memory-extraction 1 passing
+```
