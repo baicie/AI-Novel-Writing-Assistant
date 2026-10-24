@@ -21,3 +21,10 @@ knowledge_lifecycle
 - 无后台调度；
 - 无应用重启恢复任务；
 - 无 Native 编辑知识条目 CAS。
+
+
+## Native 重试入口
+
+- 知识索引面板显示非 ready 文档；
+- “重建索引”调用 `retry_knowledge_document`；
+- 未做该按钮 WDIO。

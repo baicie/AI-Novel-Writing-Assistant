@@ -56,6 +56,7 @@ fn main() {
         "search_knowledge_vector",
         "delete_knowledge_document",
         "retry_knowledge_document",
+        "get_knowledge_document",
         "upsert_character_state",
         "upsert_timeline_event",
         "upsert_plot_thread",

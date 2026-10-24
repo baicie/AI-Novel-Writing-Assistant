@@ -846,6 +846,15 @@ export function retryKnowledgeDocument(documentId: string): Promise<boolean> {
   return invoke("retry_knowledge_document", { documentId });
 }
 
+export interface KnowledgeDocumentBody {
+  id: string; novelId: string; ownerType: string; title: string; body: string;
+  sourceRevision?: string | null; indexStatus: string; indexVersion: number;
+}
+
+export function getKnowledgeDocument(documentId: string): Promise<KnowledgeDocumentBody | null> {
+  return invoke("get_knowledge_document", { documentId });
+}
+
 export function deleteKnowledgeDocument(documentId: string): Promise<boolean> {
   return invoke("delete_knowledge_document", { documentId });
 }

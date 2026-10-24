@@ -215,6 +215,30 @@ impl KnowledgeRepository for SqliteKernel {
         Ok(true)
     }
 
+    async fn get_document_body(
+        &self,
+        document_id: &str,
+    ) -> Result<Option<novel_application::KnowledgeDocumentBody>, PortError> {
+        let row = sqlx::query(
+            "SELECT id, novel_id, owner_type, title, body, source_revision, index_status, index_version
+             FROM knowledge_document WHERE id = ?",
+        ).bind(document_id).fetch_optional(&self.pool).await.map_err(map_sql)?;
+        row.as_ref()
+            .map(|row| {
+                Ok(novel_application::KnowledgeDocumentBody {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    owner_type: row.try_get("owner_type").map_err(map_sql)?,
+                    title: row.try_get("title").map_err(map_sql)?,
+                    body: row.try_get("body").map_err(map_sql)?,
+                    source_revision: row.try_get("source_revision").map_err(map_sql)?,
+                    index_status: row.try_get("index_status").map_err(map_sql)?,
+                    index_version: row.try_get("index_version").map_err(map_sql)?,
+                })
+            })
+            .transpose()
+    }
+
     async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError> {
         let rows = sqlx::query(
             "SELECT id, novel_id, owner_type, title, version, index_status, created_at

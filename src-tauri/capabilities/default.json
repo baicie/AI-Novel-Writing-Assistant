@@ -63,6 +63,7 @@
     "allow-search-knowledge-vector",
 "allow-delete-knowledge-document",
 "allow-retry-knowledge-document",
+"allow-get-knowledge-document",
 "allow-upsert-character-state",
     "allow-upsert-timeline-event",
     "allow-upsert-plot-thread",

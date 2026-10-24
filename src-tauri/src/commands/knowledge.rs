@@ -363,3 +363,15 @@ pub async fn update_memory_candidate_value(
         .update_value(&candidate_id, expected_version, &value)
         .await
 }
+
+#[tauri::command]
+pub async fn get_knowledge_document(
+    state: State<'_, AppState>,
+    document_id: String,
+) -> Result<Option<novel_application::KnowledgeDocumentBody>, AppError> {
+    state
+        .kernel
+        .get_document_body(&document_id)
+        .await
+        .map_err(AppError::from)
+}

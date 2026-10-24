@@ -139,3 +139,10 @@ Director 4 passing（上一构建同一 UI 面）
 ```text
 test:memory-extraction 1 passing
 ```
+
+
+第 10 轮新增：
+
+```text
+test:knowledge 1 passing（新增 / 编辑 / 删除）
+```

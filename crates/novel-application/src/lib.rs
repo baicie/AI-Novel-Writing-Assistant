@@ -45,15 +45,16 @@ pub use knowledge::assemble_context;
 pub use memory::{ExtractMemoryInput, MemoryService};
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
-    DeleteChapterRecord, FaultInjector, Ids, KnowledgeRepository, LeaseFence, LookupRepository,
-    MemoryCandidateView, MemoryExtractionJobView, MemoryRepository, ModelSecrets, NewArtifact,
-    NewAttempt, NewCandidate, NewChapter, NewCharacter, NewCharacterState, NewDocument,
-    NewEmbedding, NewInvocation, NewMemoryCandidate, NewMemoryJob, NewNovel, NewPlotThread,
-    NewQualityDebt, NewReviewOccurrence, NewTimelineEvent, NewVolume, NewWorld, NoFault,
-    NoModelSecrets, NovelRepository, OpenRunRecord, PromoteOutcome, RetrievalTrace,
-    SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord, SearchHit,
-    StoredEvent, StoryFactView, SystemClock, TaskCenterRepository, UpdateChapterMetaRecord,
-    UpdateVolumeRecord, UpdateWorldFields, UuidIds, WorkflowRepository, WorldRepository,
+    DeleteChapterRecord, FaultInjector, Ids, KnowledgeDocumentBody, KnowledgeRepository,
+    LeaseFence, LookupRepository, MemoryCandidateView, MemoryExtractionJobView, MemoryRepository,
+    ModelSecrets, NewArtifact, NewAttempt, NewCandidate, NewChapter, NewCharacter,
+    NewCharacterState, NewDocument, NewEmbedding, NewInvocation, NewMemoryCandidate, NewMemoryJob,
+    NewNovel, NewPlotThread, NewQualityDebt, NewReviewOccurrence, NewTimelineEvent, NewVolume,
+    NewWorld, NoFault, NoModelSecrets, NovelRepository, OpenRunRecord, PromoteOutcome,
+    RetrievalTrace, SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord,
+    SearchHit, StoredEvent, StoryFactView, SystemClock, TaskCenterRepository,
+    UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds, WorkflowRepository,
+    WorldRepository,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

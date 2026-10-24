@@ -359,6 +359,19 @@ pub struct CandidateBody {
     pub content_sha256: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeDocumentBody {
+    pub id: String,
+    pub novel_id: String,
+    pub owner_type: String,
+    pub title: String,
+    pub body: String,
+    pub source_revision: Option<String>,
+    pub index_status: String,
+    pub index_version: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewDocument {
     pub id: String,
@@ -971,6 +984,10 @@ pub trait KnowledgeRepository: Send + Sync {
     async fn delete_document(&self, document_id: &str) -> Result<bool, PortError>;
     /// Rebuild a document whose previous index attempt failed or was interrupted.
     async fn retry_index_document(&self, document_id: &str) -> Result<bool, PortError>;
+    async fn get_document_body(
+        &self,
+        document_id: &str,
+    ) -> Result<Option<KnowledgeDocumentBody>, PortError>;
     async fn list_documents(&self) -> Result<Vec<KnowledgeDocumentSummary>, PortError>;
     async fn search_keyword(
         &self,

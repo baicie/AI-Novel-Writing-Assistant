@@ -11,6 +11,8 @@ import {
   confirmMemoryCandidate,
   createCharacter,
   deferMemoryCandidate,
+  deleteKnowledgeDocument,
+  indexKnowledge,
   extractMemory,
   listMemoryCandidates,
   rejectMemoryCandidate,
@@ -30,6 +32,7 @@ import {
   saveCandidateEditDraft,
   rejectRun,
   getActiveRun,
+  getKnowledgeDocument,
   getModelSetup,
   getNovel,
   getRunDetail,
@@ -122,6 +125,10 @@ export default function TauriDirectorPage() {
   const [memoryExtracting, setMemoryExtracting] = useState(false);
   const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidateView[]>([]);
   const [memoryCandidateBusy, setMemoryCandidateBusy] = useState<string | null>(null);
+  const [knowledgeTitle, setKnowledgeTitle] = useState("");
+  const [knowledgeBody, setKnowledgeBody] = useState("");
+  const [knowledgeEditingId, setKnowledgeEditingId] = useState("");
+  const [knowledgeFilter, setKnowledgeFilter] = useState("");
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -235,6 +242,24 @@ export default function TauriDirectorPage() {
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "重建索引失败，请重试。");
     }
+  };
+  const saveKnowledge = async () => {
+    if (!knowledgeTitle.trim() || !knowledgeBody.trim()) return;
+    try {
+      await indexKnowledge({
+        id: knowledgeEditingId || `ui-knowledge-${Date.now()}`, novelId,
+        ownerType: "document", title: knowledgeTitle.trim(), body: knowledgeBody.trim(),
+      });
+      setKnowledgeTitle(""); setKnowledgeBody(""); setKnowledgeEditingId("");
+      await knowledgeQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "保存知识条目失败，请重试。");
+    }
+  };
+  const removeKnowledge = async (id: string) => {
+    if (!window.confirm("删除这条知识并清理索引？")) return;
+    try { await deleteKnowledgeDocument(id); await knowledgeQuery.refetch(); }
+    catch (cause: unknown) { setError(cause instanceof Error ? cause.message : "删除知识条目失败。"); }
   };
   const storyFactsQuery = useQuery<StoryFactView[]>({
     queryKey: ["tauri-director", novelId, "story-facts", detail?.chapterId ?? "", targetChapterOrder],
@@ -645,6 +670,24 @@ export default function TauriDirectorPage() {
                   <Button data-testid="director-retry-knowledge" variant="outline" onClick={() => void retryIndex(document.id)}>重建索引</Button>
                 </li>)}
               </ul> : <p className="text-xs text-muted-foreground">本小说的知识索引均处于可用状态。</p>}
+              <div className="space-y-2 border-t border-border/50 pt-3">
+                <input data-testid="director-knowledge-filter" className="w-full rounded-md border border-input bg-background p-2 text-xs" value={knowledgeFilter} onChange={(event) => setKnowledgeFilter(event.target.value)} placeholder="按标题筛选知识条目" />
+                <ul className="max-h-52 space-y-1 overflow-y-auto text-xs">
+                  {novelKnowledgeDocs.filter(document => !knowledgeFilter.trim() || document.title.includes(knowledgeFilter.trim())).map(document => <li key={document.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
+                    <span>{document.title} · v{document.version} · {document.indexStatus}</span>
+                    <span className="flex gap-1">
+                      <Button data-testid="director-edit-knowledge" variant="outline" onClick={() => { void getKnowledgeDocument(document.id).then(documentBody => { if (documentBody) { setKnowledgeEditingId(documentBody.id); setKnowledgeTitle(documentBody.title); setKnowledgeBody(documentBody.body); } }); }}>编辑</Button>
+                      <Button data-testid="director-delete-knowledge" variant="outline" onClick={() => void removeKnowledge(document.id)}>删除</Button>
+                    </span>
+                  </li>)}
+                </ul>
+                <input data-testid="director-knowledge-title" className="w-full rounded-md border border-input bg-background p-2 text-xs" value={knowledgeTitle} onChange={(event) => setKnowledgeTitle(event.target.value)} placeholder="知识标题" />
+                <textarea data-testid="director-knowledge-body" className="min-h-16 w-full rounded-md border border-input bg-background p-2 text-xs" value={knowledgeBody} onChange={(event) => setKnowledgeBody(event.target.value)} placeholder="知识正文（用于检索与上下文）" />
+                <div className="flex gap-2">
+                  <Button data-testid="director-save-knowledge" variant="outline" disabled={!knowledgeTitle.trim() || !knowledgeBody.trim()} onClick={() => void saveKnowledge()}>{knowledgeEditingId ? "保存修改" : "新增知识"}</Button>
+                  {knowledgeEditingId ? <Button variant="outline" onClick={() => { setKnowledgeEditingId(""); setKnowledgeTitle(""); setKnowledgeBody(""); }}>取消编辑</Button> : null}
+                </div>
+              </div>
             </section>
 
             <section data-testid="director-story-memory" className="space-y-2 rounded-md bg-muted/20 p-4">
