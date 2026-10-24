@@ -13,7 +13,12 @@ import {
   listCandidateEditDrafts,
   listReviewOccurrences,
   listStoryFacts,
+  listCharacters,
+  retryKnowledgeDocument,
+  upsertCharacterState,
   regenerateRun,
+  listKnowledgeDocuments,
+  upsertPlotThread,
   upsertTimelineEvent,
   saveCandidateEditDraft,
   rejectRun,
@@ -99,6 +104,12 @@ export default function TauriDirectorPage() {
   const [debtHistory, setDebtHistory] = useState<Record<string, ReviewOccurrenceView[]>>({});
   const [memoryBody, setMemoryBody] = useState("");
   const [memorySaving, setMemorySaving] = useState(false);
+  const [plotTitle, setPlotTitle] = useState("");
+  const [plotBody, setPlotBody] = useState("");
+  const [plotSaving, setPlotSaving] = useState(false);
+  const [stateCharacterId, setStateCharacterId] = useState("");
+  const [stateBody, setStateBody] = useState("");
+  const [stateSaving, setStateSaving] = useState(false);
   const candidateClientId = useRef<string>("");
   const candidateDraftRevision = useRef(0);
   if (!candidateClientId.current) {
@@ -112,6 +123,40 @@ export default function TauriDirectorPage() {
   const mounted = useRef(true);
 
   useEffect(() => () => { mounted.current = false; }, []);
+
+  const saveCharacterState = async () => {
+    if (!memoryPreviousChapter || !stateCharacterId || !stateBody.trim()) return;
+    setStateSaving(true);
+    try {
+      await upsertCharacterState({
+        id: `ui-state-${Date.now()}`, characterId: stateCharacterId,
+        chapterOrder: memoryPreviousChapter.sortOrder, body: stateBody.trim(),
+        sourceChapterId: memoryPreviousChapter.id, sourceRevision: `ui@${Date.now()}`,
+        status: "confirmed",
+      });
+      setStateBody("");
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "记录人物状态失败，请重试。");
+    } finally { setStateSaving(false); }
+  };
+
+  const savePlotMemory = async () => {
+    if (!memoryPreviousChapter || !plotTitle.trim() || !plotBody.trim()) return;
+    setPlotSaving(true);
+    try {
+      await upsertPlotThread({
+        id: `ui-plot-${Date.now()}`, novelId, title: plotTitle.trim(), body: plotBody.trim(),
+        openedChapterOrder: memoryPreviousChapter.sortOrder, resolvedChapterOrder: null,
+        status: "open", sourceChapterId: memoryPreviousChapter.id,
+        sourceRevision: `ui@${Date.now()}`,
+      });
+      setPlotTitle(""); setPlotBody("");
+      await storyFactsQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "记录伏笔失败，请重试。");
+    } finally { setPlotSaving(false); }
+  };
 
   const novelQuery = useQuery({ queryKey: ["tauri-director", novelId, "novel"], queryFn: () => getNovel(novelId), enabled: !!novelId });
   const chaptersQuery = useQuery({ queryKey: ["tauri-director", novelId, "chapters"], queryFn: () => listChapters(novelId), enabled: !!novelId });
@@ -142,6 +187,27 @@ export default function TauriDirectorPage() {
       setError(cause instanceof Error ? cause.message : "记录时间线事实失败，请重试。");
     } finally {
       setMemorySaving(false);
+    }
+  };
+  const charactersQuery = useQuery({
+    queryKey: ["tauri-director", novelId, "characters-memory"],
+    queryFn: () => listCharacters(novelId),
+    enabled: !!novelId,
+  });
+  const knowledgeQuery = useQuery({
+    queryKey: ["tauri-director", novelId, "knowledge-index"],
+    queryFn: listKnowledgeDocuments,
+    enabled: !!novelId,
+    refetchInterval: 10000,
+  });
+  const novelKnowledgeDocs = (knowledgeQuery.data ?? []).filter(document => document.novelId === novelId);
+  const buildingKnowledgeDocs = novelKnowledgeDocs.filter(document => document.indexStatus !== "ready");
+  const retryIndex = async (id: string) => {
+    try {
+      await retryKnowledgeDocument(id);
+      await knowledgeQuery.refetch();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "重建索引失败，请重试。");
     }
   };
   const storyFactsQuery = useQuery<StoryFactView[]>({
@@ -498,6 +564,16 @@ export default function TauriDirectorPage() {
               <h2 className="text-sm font-semibold">运行历史</h2>
               <ol className="mt-3 space-y-2 text-xs">{(historyQuery.data ?? []).slice(0, 8).map(run => <li key={run.id} className="flex items-center justify-between gap-2"><span className={run.id === runId ? "font-medium text-foreground" : "text-muted-foreground"}>{statusLabel(run.state)} · {run.chapterTitle || "未命名章节"}</span><span className="text-muted-foreground">{new Date(run.updatedAt).toLocaleDateString()}</span></li>)}</ol>
             </section>
+            <section data-testid="director-knowledge-health" className="space-y-2 rounded-md bg-muted/20 p-4">
+              <h2 className="text-sm font-semibold">知识索引</h2>
+              {buildingKnowledgeDocs.length ? <ul className="space-y-2 text-xs">
+                {buildingKnowledgeDocs.map(document => <li key={document.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
+                  <span>{document.title} · {document.indexStatus}</span>
+                  <Button data-testid="director-retry-knowledge" variant="outline" onClick={() => void retryIndex(document.id)}>重建索引</Button>
+                </li>)}
+              </ul> : <p className="text-xs text-muted-foreground">本小说的知识索引均处于可用状态。</p>}
+            </section>
+
             <section data-testid="director-story-memory" className="space-y-2 rounded-md bg-muted/20 p-4">
               <h2 className="text-sm font-semibold">长篇记忆</h2>
               {(storyFactsQuery.data ?? []).length ? <ul className="space-y-2 text-xs">
@@ -512,6 +588,21 @@ export default function TauriDirectorPage() {
                 <textarea data-testid="director-memory-input" className="min-h-20 w-full rounded-md border border-input bg-background p-2 text-sm" value={memoryBody} onChange={(event) => setMemoryBody(event.target.value)} placeholder="例如：林动在祖祠发现封印。" />
                 <Button data-testid="director-save-memory" type="submit" variant="outline" disabled={memorySaving || !memoryBody.trim()}>{memorySaving ? "保存中…" : "记录时间线"}</Button>
               </form> : <p className="text-xs text-muted-foreground">当前章节之前没有可绑定来源的正式章节。</p>}
+              {memoryPreviousChapter ? <form className="space-y-2 border-t border-border/50 pt-3" onSubmit={(event) => { event.preventDefault(); void savePlotMemory(); }}>
+                <p className="text-xs text-muted-foreground">记录伏笔（作者确认）</p>
+                <input data-testid="director-plot-title" className="w-full rounded-md border border-input bg-background p-2 text-sm" value={plotTitle} onChange={(event) => setPlotTitle(event.target.value)} placeholder="伏笔标题" />
+                <textarea data-testid="director-plot-body" className="min-h-16 w-full rounded-md border border-input bg-background p-2 text-sm" value={plotBody} onChange={(event) => setPlotBody(event.target.value)} placeholder="尚未解决的线索" />
+                <Button data-testid="director-save-plot" type="submit" variant="outline" disabled={plotSaving || !plotTitle.trim() || !plotBody.trim()}>{plotSaving ? "保存中…" : "记录伏笔"}</Button>
+              </form> : null}
+              {memoryPreviousChapter ? <form className="space-y-2 border-t border-border/50 pt-3" onSubmit={(event) => { event.preventDefault(); void saveCharacterState(); }}>
+                <p className="text-xs text-muted-foreground">记录人物状态（作者确认）</p>
+                <select data-testid="director-state-character" className="w-full rounded-md border border-input bg-background p-2 text-sm" value={stateCharacterId} onChange={(event) => setStateCharacterId(event.target.value)}>
+                  <option value="">选择人物</option>
+                  {(charactersQuery.data ?? []).map(character => <option key={character.id} value={character.id}>{character.name}</option>)}
+                </select>
+                <textarea data-testid="director-state-body" className="min-h-16 w-full rounded-md border border-input bg-background p-2 text-sm" value={stateBody} onChange={(event) => setStateBody(event.target.value)} placeholder="例如：林动成为掌门。" />
+                <Button data-testid="director-save-state" type="submit" variant="outline" disabled={stateSaving || !stateCharacterId || !stateBody.trim()}>{stateSaving ? "保存中…" : "记录人物状态"}</Button>
+              </form> : null}
             </section>
 
             <section className="rounded-md bg-muted/20 p-4 text-xs text-muted-foreground">

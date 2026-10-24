@@ -172,6 +172,20 @@ export function listStoryFacts(input: { novelId: string; beforeChapterOrder: num
   return invoke("list_story_facts", input);
 }
 
+export function upsertCharacterState(input: {
+  id: string; characterId: string; chapterOrder: number; body: string;
+  sourceChapterId: string; sourceRevision: string; status: string;
+}): Promise<void> {
+  return invoke("upsert_character_state", { request: input });
+}
+
+export function upsertPlotThread(input: {
+  id: string; novelId: string; title: string; body: string; openedChapterOrder: number;
+  resolvedChapterOrder?: number | null; status: string; sourceChapterId: string; sourceRevision: string;
+}): Promise<void> {
+  return invoke("upsert_plot_thread", { request: input });
+}
+
 export function upsertTimelineEvent(input: {
   id: string; novelId: string; chapterOrder: number; body: string;
   sourceChapterId: string; sourceRevision: string; status: string;
@@ -782,6 +796,14 @@ export function listKnowledgeDocuments(): Promise<KnowledgeDocumentSummary[]> {
 
 export function indexKnowledge(input: IndexKnowledgeInput): Promise<void> {
   return invoke("index_knowledge", { request: input });
+}
+
+export function retryKnowledgeDocument(documentId: string): Promise<boolean> {
+  return invoke("retry_knowledge_document", { documentId });
+}
+
+export function deleteKnowledgeDocument(documentId: string): Promise<boolean> {
+  return invoke("delete_knowledge_document", { documentId });
 }
 
 export function searchKnowledge(input: {

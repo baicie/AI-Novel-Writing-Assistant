@@ -76,3 +76,14 @@ cargo test -p novel-storage-sqlite --test knowledge_lifecycle
 Tauri Command：`retry_knowledge_document`。
 
 测试：`failed_index_attempt_can_be_retried` PASS。
+
+
+## Native 索引健康面板（第 5 轮）
+
+导演页新增“知识索引”：
+
+- 读取 `list_knowledge_documents`；
+- 显示本小说非 ready 文档；
+- 提供“重建索引”按钮；
+- 调用 `retry_knowledge_document`；
+- 成功后刷新。

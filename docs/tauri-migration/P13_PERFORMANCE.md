@@ -54,3 +54,6 @@ Candidate Journal SIGKILL crash + restart 1 passing
 
 
 最终构建（第 4 轮）：`.app` 20.72 MiB；DMG 9.3 MiB；Tauri release audit PASS。
+
+
+1000 章 build_ms 已包含章节正式修订同步写入知识索引的耗时。
