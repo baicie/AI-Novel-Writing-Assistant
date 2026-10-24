@@ -45,10 +45,16 @@ function outputFor(body, scenario) {
   if (body.includes("STEP:volume_strategy")) return JSON.stringify(volume);
   if (body.includes("STEP:chapter_list")) return JSON.stringify(chapters);
   if (body.includes("STEP:memory_extraction")) {
-    return JSON.stringify({ facts: [{
-      factType: "timeline_event", truthfulness: "narrator_fact", entityName: "林动",
-      value: "E2E 记忆抽取事实：林动进入山门。", evidenceQuote: "林动踏上山门石阶", confidence: 0.9
-    }] });
+    return JSON.stringify({ facts: [
+      {
+        factType: "timeline_event", truthfulness: "narrator_fact", entityName: "林动",
+        value: "E2E 记忆抽取事实：林动进入山门。", evidenceQuote: "林动踏上山门石阶", confidence: 0.9
+      },
+      {
+        factType: "timeline_event", truthfulness: "narrator_fact", entityName: "林动",
+        value: "E2E 冲突候选：林动离开山门。", evidenceQuote: "林动踏上山门石阶", confidence: 0.7
+      }
+    ] });
   }
   if (body.includes("STEP:consistency_review")) {
     return scenario === "issues"

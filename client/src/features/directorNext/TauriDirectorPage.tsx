@@ -372,7 +372,7 @@ export default function TauriDirectorPage() {
         allowLocalhostHttp: model.allowLocalhostHttp, tokenBudget: null,
       });
       setMemoryCandidates(await listMemoryCandidates({ novelId, chapterId: detail.chapterId }));
-      await refreshConflicts();
+      setMemoryConflicts(await syncMemoryConflicts({ novelId }));
       await storyFactsQuery.refetch();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "记忆抽取失败，请检查章节正式正文与模型配置。");
