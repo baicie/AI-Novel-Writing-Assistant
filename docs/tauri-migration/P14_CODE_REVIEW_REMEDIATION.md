@@ -115,3 +115,11 @@ MemoryService::resolve_conflict()
 
 P0 冲突原子性、知识来源授权/跨小说、Job fencing 已实际修复并有测试。  
 P14.0 整体仍是 PARTIAL，剩余集中在自动 enqueue、真实 SIGKILL/Native 和完整产品旅程。
+
+
+## 2026-10-25 03:45 追加
+
+- G1：新增 decision trigger 故障注入，验证 fact+decision 全事务回滚（10 tests）。
+- G2：新增进程内 index 写锁 + ready CAS + 并发 v2/v3 测试（3 tests）。
+- G3：章节保存自动记录 succeeded job；手动 retry reset；空 sourceRevision 兼容。
+- G4/G5 仍未完成；最终 Native crash/restart 组未通过。

@@ -97,10 +97,10 @@ Index Retry          未完成 WDIO
 
 ```text
 cargo test --workspace --exclude novel-http
-275 passed, 0 failed, 688.70s
+278 passed, 0 failed, 754.51s
 
 clean worktree cargo test --workspace --all-targets
-334 passed, 0 failed（实际执行）
+337 passed, 0 failed（实际执行）
 
 pnpm test
 186 passed, 0 failed
@@ -134,3 +134,17 @@ PASS
 3. 两并发 index 写与 building 恢复。
 4. 真实 Embedding/Provider 评测（需预算授权）。
 5. Native 历史恢复、多章、范围导出、任务中心。
+
+
+## 2026-10-25 03:45 最终快照
+
+- HEAD：`27c7b29d`（本地领先 origin 5，未 Push）
+- Rust：278 passed / 0 failed / 754.51s
+- clean all-targets：337 passed / 0 failed
+- Frontend：186 passed；typecheck/build PASS
+- fmt/clippy：PASS
+- Production：`.app` 21.40 MiB；DMG 9.5 MiB；audit PASS；Commands 89/89/89
+- Native：Director 4、conflict 1、memory-extraction 1、knowledge 1、memory 1
+- Native crash/restart 组：因两进程共享数据目录/状态文件或主动 SIGKILL 断连未通过，未标记产品通过
+- G3 自动 Job：章节保存现在记录 succeeded job；自动 worker 仍缺失
+- G4/G5：PARTIAL/NOT_STARTED
