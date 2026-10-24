@@ -3,7 +3,9 @@ mod state;
 
 use std::sync::Arc;
 
-use novel_application::{Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds};
+use novel_application::{
+    IndexJobRepository, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
+};
 use novel_llm::OpenAiCompatibleProvider;
 
 #[cfg(feature = "e2e")]
@@ -98,12 +100,21 @@ pub fn run() {
                 Ok::<_, String>((kernel, runtime))
             })?;
 
+            let recovery_kernel = kernel.clone();
             app.manage(AppState {
                 runtime: runtime.clone(),
                 kernel,
                 secrets,
                 llm,
                 cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
+            });
+
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let now = novel_platform::now_ms();
+                    let _ = recovery_kernel.recover_expired_index_jobs(now).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
             });
 
             let worker = runtime.clone();

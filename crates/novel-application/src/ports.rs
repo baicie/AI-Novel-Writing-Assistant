@@ -238,6 +238,7 @@ pub struct IndexJobView {
     pub status: String,
     pub attempt_count: i64,
     pub max_attempts: i64,
+    pub claim_epoch: i64,
     pub next_run_at: i64,
     pub last_error_category: Option<String>,
     pub last_error: Option<String>,
@@ -576,6 +577,7 @@ pub trait MemoryRepository: Send + Sync {
         conflict_id: &str,
         expected_version: i64,
         command_id: &str,
+        request_hash: &str,
         decision: &str,
         chosen_candidate_id: Option<&str>,
         reason: &str,
@@ -603,15 +605,25 @@ pub trait IndexJobRepository: Send + Sync {
         &self,
         job_id: &str,
         owner: &str,
+        claim_epoch: i64,
         now_ms: i64,
     ) -> Result<(), PortError>;
     async fn fail_index_job(
         &self,
         job_id: &str,
         owner: &str,
+        claim_epoch: i64,
         category: &str,
         error: &str,
         next_run_at: i64,
+        now_ms: i64,
+    ) -> Result<IndexJobView, PortError>;
+    async fn mark_index_job_obsolete(
+        &self,
+        job_id: &str,
+        owner: &str,
+        claim_epoch: i64,
+        reason: &str,
         now_ms: i64,
     ) -> Result<IndexJobView, PortError>;
     async fn recover_expired_index_jobs(&self, now_ms: i64)

@@ -1,4 +1,6 @@
-use novel_application::{IndexJobRepository, NewIndexJob, NewNovel, NovelRepository};
+use novel_application::{
+    IndexJobRepository, KnowledgeRepository, NewDocument, NewIndexJob, NewNovel, NovelRepository,
+};
 use novel_storage_sqlite::SqliteKernel;
 
 async fn fixture() -> (tempfile::TempDir, SqliteKernel) {
@@ -13,6 +15,27 @@ async fn fixture() -> (tempfile::TempDir, SqliteKernel) {
             title: "索引任务".into(),
             description: String::new(),
             now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let body = "索引来源正文。".to_string();
+    KnowledgeRepository::index_document(
+        &kernel,
+        NewDocument {
+            id: "ch1".into(),
+            novel_id: "n".into(),
+            owner_type: "document".into(),
+            title: "ch1".into(),
+            body: body.clone(),
+            terms: novel_context::fts_query(&novel_context::tokenize(
+                &body,
+                &novel_context::Lexicon::default(),
+            )),
+            created_at: 1,
+            source_revision: Some("rev-1".into()),
+            source_content_hash: Some("hash-1".into()),
+            embedding: None,
         },
     )
     .await
@@ -63,12 +86,12 @@ async fn enqueue_is_idempotent_and_claim_has_execution_lease() {
     );
     assert!(
         kernel
-            .complete_index_job(&first.id, "worker-b", 22)
+            .complete_index_job(&first.id, "worker-b", claimed.claim_epoch, 22)
             .await
             .is_err()
     );
     kernel
-        .complete_index_job(&first.id, "worker-a", 23)
+        .complete_index_job(&first.id, "worker-a", claimed.claim_epoch, 23)
         .await
         .unwrap();
     let jobs = kernel.list_index_jobs("n").await.unwrap();
@@ -88,7 +111,15 @@ async fn failure_backoff_recovery_and_max_attempts_are_persisted() {
         .unwrap()
         .unwrap();
     let failed = kernel
-        .fail_index_job(&queued.id, "worker-a", "index_error", "boom", 2_000, 30)
+        .fail_index_job(
+            &queued.id,
+            "worker-a",
+            claimed.claim_epoch,
+            "index_error",
+            "boom",
+            2_000,
+            30,
+        )
         .await
         .unwrap();
     assert_eq!(failed.status, "retry_wait");
@@ -115,6 +146,7 @@ async fn failure_backoff_recovery_and_max_attempts_are_persisted() {
         .fail_index_job(
             &queued.id,
             "worker-c",
+            claimed.claim_epoch,
             "index_error",
             "boom-2",
             10_000,
@@ -124,4 +156,67 @@ async fn failure_backoff_recovery_and_max_attempts_are_persisted() {
         .unwrap();
     assert_eq!(exhausted.status, "failed");
     assert_eq!(exhausted.attempt_count, 2);
+}
+
+#[tokio::test]
+async fn stale_epoch_and_stale_source_revision_cannot_complete() {
+    let (_dir, kernel) = fixture().await;
+    let queued = kernel
+        .enqueue_index_job(job("j1", "cmd-1", 10))
+        .await
+        .unwrap();
+    let first = kernel
+        .claim_index_job(&queued.id, "worker-a", 1_000, 20)
+        .await
+        .unwrap()
+        .unwrap();
+    kernel.recover_expired_index_jobs(2_000).await.unwrap();
+    let second = kernel
+        .claim_index_job(&queued.id, "worker-b", 5_000, 3_000)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(second.claim_epoch > first.claim_epoch);
+    assert!(
+        kernel
+            .complete_index_job(&queued.id, "worker-a", first.claim_epoch, 4_000)
+            .await
+            .is_err()
+    );
+    // Source revision changed after the job was claimed: the job is obsolete for completion.
+    let mut newer = novel_application::NewDocument {
+        id: "ch1".into(),
+        novel_id: "n".into(),
+        owner_type: "document".into(),
+        title: "ch1".into(),
+        body: "索引来源正文 v2。".into(),
+        terms: novel_context::fts_query(&novel_context::tokenize(
+            "索引来源正文 v2",
+            &novel_context::Lexicon::default(),
+        )),
+        created_at: 2,
+        source_revision: Some("rev-2".into()),
+        source_content_hash: Some("hash-2".into()),
+        embedding: None,
+    };
+    KnowledgeRepository::index_document(&kernel, newer)
+        .await
+        .unwrap();
+    assert!(
+        kernel
+            .complete_index_job(&queued.id, "worker-b", second.claim_epoch, 6_000)
+            .await
+            .is_err()
+    );
+    let obsolete = kernel
+        .mark_index_job_obsolete(
+            &queued.id,
+            "worker-b",
+            second.claim_epoch,
+            "revision changed",
+            7_000,
+        )
+        .await
+        .unwrap();
+    assert_eq!(obsolete.status, "obsolete");
 }

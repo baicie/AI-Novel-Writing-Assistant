@@ -12,8 +12,8 @@ impl IndexJobRepository for SqliteKernel {
         sqlx::query(
             "INSERT INTO knowledge_index_job
                (id, command_id, novel_id, source_type, source_id, source_revision, index_version,
-                status, attempt_count, max_attempts, next_run_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?)
+                status, attempt_count, max_attempts, claim_epoch, next_run_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, 0, ?, ?, ?)
              ON CONFLICT(command_id) DO NOTHING",
         )
         .bind(&job.id)
@@ -32,7 +32,7 @@ impl IndexJobRepository for SqliteKernel {
         .map_err(map_sql)?;
         let row = sqlx::query(
             "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
-                    attempt_count, max_attempts, next_run_at, last_error_category, last_error,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                     created_at, updated_at
              FROM knowledge_index_job WHERE command_id = ?",
         )
@@ -46,7 +46,7 @@ impl IndexJobRepository for SqliteKernel {
     async fn list_index_jobs(&self, novel_id: &str) -> Result<Vec<IndexJobView>, PortError> {
         let rows = sqlx::query(
             "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
-                    attempt_count, max_attempts, next_run_at, last_error_category, last_error,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                     created_at, updated_at
              FROM knowledge_index_job WHERE novel_id = ?
              ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'retry_wait' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,
@@ -64,7 +64,8 @@ impl IndexJobRepository for SqliteKernel {
     ) -> Result<Option<IndexJobView>, PortError> {
         let result = sqlx::query(
             "UPDATE knowledge_index_job
-             SET status = 'running', lease_owner = ?, lease_until = ?, updated_at = ?
+             SET status = 'running', lease_owner = ?, lease_until = ?, claim_epoch = claim_epoch + 1,
+                 updated_at = ?
              WHERE id = ? AND status IN ('pending','retry_wait') AND next_run_at <= ?",
         )
         .bind(owner)
@@ -80,7 +81,7 @@ impl IndexJobRepository for SqliteKernel {
         }
         let row = sqlx::query(
             "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
-                    attempt_count, max_attempts, next_run_at, last_error_category, last_error,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                     created_at, updated_at
              FROM knowledge_index_job WHERE id = ?",
         )
@@ -95,16 +96,57 @@ impl IndexJobRepository for SqliteKernel {
         &self,
         job_id: &str,
         owner: &str,
+        claim_epoch: i64,
         now_ms: i64,
     ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let job = sqlx::query(
+            "SELECT status, lease_owner, claim_epoch, source_id, source_revision, index_version
+             FROM knowledge_index_job WHERE id = ?",
+        )
+        .bind(job_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("索引任务不存在。".into()))?;
+        let status: String = job.try_get("status").map_err(map_sql)?;
+        let lease_owner: Option<String> = job.try_get("lease_owner").map_err(map_sql)?;
+        let epoch: i64 = job.try_get("claim_epoch").map_err(map_sql)?;
+        if status != "running" || lease_owner.as_deref() != Some(owner) || epoch != claim_epoch {
+            return Err(PortError::Conflict("索引任务执行权已失效。".into()));
+        }
+        let source_id: String = job.try_get("source_id").map_err(map_sql)?;
+        let source_revision: String = job.try_get("source_revision").map_err(map_sql)?;
+        let index_version: i64 = job.try_get("index_version").map_err(map_sql)?;
+        let current = sqlx::query(
+            "SELECT source_revision, index_version FROM knowledge_document WHERE id = ?",
+        )
+        .bind(&source_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::Conflict("索引来源已删除，任务不能成功。".into()))?;
+        let current_revision: Option<String> =
+            current.try_get("source_revision").map_err(map_sql)?;
+        let current_version: i64 = current.try_get("index_version").map_err(map_sql)?;
+        if current_revision.as_deref() != Some(source_revision.as_str()) {
+            return Err(PortError::Conflict(
+                "索引来源 revision 已变化，旧任务不能成功。".into(),
+            ));
+        }
+        if current_version < index_version {
+            return Err(PortError::Conflict("索引版本尚未达到任务要求。".into()));
+        }
         let result = sqlx::query(
             "UPDATE knowledge_index_job SET status = 'succeeded', lease_owner = NULL,
                     lease_until = NULL, last_error = NULL, last_error_category = NULL, updated_at = ?
-             WHERE id = ? AND status = 'running' AND lease_owner = ?",
-        ).bind(now_ms).bind(job_id).bind(owner).execute(&self.pool).await.map_err(map_sql)?;
-        if result.rows_affected() == 0 {
+             WHERE id = ? AND status = 'running' AND lease_owner = ? AND claim_epoch = ?",
+        ).bind(now_ms).bind(job_id).bind(owner).bind(claim_epoch)
+        .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        if result.rows_affected() != 1 {
             return Err(PortError::Conflict("索引任务执行权已失效。".into()));
         }
+        tx.commit().await.map_err(map_sql)?;
         Ok(())
     }
 
@@ -112,6 +154,7 @@ impl IndexJobRepository for SqliteKernel {
         &self,
         job_id: &str,
         owner: &str,
+        claim_epoch: i64,
         category: &str,
         error: &str,
         next_run_at: i64,
@@ -120,10 +163,11 @@ impl IndexJobRepository for SqliteKernel {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         let row = sqlx::query(
             "SELECT attempt_count, max_attempts FROM knowledge_index_job
-             WHERE id = ? AND status = 'running' AND lease_owner = ?",
+             WHERE id = ? AND status = 'running' AND lease_owner = ? AND claim_epoch = ?",
         )
         .bind(job_id)
         .bind(owner)
+        .bind(claim_epoch)
         .fetch_optional(tx.deref_mut())
         .await
         .map_err(map_sql)?
@@ -138,7 +182,7 @@ impl IndexJobRepository for SqliteKernel {
         sqlx::query(
             "UPDATE knowledge_index_job SET status = ?, attempt_count = ?, next_run_at = ?,
                     last_error_category = ?, last_error = ?, lease_owner = NULL, lease_until = NULL,
-                    updated_at = ? WHERE id = ?",
+                    updated_at = ? WHERE id = ? AND status = 'running' AND lease_owner = ? AND claim_epoch = ?",
         )
         .bind(status)
         .bind(attempts)
@@ -147,13 +191,15 @@ impl IndexJobRepository for SqliteKernel {
         .bind(error)
         .bind(now_ms)
         .bind(job_id)
+        .bind(owner)
+        .bind(claim_epoch)
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
         tx.commit().await.map_err(map_sql)?;
         let row = sqlx::query(
             "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
-                    attempt_count, max_attempts, next_run_at, last_error_category, last_error,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                     created_at, updated_at
              FROM knowledge_index_job WHERE id = ?",
         )
@@ -161,6 +207,39 @@ impl IndexJobRepository for SqliteKernel {
         .fetch_one(&self.pool)
         .await
         .map_err(map_sql)?;
+        job_from_row(&row)
+    }
+
+    async fn mark_index_job_obsolete(
+        &self,
+        job_id: &str,
+        owner: &str,
+        claim_epoch: i64,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<IndexJobView, PortError> {
+        let result = sqlx::query(
+            "UPDATE knowledge_index_job SET status = 'obsolete', last_error_category = 'obsolete',
+                    last_error = ?, lease_owner = NULL, lease_until = NULL, updated_at = ?
+             WHERE id = ? AND status = 'running' AND lease_owner = ? AND claim_epoch = ?",
+        )
+        .bind(reason)
+        .bind(now_ms)
+        .bind(job_id)
+        .bind(owner)
+        .bind(claim_epoch)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if result.rows_affected() != 1 {
+            return Err(PortError::Conflict("索引任务执行权已失效。".into()));
+        }
+        let row = sqlx::query(
+            "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
+                    created_at, updated_at
+             FROM knowledge_index_job WHERE id = ?",
+        ).bind(job_id).fetch_one(&self.pool).await.map_err(map_sql)?;
         job_from_row(&row)
     }
 
@@ -193,7 +272,7 @@ impl IndexJobRepository for SqliteKernel {
         for id in expired {
             let row = sqlx::query(
                 "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
-                        attempt_count, max_attempts, next_run_at, last_error_category, last_error,
+                        attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                         created_at, updated_at
                  FROM knowledge_index_job WHERE id = ?",
             ).bind(id).fetch_one(&self.pool).await.map_err(map_sql)?;
@@ -214,6 +293,7 @@ fn job_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<IndexJobView, PortError
         status: row.try_get("status").map_err(map_sql)?,
         attempt_count: row.try_get("attempt_count").map_err(map_sql)?,
         max_attempts: row.try_get("max_attempts").map_err(map_sql)?,
+        claim_epoch: row.try_get("claim_epoch").map_err(map_sql)?,
         next_run_at: row.try_get("next_run_at").map_err(map_sql)?,
         last_error_category: row.try_get("last_error_category").map_err(map_sql)?,
         last_error: row.try_get("last_error").map_err(map_sql)?,

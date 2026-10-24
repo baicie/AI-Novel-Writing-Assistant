@@ -37,6 +37,11 @@ pub async fn index_knowledge(
     ) {
         return Err(AppError::validation("未知的知识归属类型。"));
     }
+    if request.owner_type == "chapter" || request.id.starts_with("chapter:") {
+        return Err(AppError::validation(
+            "正式章节索引只能由章节保存流程维护，不能通过通用知识接口覆盖。",
+        ));
+    }
     let terms = fts_query(&tokenize(body, &Lexicon::default()));
     let embedding = request.embedding.map(|vector| NewEmbedding {
         model: request
@@ -454,18 +459,15 @@ pub async fn retry_index_job(
         .await
         .map_err(AppError::from)?;
     let _ = jobs;
+    let now = novel_platform::now_ms();
+    let owner = format!("tauri-manual-{now}");
     let job = state
         .kernel
-        .claim_index_job(
-            &job_id,
-            "tauri-manual",
-            novel_platform::now_ms() + 60_000,
-            novel_platform::now_ms(),
-        )
+        .claim_index_job(&job_id, &owner, now + 60_000, now)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::conflict("索引任务不可执行或已被其他执行者领取。"))?;
-    execute_index_job(&state, job).await
+    execute_index_job(&state, job, &owner).await
 }
 
 #[tauri::command]
@@ -492,47 +494,76 @@ pub async fn retry_knowledge_document_with_job(
         })
         .await
         .map_err(AppError::from)?;
+    let owner = format!("tauri-manual-{now}");
     let claimed = state
         .kernel
-        .claim_index_job(&job.id, "tauri-manual", now + 60_000, now)
+        .claim_index_job(&job.id, &owner, now + 60_000, now)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::conflict("索引任务不可执行。"))?;
-    execute_index_job(&state, claimed).await
+    execute_index_job(&state, claimed, &owner).await
 }
 
-async fn execute_index_job(state: &AppState, job: IndexJobView) -> Result<IndexJobView, AppError> {
+async fn execute_index_job(
+    state: &AppState,
+    job: IndexJobView,
+    owner: &str,
+) -> Result<IndexJobView, AppError> {
     let now = novel_platform::now_ms();
+    let current = state
+        .kernel
+        .get_document_body(&job.source_id)
+        .await
+        .map_err(AppError::from)?;
+    let Some(current) = current else {
+        return state
+            .kernel
+            .mark_index_job_obsolete(&job.id, owner, job.claim_epoch, "来源已删除", now)
+            .await
+            .map_err(AppError::from);
+    };
+    if current.source_revision.as_deref() != Some(job.source_revision.as_str()) {
+        return state
+            .kernel
+            .mark_index_job_obsolete(&job.id, owner, job.claim_epoch, "来源 revision 已更新", now)
+            .await
+            .map_err(AppError::from);
+    }
     match state.kernel.retry_index_document(&job.source_id).await {
-        Ok(completed) => {
-            if completed {
-                state
-                    .kernel
-                    .complete_index_job(&job.id, "tauri-manual", now)
-                    .await
-                    .map_err(AppError::from)?;
-            } else {
-                state
-                    .kernel
-                    .complete_index_job(&job.id, "tauri-manual", now)
-                    .await
-                    .map_err(AppError::from)?;
-            }
+        Ok(true) => {
+            state
+                .kernel
+                .complete_index_job(&job.id, owner, job.claim_epoch, now)
+                .await
+                .map_err(AppError::from)?;
+        }
+        Ok(false) => {
+            return state
+                .kernel
+                .mark_index_job_obsolete(
+                    &job.id,
+                    owner,
+                    job.claim_epoch,
+                    "索引已是就绪状态但请求未执行",
+                    now,
+                )
+                .await
+                .map_err(AppError::from);
         }
         Err(error) => {
-            let failed = state
+            return state
                 .kernel
                 .fail_index_job(
                     &job.id,
-                    "tauri-manual",
+                    owner,
+                    job.claim_epoch,
                     "index_error",
                     &error.to_string(),
                     now + job.attempt_count.max(1) * 1_000,
                     now,
                 )
                 .await
-                .map_err(AppError::from)?;
-            return Ok(failed);
+                .map_err(AppError::from);
         }
     }
     let jobs = state

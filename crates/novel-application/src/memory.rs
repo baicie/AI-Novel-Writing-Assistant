@@ -322,53 +322,18 @@ impl MemoryService {
         ) {
             return Err(AppError::validation("未知的冲突裁决动作。"));
         }
-        if let Some(existing) = self
-            .memory
-            .memory_conflict_decision_by_command(command_id)
-            .await?
-        {
-            if existing == conflict_id {
-                return Ok(self.memory.get_memory_conflict(conflict_id).await?);
-            }
-            return Err(AppError::conflict("commandId 已用于其他冲突裁决。"));
-        }
-        let conflict = self.memory.get_memory_conflict(conflict_id).await?;
-        if conflict.version != expected_version {
-            return Err(AppError::conflict("冲突已经变化，请刷新后再裁决。"));
-        }
-        let chosen = chosen_candidate_id
-            .or_else(|| conflict.candidate_ids.first().map(String::as_str))
-            .ok_or_else(|| AppError::validation("冲突没有可裁决候选。"))?;
-        if !conflict.candidate_ids.iter().any(|id| id == chosen) {
-            return Err(AppError::validation("裁决候选不属于这条冲突。"));
-        }
-        let candidate = self
-            .memory
-            .list_memory_candidates(&conflict.novel_id, &conflict.chapter_id)
-            .await?
-            .into_iter()
-            .find(|candidate| candidate.id == chosen)
-            .ok_or_else(|| AppError::not_found("没有找到冲突候选。"))?;
-        match decision {
-            "confirm_new" | "supersede_with_evidence" => {
-                self.confirm(chosen, candidate.version).await?;
-            }
-            "keep_existing" | "reject_extraction" => {
-                self.reject(chosen, candidate.version, reason).await?;
-            }
-            "mark_disputed" => {
-                self.defer(chosen, candidate.version).await?;
-            }
-            _ => unreachable!(),
-        }
+        let request_hash = sha256_hex(
+            format!("{conflict_id}\u{1f}{expected_version}\u{1f}{decision}\u{1f}{}\u{1f}{}\u{1f}{reason}\u{1f}{operator}", chosen_candidate_id.unwrap_or(""), command_id).as_bytes(),
+        );
         Ok(self
             .memory
             .resolve_memory_conflict(
                 conflict_id,
                 expected_version,
                 command_id,
+                &request_hash,
                 decision,
-                Some(chosen),
+                chosen_candidate_id,
                 reason,
                 operator,
                 self.clock.now_ms(),

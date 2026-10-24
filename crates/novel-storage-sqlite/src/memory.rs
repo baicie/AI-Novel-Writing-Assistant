@@ -479,6 +479,7 @@ impl MemoryRepository for SqliteKernel {
         conflict_id: &str,
         expected_version: i64,
         command_id: &str,
+        request_hash: &str,
         decision: &str,
         chosen_candidate_id: Option<&str>,
         reason: &str,
@@ -493,19 +494,21 @@ impl MemoryRepository for SqliteKernel {
         ).bind(conflict_id).fetch_optional(tx.deref_mut()).await.map_err(map_sql)?
             .ok_or_else(|| PortError::NotFound("没有找到这条记忆冲突。".into()))?;
         let conflict = conflict_from_row(&row)?;
-        if let Some(existing) = sqlx::query_scalar::<_, String>(
-            "SELECT conflict_id FROM memory_conflict_decision WHERE command_id = ?",
+        if let Some((existing_conflict, existing_hash)) = sqlx::query_as::<_, (String, String)>(
+            "SELECT conflict_id, request_hash FROM memory_conflict_decision WHERE command_id = ?",
         )
         .bind(command_id)
         .fetch_optional(tx.deref_mut())
         .await
         .map_err(map_sql)?
         {
-            if existing == conflict_id {
+            if existing_conflict == conflict_id && existing_hash == request_hash {
                 tx.commit().await.map_err(map_sql)?;
                 return self.get_memory_conflict(conflict_id).await;
             }
-            return Err(PortError::Conflict("commandId 已用于其他冲突裁决。".into()));
+            return Err(PortError::Conflict(
+                "commandId 已用于不同的冲突裁决请求。".into(),
+            ));
         }
         if conflict.status != "open" {
             return Err(PortError::Conflict("这条冲突已经裁决。".into()));
@@ -513,22 +516,59 @@ impl MemoryRepository for SqliteKernel {
         if conflict.version != expected_version {
             return Err(PortError::Conflict("冲突已经变化，请刷新后再裁决。".into()));
         }
-        if let Some(chosen) = chosen_candidate_id
-            && !conflict.candidate_ids.iter().any(|id| id == chosen)
-        {
+        let chosen = chosen_candidate_id
+            .or_else(|| conflict.candidate_ids.first().map(String::as_str))
+            .ok_or_else(|| PortError::Integrity("冲突没有可裁决候选。".into()))?;
+        if !conflict.candidate_ids.iter().any(|id| id == chosen) {
             return Err(PortError::Integrity("裁决候选不属于这条冲突。".into()));
+        }
+        let candidate = load_candidate(&mut tx, chosen).await?;
+        match decision {
+            "confirm_new" => {
+                validate_candidate_source(&mut tx, &candidate, false).await?;
+                let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
+                write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
+                set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
+                    .await?;
+                reject_other_candidates(&mut tx, &conflict.candidate_ids, &candidate.id, now_ms)
+                    .await?;
+            }
+            "supersede_with_evidence" => {
+                if conflict.fact_ids.is_empty() {
+                    return Err(PortError::Conflict(
+                        "替代裁决必须关联至少一个旧事实。".into(),
+                    ));
+                }
+                validate_candidate_source(&mut tx, &candidate, true).await?;
+                let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
+                write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
+                set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
+                    .await?;
+                reject_other_candidates(&mut tx, &conflict.candidate_ids, &candidate.id, now_ms)
+                    .await?;
+                supersede_old_facts(&mut tx, &conflict.novel_id, &conflict.fact_ids, now_ms)
+                    .await?;
+            }
+            "keep_existing" | "reject_extraction" => {
+                reject_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
+            }
+            "mark_disputed" => {
+                defer_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
+            }
+            _ => return Err(PortError::Integrity("未知冲突裁决动作。".into())),
         }
         sqlx::query(
             "INSERT INTO memory_conflict_decision
-               (id, conflict_id, command_id, decision, chosen_candidate_id, reason, operator,
-                conflict_version, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               (id, conflict_id, command_id, request_hash, decision, chosen_candidate_id, reason,
+                operator, conflict_version, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(format!("decision-{command_id}"))
         .bind(conflict_id)
         .bind(command_id)
+        .bind(request_hash)
         .bind(decision)
-        .bind(chosen_candidate_id)
+        .bind(Some(chosen))
         .bind(reason)
         .bind(operator)
         .bind(expected_version)
@@ -536,9 +576,9 @@ impl MemoryRepository for SqliteKernel {
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE memory_conflict SET status = 'resolved', version = version + 1, updated_at = ?
-             WHERE id = ? AND version = ?",
+             WHERE id = ? AND version = ? AND status = 'open'",
         )
         .bind(now_ms)
         .bind(conflict_id)
@@ -546,6 +586,9 @@ impl MemoryRepository for SqliteKernel {
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
+        if updated.rows_affected() != 1 {
+            return Err(PortError::Conflict("冲突已经变化，裁决未写入。".into()));
+        }
         tx.commit().await.map_err(map_sql)?;
         self.get_memory_conflict(conflict_id).await
     }
@@ -628,6 +671,303 @@ fn candidate_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<MemoryCandidateVi
         created_at: row.try_get("created_at").map_err(map_sql)?,
         updated_at: row.try_get("updated_at").map_err(map_sql)?,
     })
+}
+
+async fn load_candidate(
+    tx: &mut crate::db::Tx<'_>,
+    candidate_id: &str,
+) -> Result<MemoryCandidateView, PortError> {
+    let row = sqlx::query(
+        "SELECT id, job_id, novel_id, chapter_id, chapter_version, source_content_hash,
+                fact_type, truthfulness, entity_name, entity_id, value, evidence_quote,
+                evidence_start, confidence, status, ambiguous, version, decision_reason,
+                created_at, updated_at
+         FROM memory_extraction_candidate WHERE id = ?",
+    )
+    .bind(candidate_id)
+    .fetch_optional(tx.deref_mut())
+    .await
+    .map_err(map_sql)?
+    .ok_or_else(|| PortError::NotFound("没有找到这条记忆候选。".into()))?;
+    candidate_from_row(&row)
+}
+
+async fn chapter_order_for(tx: &mut crate::db::Tx<'_>, chapter_id: &str) -> Result<i32, PortError> {
+    sqlx::query_scalar("SELECT sort_order FROM chapter WHERE id = ?")
+        .bind(chapter_id)
+        .fetch_one(tx.deref_mut())
+        .await
+        .map_err(map_sql)
+}
+
+async fn validate_candidate_source(
+    tx: &mut crate::db::Tx<'_>,
+    candidate: &MemoryCandidateView,
+    allow_existing_state: bool,
+) -> Result<(), PortError> {
+    if candidate.version < 0 || !matches!(candidate.status.as_str(), "proposed" | "deferred") {
+        return Err(PortError::Conflict(
+            "记忆候选已经处理，不能重复裁决。".into(),
+        ));
+    }
+    if candidate.ambiguous
+        || candidate.entity_id.is_none() && candidate.fact_type == "character_state"
+    {
+        return Err(PortError::Conflict(
+            "人物身份存在歧义，需要人工指定后再确认。".into(),
+        ));
+    }
+    let current = sqlx::query(
+        "SELECT r.version AS version, r.content AS content FROM chapter c
+         JOIN chapter_revision r ON r.id = c.official_revision_id WHERE c.id = ?",
+    )
+    .bind(&candidate.chapter_id)
+    .fetch_optional(tx.deref_mut())
+    .await
+    .map_err(map_sql)?
+    .ok_or_else(|| PortError::Conflict("来源章节没有正式正文。".into()))?;
+    let version: i64 = current.try_get("version").map_err(map_sql)?;
+    if version != candidate.chapter_version {
+        return Err(PortError::Conflict(
+            "来源章节已经被修改，候选事实已过期。".into(),
+        ));
+    }
+    let content: String = current.try_get("content").map_err(map_sql)?;
+    use sha2::{Digest, Sha256};
+    if hex::encode(Sha256::digest(content.as_bytes())) != candidate.source_content_hash {
+        return Err(PortError::Conflict(
+            "来源正文哈希不一致，候选事实已过期。".into(),
+        ));
+    }
+    if !allow_existing_state
+        && candidate.fact_type == "character_state"
+        && let Some(entity_id) = candidate.entity_id.as_deref()
+    {
+        let order = chapter_order_for(tx, &candidate.chapter_id).await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT body FROM character_state
+             WHERE character_id = ? AND chapter_order = ? AND status = 'confirmed' AND body != ?
+             LIMIT 1",
+        )
+        .bind(entity_id)
+        .bind(order)
+        .bind(&candidate.value)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        if existing.is_some() {
+            return Err(PortError::Conflict(
+                "同一人物在同一剧情位置存在不兼容状态，需人工裁决后再确认。".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn write_candidate_fact(
+    tx: &mut crate::db::Tx<'_>,
+    candidate: &MemoryCandidateView,
+    chapter_order: i32,
+    now_ms: i64,
+) -> Result<String, PortError> {
+    let fact_status = if matches!(
+        candidate.truthfulness.as_str(),
+        "narrator_fact" | "author_asserted"
+    ) {
+        "confirmed"
+    } else {
+        "disputed"
+    };
+    let fact_id = format!("memory-{}", candidate.id);
+    match candidate.fact_type.as_str() {
+        "character_state" => {
+            sqlx::query(
+                "INSERT INTO character_state
+                   (id, character_id, chapter_order, body, created_at, source_revision, status,
+                    updated_at, source_chapter_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET body = excluded.body, chapter_order = excluded.chapter_order,
+                   source_revision = excluded.source_revision, status = excluded.status,
+                   updated_at = excluded.updated_at, source_chapter_id = excluded.source_chapter_id",
+            ).bind(&fact_id).bind(candidate.entity_id.as_deref().unwrap_or(""))
+            .bind(chapter_order).bind(&candidate.value).bind(now_ms)
+            .bind(format!("memory:{}", candidate.chapter_version)).bind(fact_status)
+            .bind(now_ms).bind(&candidate.chapter_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        "timeline_event" => {
+            sqlx::query(
+                "INSERT INTO timeline_event
+                   (id, novel_id, chapter_order, body, created_at, source_revision, status,
+                    updated_at, source_chapter_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET body = excluded.body, chapter_order = excluded.chapter_order,
+                   source_revision = excluded.source_revision, status = excluded.status,
+                   updated_at = excluded.updated_at, source_chapter_id = excluded.source_chapter_id",
+            ).bind(&fact_id).bind(&candidate.novel_id).bind(chapter_order)
+            .bind(&candidate.value).bind(now_ms)
+            .bind(format!("memory:{}", candidate.chapter_version)).bind(fact_status)
+            .bind(now_ms).bind(&candidate.chapter_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        "plot_thread" => {
+            let title = candidate
+                .entity_name
+                .clone()
+                .unwrap_or_else(|| "未命名伏笔".into());
+            sqlx::query(
+                "INSERT INTO plot_thread
+                   (id, novel_id, title, body, opened_chapter_order, resolved_chapter_order,
+                    status, source_revision, evidence_json, created_at, updated_at, source_chapter_id)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
+                   opened_chapter_order = excluded.opened_chapter_order, status = excluded.status,
+                   source_revision = excluded.source_revision, updated_at = excluded.updated_at,
+                   source_chapter_id = excluded.source_chapter_id",
+            ).bind(&fact_id).bind(&candidate.novel_id).bind(title).bind(&candidate.value)
+            .bind(chapter_order).bind(if fact_status == "confirmed" { "open" } else { "disputed" })
+            .bind(format!("memory:{}", candidate.chapter_version)).bind(&candidate.evidence_quote)
+            .bind(now_ms).bind(now_ms).bind(&candidate.chapter_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        other => return Err(PortError::Integrity(format!("未知记忆类型：{other}"))),
+    }
+    Ok(fact_id)
+}
+
+async fn set_candidate_status(
+    tx: &mut crate::db::Tx<'_>,
+    candidate: &MemoryCandidateView,
+    status: &str,
+    reason: Option<&str>,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    let result = sqlx::query(
+        "UPDATE memory_extraction_candidate SET status = ?, decision_reason = ?,
+                version = version + 1, updated_at = ?
+         WHERE id = ? AND version = ? AND status IN ('proposed','deferred')",
+    )
+    .bind(status)
+    .bind(reason)
+    .bind(now_ms)
+    .bind(&candidate.id)
+    .bind(candidate.version)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    if result.rows_affected() != 1 {
+        return Err(PortError::Conflict(
+            "记忆候选已经变化，请刷新后再确认。".into(),
+        ));
+    }
+    Ok(())
+}
+
+async fn reject_other_candidates(
+    tx: &mut crate::db::Tx<'_>,
+    ids: &[String],
+    chosen: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    for id in ids.iter().filter(|id| id.as_str() != chosen) {
+        sqlx::query(
+            "UPDATE memory_extraction_candidate SET status = 'rejected', decision_reason = ?,
+                    version = version + 1, updated_at = ?
+             WHERE id = ? AND status IN ('proposed','deferred')",
+        )
+        .bind("冲突裁决：未采用该候选")
+        .bind(now_ms)
+        .bind(id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    }
+    Ok(())
+}
+
+async fn reject_candidates(
+    tx: &mut crate::db::Tx<'_>,
+    ids: &[String],
+    reason: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    for id in ids {
+        sqlx::query(
+            "UPDATE memory_extraction_candidate SET status = 'rejected', decision_reason = ?,
+                    version = version + 1, updated_at = ?
+             WHERE id = ? AND status IN ('proposed','deferred')",
+        )
+        .bind(reason)
+        .bind(now_ms)
+        .bind(id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    }
+    Ok(())
+}
+
+async fn defer_candidates(
+    tx: &mut crate::db::Tx<'_>,
+    ids: &[String],
+    reason: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    for id in ids {
+        sqlx::query(
+            "UPDATE memory_extraction_candidate SET status = 'deferred', decision_reason = ?,
+                    version = version + 1, updated_at = ?
+             WHERE id = ? AND status IN ('proposed','deferred')",
+        )
+        .bind(reason)
+        .bind(now_ms)
+        .bind(id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    }
+    Ok(())
+}
+
+async fn supersede_old_facts(
+    tx: &mut crate::db::Tx<'_>,
+    novel_id: &str,
+    fact_ids: &[String],
+    now_ms: i64,
+) -> Result<(), PortError> {
+    for id in fact_ids {
+        sqlx::query(
+            "UPDATE character_state SET status = 'superseded', updated_at = ?
+             WHERE id = ? AND character_id IN (SELECT id FROM character WHERE novel_id = ?)",
+        )
+        .bind(now_ms)
+        .bind(id)
+        .bind(novel_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        sqlx::query(
+            "UPDATE timeline_event SET status = 'superseded', updated_at = ?
+             WHERE id = ? AND novel_id = ?",
+        )
+        .bind(now_ms)
+        .bind(id)
+        .bind(novel_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        sqlx::query(
+            "UPDATE plot_thread SET status = 'superseded', updated_at = ?
+             WHERE id = ? AND novel_id = ?",
+        )
+        .bind(now_ms)
+        .bind(id)
+        .bind(novel_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    }
+    Ok(())
 }
 
 fn conflict_id(

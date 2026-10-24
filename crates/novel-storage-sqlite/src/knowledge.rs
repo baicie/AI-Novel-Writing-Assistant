@@ -21,21 +21,60 @@ impl KnowledgeRepository for SqliteKernel {
         // Phase 1: mark the document as rebuilding before touching chunks. Once
         // this commits, stale chunks are no longer returned to readers even if the
         // rebuild transaction fails below.
-        let existing: Option<(i64, String, String, String, Option<String>, String)> =
-            sqlx::query_as(
-                "SELECT version, title, body, owner_type, source_content_hash, index_status
+        let existing: Option<(
+            i64,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+        )> = sqlx::query_as(
+            "SELECT version, title, body, owner_type, source_content_hash, index_status,
+                        novel_id, source_revision
              FROM knowledge_document WHERE id = ?",
+        )
+        .bind(&document.id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if let Some((_version, _title, _body, _owner, _hash, _status, existing_novel, _revision)) =
+            &existing
+            && existing_novel != &document.novel_id
+        {
+            return Err(PortError::Conflict(
+                "knowledge document 已属于另一本小说，不能跨小说覆盖。".into(),
+            ));
+        }
+        if let (Some((_, _, _, _, _, _, _, Some(existing_revision))), Some(incoming_revision)) =
+            (&existing, document.source_revision.as_deref())
+            && let (Some(existing_rank), Some(incoming_rank)) = (
+                revision_rank(existing_revision),
+                revision_rank(incoming_revision),
             )
-            .bind(&document.id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(map_sql)?;
-        if let Some((_version, title, body, owner, existing_hash, status)) = &existing
+            && incoming_rank < existing_rank
+        {
+            return Err(PortError::Conflict(
+                "知识来源 revision 已过期，不能覆盖较新的索引。".into(),
+            ));
+        }
+        if let Some((
+            _version,
+            title,
+            body,
+            owner,
+            existing_hash,
+            status,
+            _novel,
+            existing_revision,
+        )) = &existing
             && title == &document.title
             && body == &document.body
             && owner == &document.owner_type
             && existing_hash.as_deref() == Some(source_hash.as_str())
             && status == "ready"
+            && existing_revision.as_deref() == document.source_revision.as_deref()
         {
             return Ok(());
         }
@@ -141,6 +180,17 @@ impl KnowledgeRepository for SqliteKernel {
                 .map_err(map_sql)?;
         if exists == 0 {
             return Ok(false);
+        }
+        let owner_type: String =
+            sqlx::query_scalar("SELECT owner_type FROM knowledge_document WHERE id = ?")
+                .bind(document_id)
+                .fetch_one(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+        if owner_type == "chapter" || document_id.starts_with("chapter:") {
+            return Err(PortError::Conflict(
+                "系统派生的章节索引不能通过通用知识删除接口删除。".into(),
+            ));
         }
         let chunks: Vec<String> =
             sqlx::query_scalar("SELECT id FROM knowledge_chunk WHERE document_id = ?")
@@ -277,6 +327,7 @@ impl KnowledgeRepository for SqliteKernel {
              JOIN knowledge_chunk c ON c.id = knowledge_fts.chunk_id
              JOIN knowledge_document d ON d.id = c.document_id
              WHERE d.novel_id = ? AND d.index_status = 'ready' AND knowledge_fts MATCH ?
+             ORDER BY bm25(knowledge_fts), c.id
              LIMIT ?",
         )
         .bind(novel_id)
@@ -325,6 +376,7 @@ impl KnowledgeRepository for SqliteKernel {
                 .0
                 .partial_cmp(&left.0)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.1.chunk_id.cmp(&right.1.chunk_id))
         });
         scored.truncate(usize::try_from(limit).unwrap_or(0));
         Ok(scored.into_iter().map(|(_, hit)| hit).collect())
@@ -373,4 +425,15 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<SearchHit, PortError> {
         chunk_hash: row.try_get("chunk_hash").map_err(map_sql)?,
         index_version: row.try_get("index_version").map_err(map_sql)?,
     })
+}
+
+fn revision_rank(revision: &str) -> Option<i64> {
+    revision
+        .rsplit_once("@v")
+        .and_then(|(_, value)| value.parse::<i64>().ok())
+        .or_else(|| {
+            revision
+                .strip_prefix('v')
+                .and_then(|value| value.parse::<i64>().ok())
+        })
 }

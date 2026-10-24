@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use novel_application::{
     ExtractMemoryInput, MemoryRepository, MemoryService, NewChapter, NewCharacter, NewNovel,
-    NovelRepository,
+    NewTimelineEvent, NovelRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
@@ -370,4 +370,235 @@ async fn conflicts_are_detected_and_resolved_with_command_idempotency() {
         )
         .await;
     assert!(stale.is_err());
+}
+
+async fn conflict_fixture() -> (
+    Arc<SqliteKernel>,
+    MemoryService,
+    String,
+    String,
+    Vec<novel_application::MemoryConflictView>,
+) {
+    let output = serde_json::json!({"facts":[
+        {"factType":"timeline_event","truthfulness":"narrator_fact","entityName":"林动","value":"林动在祖祠","evidenceQuote":"林动成为掌门","confidence":0.9},
+        {"factType":"timeline_event","truthfulness":"narrator_fact","entityName":"林动","value":"林动在码头","evidenceQuote":"林动离开山门","confidence":0.8}
+    ]}).to_string();
+    let (kernel, service, novel, chapter) = fixture(output).await;
+    service
+        .extract(ExtractMemoryInput {
+            command_id: "atomic-extract".into(),
+            novel_id: novel.clone(),
+            chapter_id: chapter.clone(),
+            provider: "mock".into(),
+            model: "mock".into(),
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+            token_budget: Some(512),
+        })
+        .await
+        .unwrap();
+    let conflicts = service.sync_conflicts(&novel).await.unwrap();
+    (kernel, service, novel, chapter, conflicts)
+}
+
+#[tokio::test]
+async fn atomic_resolution_rejects_stale_candidate_and_keep_existing_rejects_all() {
+    let (kernel, service, novel, chapter, conflicts) = conflict_fixture().await;
+    let conflict = conflicts
+        .into_iter()
+        .find(|conflict| conflict.status == "open")
+        .unwrap();
+    NovelRepository::save_user_chapter(
+        kernel.as_ref(),
+        novel_application::SaveChapterRecord {
+            novel_id: novel.clone(),
+            chapter_id: chapter.clone(),
+            expected_version: 1,
+            title: "第一章".into(),
+            content: "作者修改后的正文。".into(),
+            revision_id: "rev2".into(),
+            artifact_id: "art2".into(),
+            content_sha256: "hash2".into(),
+            now_ms: 5,
+        },
+    )
+    .await
+    .unwrap();
+    let chosen = conflict.candidate_ids[0].clone();
+    let result = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "atomic-stale",
+            "confirm_new",
+            Some(&chosen),
+            "过期候选不应写入",
+            "author",
+        )
+        .await;
+    assert!(result.is_err());
+    let facts = NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+        .await
+        .unwrap();
+    assert!(facts.is_empty());
+    let decisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_conflict_decision")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        decisions, 0,
+        "failed atomic resolution must not record a decision"
+    );
+}
+
+#[tokio::test]
+async fn keep_existing_rejects_every_conflicting_candidate() {
+    let (kernel, service, novel, _chapter, conflicts) = conflict_fixture().await;
+    let conflict = conflicts
+        .into_iter()
+        .find(|conflict| conflict.status == "open")
+        .unwrap();
+    let resolved = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "keep-all",
+            "keep_existing",
+            None,
+            "保留旧事实",
+            "author",
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.status, "resolved");
+    let candidates = service
+        .list_candidates(&novel, &conflict.chapter_id)
+        .await
+        .unwrap();
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.status == "rejected")
+    );
+    assert!(
+        NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn supersede_removes_old_fact_from_confirmed_story_facts() {
+    let (kernel, service, novel, _chapter, conflicts) = conflict_fixture().await;
+    let conflict = conflicts
+        .into_iter()
+        .find(|conflict| conflict.status == "open")
+        .unwrap();
+    NovelRepository::upsert_timeline_event(
+        kernel.as_ref(),
+        NewTimelineEvent {
+            id: "old-fact".into(),
+            novel_id: novel.clone(),
+            chapter_order: 1,
+            body: "旧事实：林动在旧地点".into(),
+            source_chapter_id: "ch1".into(),
+            source_revision: "rev-1".into(),
+            status: "confirmed".into(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE memory_conflict SET fact_ids_json = ? WHERE id = ?")
+        .bind(serde_json::json!(["old-fact"]).to_string())
+        .bind(&conflict.id)
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    let chosen = conflict.candidate_ids[0].clone();
+    service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "supersede-old",
+            "supersede_with_evidence",
+            Some(&chosen),
+            "新证据替代旧事实",
+            "author",
+        )
+        .await
+        .unwrap();
+    let facts = NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+        .await
+        .unwrap();
+    assert!(
+        !facts.iter().any(|fact| fact.id == "old-fact"),
+        "superseded fact must not enter Context facts"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_resolution_writes_once_and_hash_guards_command_reuse() {
+    let (_kernel, service, _novel, _chapter, conflicts) = conflict_fixture().await;
+    let conflict = conflicts
+        .into_iter()
+        .find(|conflict| conflict.status == "open")
+        .unwrap();
+    let chosen = conflict.candidate_ids[0].clone();
+    let first = service.resolve_conflict(
+        &conflict.id,
+        conflict.version,
+        "race",
+        "confirm_new",
+        Some(&chosen),
+        "并发一",
+        "author",
+    );
+    let second = service.resolve_conflict(
+        &conflict.id,
+        conflict.version,
+        "race",
+        "keep_existing",
+        Some(&chosen),
+        "并发二",
+        "author",
+    );
+    let (left, right) = tokio::join!(first, second);
+    assert!(
+        left.is_ok() ^ right.is_ok(),
+        "exactly one concurrent decision must win"
+    );
+    let (winning_decision, winning_reason, losing_decision, losing_reason) = if left.is_ok() {
+        ("confirm_new", "并发一", "keep_existing", "并发二")
+    } else {
+        ("keep_existing", "并发二", "confirm_new", "并发一")
+    };
+    let replay = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "race",
+            winning_decision,
+            Some(&chosen),
+            winning_reason,
+            "author",
+        )
+        .await;
+    assert!(replay.is_ok(), "identical command replay must be accepted");
+    let reused = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "race",
+            losing_decision,
+            Some(&chosen),
+            losing_reason,
+            "author",
+        )
+        .await;
+    assert!(
+        reused.is_err(),
+        "same commandId with different decision must conflict"
+    );
 }
