@@ -47,3 +47,12 @@ p13_index_jobs 2 passed
 
 Director 知识索引面板显示队列、状态、尝试次数、错误与“重试任务”“刷新队列”。
 未做 Index Retry WDIO。
+
+## P14.0-C Fencing 修复
+
+- `claim_epoch` 单调递增；
+- Claim/Complete/Fail/Obsolete 均验证 owner + epoch；
+- Complete 验证来源存在、sourceRevision 当前、indexVersion 达标；
+- `retry_index_document=false` 标记 obsolete，不伪装成功；
+- 启动扫描过期 lease；
+- 仍未自动 enqueue 章节索引、未做真实 SIGKILL Native。

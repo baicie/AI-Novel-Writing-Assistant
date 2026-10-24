@@ -626,6 +626,11 @@ pub trait IndexJobRepository: Send + Sync {
         reason: &str,
         now_ms: i64,
     ) -> Result<IndexJobView, PortError>;
+    async fn reset_index_job_for_retry(
+        &self,
+        job_id: &str,
+        now_ms: i64,
+    ) -> Result<IndexJobView, PortError>;
     async fn recover_expired_index_jobs(&self, now_ms: i64)
     -> Result<Vec<IndexJobView>, PortError>;
 }

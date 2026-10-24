@@ -6,8 +6,8 @@
   "metrics": {
     "recallAt10": 1.0,
     "precisionAt5": 0.2,
-    "mrr": 0.76,
-    "ndcg": 0.78,
+    "mrr": 1.0,
+    "ndcg": 1.0,
     "sourceRevisionAccuracy": 1.0,
     "futureLeakage": 0,
     "noAnswerAccuracy": 1.0

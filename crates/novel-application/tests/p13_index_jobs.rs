@@ -156,6 +156,19 @@ async fn failure_backoff_recovery_and_max_attempts_are_persisted() {
         .unwrap();
     assert_eq!(exhausted.status, "failed");
     assert_eq!(exhausted.attempt_count, 2);
+    let requeued = kernel
+        .reset_index_job_for_retry(&queued.id, 11_000)
+        .await
+        .unwrap();
+    assert_eq!(requeued.status, "pending");
+    assert_eq!(requeued.attempt_count, 0);
+    assert!(
+        kernel
+            .claim_index_job(&queued.id, "manual", 20_000, 12_000)
+            .await
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[tokio::test]

@@ -19,8 +19,8 @@ questions=50
 answered=40
 recall@10=1.00
 precision@5=0.20
-mrr=0.76
-ndcg=0.78
+mrr=1.00
+ndcg=1.00
 source_revision_accuracy=1.00
 future_leak=0
 no_answer_accuracy=1.00
@@ -36,6 +36,8 @@ no_answer_accuracy=1.00
 | no_answer | 10 | 0 (correctly empty) | — |
 
 JSON：`docs/tauri-migration/p13-large-benchmark-v1.json`
+
+P14.0-D 增加 FTS5 `bm25` 排序与 `chunk_id` tie-break 后，该冻结集 MRR 从 0.76 提升到 1.00；这是排序修复，不代表真实语义检索能力。
 
 ## 重要限制
 

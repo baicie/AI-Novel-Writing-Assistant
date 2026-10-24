@@ -460,6 +460,7 @@ pub async fn retry_index_job(
         .map_err(AppError::from)?;
     let _ = jobs;
     let now = novel_platform::now_ms();
+    let _ = state.kernel.reset_index_job_for_retry(&job_id, now).await;
     let owner = format!("tauri-manual-{now}");
     let job = state
         .kernel
@@ -522,7 +523,9 @@ async fn execute_index_job(
             .await
             .map_err(AppError::from);
     };
-    if current.source_revision.as_deref() != Some(job.source_revision.as_str()) {
+    if !job.source_revision.is_empty()
+        && current.source_revision.as_deref() != Some(job.source_revision.as_str())
+    {
         return state
             .kernel
             .mark_index_job_obsolete(&job.id, owner, job.claim_epoch, "来源 revision 已更新", now)

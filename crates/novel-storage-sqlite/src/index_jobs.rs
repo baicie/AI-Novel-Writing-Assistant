@@ -243,6 +243,37 @@ impl IndexJobRepository for SqliteKernel {
         job_from_row(&row)
     }
 
+    async fn reset_index_job_for_retry(
+        &self,
+        job_id: &str,
+        now_ms: i64,
+    ) -> Result<IndexJobView, PortError> {
+        let result = sqlx::query(
+            "UPDATE knowledge_index_job SET status = 'pending', attempt_count = 0,
+                    next_run_at = ?, lease_owner = NULL, lease_until = NULL,
+                    last_error_category = NULL, last_error = NULL, updated_at = ?
+             WHERE id = ? AND status IN ('failed','obsolete')",
+        )
+        .bind(now_ms)
+        .bind(now_ms)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if result.rows_affected() != 1 {
+            return Err(PortError::Conflict(
+                "只有 failed/obsolete 任务可以手动重新排队。".into(),
+            ));
+        }
+        let row = sqlx::query(
+            "SELECT id, novel_id, source_type, source_id, source_revision, index_version, status,
+                    attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
+                    created_at, updated_at
+             FROM knowledge_index_job WHERE id = ?",
+        ).bind(job_id).fetch_one(&self.pool).await.map_err(map_sql)?;
+        job_from_row(&row)
+    }
+
     async fn recover_expired_index_jobs(
         &self,
         now_ms: i64,

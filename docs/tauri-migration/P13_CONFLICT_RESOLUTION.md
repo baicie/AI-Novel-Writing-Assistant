@@ -57,3 +57,11 @@ p13_memory_extraction 5 passed
 
 - `supersede_with_evidence` 当前等价于确认新候选，未实现旧事实 supersede 链。
 - 没有按剧情时间/地点/死亡状态的结构化字段，因此不把关键词判断伪装为冲突检测。
+
+## P14.0-A 原子性修复
+
+- 裁决、候选确认/拒绝、事实写入、旧事实 supersede、decision、conflict version 更新已合并为单个 SQLite 事务。
+- `supersede_with_evidence` 必须关联旧 fact_ids，并标记旧事实 superseded。
+- `keep_existing`/`reject_extraction` 拒绝全部冲突候选。
+- `memory_conflict_decision.request_hash` 绑定 commandId 与请求参数；相同 commandId 不同参数返回 Conflict。
+- 新增并发/stale/supersede/回滚测试。

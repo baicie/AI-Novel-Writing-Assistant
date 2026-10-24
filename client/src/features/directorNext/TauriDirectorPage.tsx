@@ -733,7 +733,7 @@ export default function TauriDirectorPage() {
                 {indexJobs.length ? <ul className="max-h-40 space-y-1 overflow-y-auto text-xs">
                   {indexJobs.slice(0, 20).map(job => <li key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2">
                     <span>{job.status} · {job.sourceType}:{job.sourceId.slice(0, 12)} · 尝试 {job.attemptCount}/{job.maxAttempts}{job.lastError ? ` · ${job.lastError}` : ""}</span>
-                    {(job.status === "retry_wait" || job.status === "failed" || job.status === "pending") ? <Button data-testid="director-retry-index-job" variant="outline" onClick={() => void retryIndexJob({ jobId: job.id }).then(refreshIndexJobs).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "重试索引任务失败。"))}>重试任务</Button> : null}
+                    {(job.status === "retry_wait" || job.status === "failed" || job.status === "obsolete" || job.status === "pending") ? <Button data-testid="director-retry-index-job" variant="outline" onClick={() => void retryIndexJob({ jobId: job.id }).then(refreshIndexJobs).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "重试索引任务失败。"))}>重试任务</Button> : null}
                   </li>)}
                 </ul> : <p className="text-xs text-muted-foreground">索引队列为空。</p>}
               </div>
