@@ -166,8 +166,6 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 reason: "还没有填写模型密钥".into(),
             });
         }
-        authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
-        authorize_resolved_endpoint(&request.endpoint, request.allow_localhost_http).await?;
         let requested_tokens = request
             .max_output_tokens
             .unwrap_or(self.policy.default_max_output_tokens);
@@ -176,6 +174,8 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 "本次生成的 token 预算不在允许范围内".into(),
             ));
         }
+        authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
+        authorize_resolved_endpoint(&request.endpoint, request.allow_localhost_http).await?;
         let body = serde_json::json!({
             "model": request.model,
             "stream": true,

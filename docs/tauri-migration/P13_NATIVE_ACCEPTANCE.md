@@ -1,6 +1,6 @@
 # P13.4 Native Acceptance
 
-## 状态：PARTIAL / NOT_STARTED
+## 状态：PARTIAL
 
 本轮未修改 Native UI，仅新增索引 Tauri Command 与文档。
 
@@ -22,3 +22,18 @@
 
 
 本轮新增 Tauri `delete_knowledge_document` 与 index source fields，但未做 Native UI 验收；不能以 Rust 测试替代。
+
+
+本轮实际执行：
+
+```text
+Director 4 passing
+Editor 2 passing
+Candidate Journal SIGKILL + restart 1 passing
+```
+
+未执行：
+
+- 原生知识库管理 UI 新增/编辑/删除验收
+- 真双窗口
+- 知识删除命令 UI

@@ -46,7 +46,19 @@ cargo test -p novel-storage-sqlite --test knowledge_lifecycle
 ## 未完成
 
 - SearchHit 已返回 sourceRevision/chunkHash/indexVersion。
-- 正式章节保存仍未自动触发章节索引。
+- 正式章节保存/删除/晋升已自动同步章节知识索引。
 - 正式章节保存未自动触发章节索引。
 - 索引失败重试队列与后台重建未实现。
 - 跨小说/未来章节的章节索引 E2E 尚未完成。
+
+
+## 章节索引自动同步
+
+`save_user_chapter`、`promote_candidate`、`delete_chapter` 在同一 SQLite 事务内同步 `chapter:{id}` 文档：
+
+- 正文 revision 与 source_revision/hash 一致；
+- 旧 chunk/FTS/embedding 在保存新修订时替换；
+- 删除章节同时删除索引；
+- 章节索引 source_revision 记录 revision id + version。
+
+测试：`confirmed_chapter_revision_updates_and_deletes_chapter_index`。

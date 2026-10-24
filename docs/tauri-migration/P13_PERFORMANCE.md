@@ -35,6 +35,14 @@ db_mb=0.91
 本轮不新增缓存架构。
 
 
+Native 回归本轮执行：
+
+```text
+Director 4 passing
+Editor 2 passing
+Candidate Journal SIGKILL crash + restart 1 passing
+```
+
 仍未覆盖：
 
 - 500/1000 章增量索引收敛

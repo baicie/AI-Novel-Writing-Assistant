@@ -8,6 +8,7 @@ use novel_application::{
     PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord,
     StoryFactView, UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
+use novel_context::{Lexicon, fts_query, tokenize};
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
 use sqlx::Row;
@@ -679,6 +680,17 @@ impl NovelRepository for SqliteKernel {
             input.now_ms,
         )
         .await?;
+        sync_chapter_knowledge(
+            &mut tx,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.title,
+            &input.content,
+            &input.revision_id,
+            next_version,
+            input.now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         self.get_chapter(&input.novel_id, &input.chapter_id).await
     }
@@ -912,6 +924,7 @@ impl NovelRepository for SqliteKernel {
                 "章节内容已经变化，请重新打开后再删除。".into(),
             ));
         }
+        delete_chapter_knowledge(&mut tx, &input.chapter_id).await?;
         sqlx::query("DELETE FROM chapter_candidate WHERE chapter_id = ?")
             .bind(&input.chapter_id)
             .execute(tx.deref_mut())
@@ -1302,6 +1315,28 @@ impl NovelRepository for SqliteKernel {
             .execute(tx.deref_mut())
             .await
             .map_err(map_sql)?;
+        let content: String = candidate.try_get("content").map_err(map_sql)?;
+        let chapter_title: String = sqlx::query_scalar("SELECT title FROM chapter WHERE id = ?")
+            .bind(chapter_id)
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        let chapter_novel: String = sqlx::query_scalar("SELECT novel_id FROM chapter WHERE id = ?")
+            .bind(chapter_id)
+            .fetch_one(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sync_chapter_knowledge(
+            &mut tx,
+            &chapter_novel,
+            chapter_id,
+            &chapter_title,
+            &content,
+            revision_id,
+            version,
+            now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }
@@ -1383,6 +1418,125 @@ impl NovelRepository for SqliteKernel {
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }
+}
+
+async fn sync_chapter_knowledge(
+    tx: &mut crate::db::Tx<'_>,
+    novel_id: &str,
+    chapter_id: &str,
+    title: &str,
+    content: &str,
+    source_revision: &str,
+    source_version: i64,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    use sha2::{Digest, Sha256};
+    let document_id = format!("chapter:{chapter_id}");
+    let source_revision = format!("{source_revision}@v{source_version}");
+    let content_hash = hex::encode(Sha256::digest(content.as_bytes()));
+    let terms = fts_query(&tokenize(content, &Lexicon::default()));
+    let existing: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM knowledge_document WHERE id = ?")
+            .bind(&document_id)
+            .fetch_optional(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    let next_version = existing.unwrap_or(0) + 1;
+    sqlx::query(
+        "INSERT INTO knowledge_document
+           (id, novel_id, owner_type, title, body, version, index_status, created_at,
+            source_revision, source_content_hash, index_version, indexed_at)
+         VALUES (?, ?, 'chapter', ?, ?, ?, 'ready', ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           novel_id = excluded.novel_id, owner_type = 'chapter', title = excluded.title,
+           body = excluded.body, version = excluded.version, index_status = 'ready',
+           source_revision = excluded.source_revision,
+           source_content_hash = excluded.source_content_hash,
+           index_version = excluded.index_version, indexed_at = excluded.indexed_at",
+    )
+    .bind(&document_id)
+    .bind(novel_id)
+    .bind(title)
+    .bind(content)
+    .bind(next_version)
+    .bind(now_ms)
+    .bind(&source_revision)
+    .bind(&content_hash)
+    .bind(next_version)
+    .bind(now_ms)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    let chunks: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM knowledge_chunk WHERE document_id = ?")
+            .bind(&document_id)
+            .fetch_all(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    for chunk in &chunks {
+        sqlx::query("DELETE FROM knowledge_fts WHERE chunk_id = ?")
+            .bind(chunk)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sqlx::query("DELETE FROM embedding WHERE chunk_id = ?")
+            .bind(chunk)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    }
+    sqlx::query("DELETE FROM knowledge_chunk WHERE document_id = ?")
+        .bind(&document_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    let chunk_id = format!("{document_id}:0");
+    sqlx::query("INSERT INTO knowledge_chunk(id, document_id, ordinal, body, terms, source_revision, chunk_hash) VALUES (?, ?, 0, ?, ?, ?, ?)")
+        .bind(&chunk_id).bind(&document_id).bind(content).bind(&terms)
+        .bind(&source_revision).bind(&content_hash).execute(tx.deref_mut()).await.map_err(map_sql)?;
+    sqlx::query("INSERT INTO knowledge_fts(chunk_id, terms) VALUES (?, ?)")
+        .bind(&chunk_id)
+        .bind(&terms)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    Ok(())
+}
+
+async fn delete_chapter_knowledge(
+    tx: &mut crate::db::Tx<'_>,
+    chapter_id: &str,
+) -> Result<(), PortError> {
+    let document_id = format!("chapter:{chapter_id}");
+    let chunks: Vec<String> =
+        sqlx::query_scalar("SELECT id FROM knowledge_chunk WHERE document_id = ?")
+            .bind(&document_id)
+            .fetch_all(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    for chunk in &chunks {
+        sqlx::query("DELETE FROM knowledge_fts WHERE chunk_id = ?")
+            .bind(chunk)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        sqlx::query("DELETE FROM embedding WHERE chunk_id = ?")
+            .bind(chunk)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+    }
+    sqlx::query("DELETE FROM knowledge_chunk WHERE document_id = ?")
+        .bind(&document_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    sqlx::query("DELETE FROM knowledge_document WHERE id = ?")
+        .bind(&document_id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+    Ok(())
 }
 
 fn novel_platform_now() -> i64 {

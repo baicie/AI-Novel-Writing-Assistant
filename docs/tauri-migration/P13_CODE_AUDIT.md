@@ -40,9 +40,9 @@ Chunk 表已记录 source_revision/chunk_hash，但 SearchHit 原先只返回 ch
 
 ### P2-2 正式章节变更不会自动重建索引
 
-目前 `index_document` 只由显式知识导入/Tauri 命令调用；章节正式版本更新没有自动触发章节知识索引。
+原实现只由显式知识导入调用，章节正式版本更新不触发索引。
 
-状态：**OPEN / PARTIAL**。
+状态：**FIXED**（save_user_chapter / promote_candidate / delete_chapter 同事务同步 chapter 索引）。
 
 ### P2-3 时间衰减可能降低长期伏笔可见性
 
@@ -62,3 +62,9 @@ RRF/decay 是排序函数，Context Assembly 主要按 source priority/budget；
 Character State / Timeline / Plot Thread 已有读取与 Context 集成，但没有 Native 写入 Command/UI 与 AI 抽取确认链路。
 
 状态：**OPEN（P13.2 PARTIAL）**。
+
+### P1-4 零/超大输出预算在 DNS 解析之后才校验
+
+`OpenAiCompatibleProvider::generate` 原先先做 endpoint DNS 授权，再检查 max_output_tokens；0 预算测试可能先触发网络错误。
+
+状态：**FIXED**（预算校验前移到任何 DNS/网络调用之前）。

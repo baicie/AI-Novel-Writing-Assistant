@@ -144,3 +144,130 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     .unwrap();
     assert!(deleted.is_empty(), "deleted source must not be searchable");
 }
+
+#[tokio::test]
+async fn confirmed_chapter_revision_updates_and_deletes_chapter_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("chapter-index.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n".into(),
+            title: "章节索引".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        novel_application::NewChapter {
+            id: "ch1".into(),
+            novel_id: "n".into(),
+            title: "第一章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "ch1".into(),
+            expected_version: 0,
+            title: "第一章".into(),
+            content: "林动进入山门。".into(),
+            revision_id: "rev1".into(),
+            artifact_id: "art1".into(),
+            content_sha256: "hash1".into(),
+            now_ms: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let first = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("山门", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].chunk_id, "chapter:ch1:0");
+    assert!(
+        first[0]
+            .source_revision
+            .as_deref()
+            .unwrap_or("")
+            .contains("rev1")
+    );
+
+    NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "ch1".into(),
+            expected_version: 1,
+            title: "第一章".into(),
+            content: "林动进入祖祠。".into(),
+            revision_id: "rev2".into(),
+            artifact_id: "art2".into(),
+            content_sha256: "hash2".into(),
+            now_ms: 3,
+        },
+    )
+    .await
+    .unwrap();
+    let old = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("山门", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert!(old.is_empty(), "old chapter revision must leave the index");
+    let new = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("祖祠", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert_eq!(new.len(), 1);
+    assert!(
+        new[0]
+            .source_revision
+            .as_deref()
+            .unwrap_or("")
+            .contains("rev2")
+    );
+
+    NovelRepository::delete_chapter(
+        &kernel,
+        novel_application::DeleteChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "ch1".into(),
+            expected_version: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let deleted = KnowledgeRepository::search_keyword(
+        &kernel,
+        "n",
+        &fts_query(&tokenize("祖祠", &Lexicon::default())),
+        5,
+    )
+    .await
+    .unwrap();
+    assert!(deleted.is_empty(), "deleted chapter must leave the index");
+}
