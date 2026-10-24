@@ -122,3 +122,13 @@ test:memory 1 passing（时间线 + 伏笔 + 人物状态）
 Director 4 passing
 test:memory 1 passing（时间线 + 伏笔 + 人物状态）
 ```
+
+
+第 8 轮最终构建：
+
+```text
+test:memory 1 passing（时间线 + 伏笔 + 人物状态）
+Director 4 passing（上一构建同一 UI 面）
+```
+
+`.app` 20.74 MiB；DMG 9.3 MiB；audit PASS；Tauri Commands 75。
