@@ -158,3 +158,17 @@ test:memory-extraction 1 passing
 ```
 
 生产包 `.app` 21.04 MiB，DMG 9.4 MiB，audit PASS。
+
+
+## P13-C4 最终 Native 证据
+
+```text
+Director                 4 passing（最近同 UI 构建）
+memory                   1 passing
+memory-extraction        1 passing
+conflict                 1 passing
+knowledge CRUD           1 passing
+Index Retry              未完成 WDIO
+```
+
+最终 `.app` 21.35 MiB，DMG 9.5 MiB，production audit PASS。

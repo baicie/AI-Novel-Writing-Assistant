@@ -180,12 +180,11 @@
 
 - P13.3 仍无 50 章伏笔/不可靠叙述者大对抗集；P13.4 真实双窗口与知识库完整 Native 管理页未验收。
 
-## B-024 P13.5–P13.9
+## B-024 P13 Final Closure
 
-- P13.5：抽取/候选/确认/CAS/来源 hash 与 Native WDIO 已实现；身份/别名、关系、地点、能力物品仍无独立事实结构，未接真实模型。
-- P13.6：章节修改失效、同章人物冲突阻断、过期 CAS 已实现；地点冲突、死亡后行动、时间线循环、伏笔重复回收与裁决 UI 未完成。
-- P13.7：Native 知识 CRUD/重建/删除已实现并 WDIO；持久化索引任务、重试计数/next_run_at、重启恢复、归档未完成。
-- P13.8：50 章/50 问题 p13-large-v1 已完成 Lexical 指标；Vector/Hybrid/RRF/Context Policy 对照、人工语义标注、生成质量合同未完成。
-- P13.9：100/500/1000 章 1.4k 字正文与 8×10 并发检索已测；内存峰值、冷启动/预热、真实双窗口、系统输入法未验收。
+- P13-C1：候选冲突/过期来源检测、5 种裁决、CAS/幂等/历史、Native WDIO 已实现；地点/死亡/时间线循环/伏笔重复回收未实现，supersede 未形成旧事实链。
+- P13-C2：持久化 job/lease/attempt/backoff/recover 命令/队列 UI 已实现；章节保存未自动 enqueue、旧 job revision 强校验、真实启动恢复循环与 Index Retry WDIO 未完成。
+- P13-C3：50 问题 FTS/Vector(mock)/Hybrid/Policy 对照完成；Embedding 为 deterministic mock-64，不代表真实语义能力。
+- P13-C4：`cargo test --workspace --exclude novel-http` 268 passed；干净 worktree all-targets 实际执行见 P13_EXIT_REPORT；生产构建需重新执行。
 
-- 当前工作树的 `cargo test --all-targets` 会编译用户保留的未跟踪 `crates/novel-http/tests/integration_runs.rs`，该文件引用旧测试辅助 API 而失败；按约束不修改/不删除。干净 worktree all-targets 已通过。
+- P13-C4：Rust 268 passed；clean worktree all-targets 实际 327 passed；前端 186；生产 .app 21.35 MiB/DMG 9.5 MiB/audit PASS。Index Retry WDIO 与全部 Native SIGKILL 未在最终 HEAD 重跑。

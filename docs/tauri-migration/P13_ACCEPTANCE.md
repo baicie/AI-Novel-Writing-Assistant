@@ -1,51 +1,59 @@
 # P13 Acceptance
 
-基线：`5dbe47e3`。
+基线：`8b79a518` + C4 文档提交。  
+结论：**P13 主阶段关闭，整体 PARTIAL。**
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| P13.0 代码审计 | VERIFIED（审计） | 修复索引重建/失效/删除/预算前置 |
-| P13.1 RAG 索引生命周期 | IMPLEMENTED / PARTIAL | 来源版本、章节自动同步、重试、健康面板；无持久化后台重试队列 |
-| P13.2 长篇记忆 | IMPLEMENTED / PARTIAL | 三类事实、Native 表单、修改失效；无身份/关系/地点独立结构 |
-| P13.3 对抗评测 | PARTIAL | 8 case 确定性指标 + 50 case 合成检索；无真实语义标注 |
-| P13.4 Native/性能 | PARTIAL | Director/Editor/SIGKILL、知识库 CRUD、1000 章性能；双窗口未验收 |
-| P13.5 记忆抽取 | IMPLEMENTED / PARTIAL | 抽取→候选→人工确认→正式事实→Context；Native WDIO 通过；事实类型仅 3 类 |
-| P13.6 冲突裁决 | PARTIAL | 来源失效/CAS + 同章人物冲突阻断；无完整冲突检测与裁决 UI |
-| P13.7 知识库 Native | IMPLEMENTED / PARTIAL | Native 列表/筛选/新增/编辑/删除 + WDIO；无持久化索引任务/归档 |
-| P13.8 大对抗集 | PARTIAL | p13-large-v1 50 章/50 问题；仅 Lexical/FTS，无 Vector/Hybrid 对照 |
-| P13.9 真实性能 | PARTIAL | 100/500/1000 章 1.4k 字正文 + 8×10 并发检索；无内存峰值/冷启动/真实双窗口 |
-
-不得将 P13.5–P13.9 全部标记 VERIFIED。
+| P13.0 审计 | VERIFIED（审计） | 索引重建/失效/删除/预算前置修复 |
+| P13.1 RAG 索引生命周期 | IMPLEMENTED / PARTIAL | 来源版本、章节同步、重试、健康面板；旧 job revision 强校验未完成 |
+| P13.2 长篇记忆 | IMPLEMENTED / PARTIAL | 三类事实、Native 表单、失效；无身份/关系/地点结构 |
+| P13.3 对抗评测 | PARTIAL | 8 case + 50 case 合成；无真实语义标注 |
+| P13.4 Native/性能 | PARTIAL | Director/Editor/SIGKILL、1000 章；双窗口未验收 |
+| P13.5 记忆抽取 | IMPLEMENTED / PARTIAL | 候选/证据/确认/CAS/Native WDIO；事实类型仅 3 类 |
+| P13.6 冲突裁决 | PARTIAL | 候选/过期来源检测、5 种裁决、CAS/幂等/历史、Native WDIO；无地点/死亡/时间线检测 |
+| P13.7 知识库 Native | IMPLEMENTED / PARTIAL | Native CRUD、持久化 job/lease/退避/恢复命令/队列 UI；自动 enqueue/重启循环未完成 |
+| P13.8 大对抗集 | PARTIAL | 50 章/50 问题；FTS/Vector(mock)/Hybrid/Policy 对照；无真实 Embedding |
+| P13.9 真实性能 | PARTIAL | 100/500/1000 章 + 8×10 并发；无内存峰值/冷启动/双窗口 |
 
 ## 关键测试
 
 ```text
-p13_memory_extraction                 4 passed
-p13_large_benchmark                   1 passed
-p13_scale_baseline                    1 passed
-p13_story_memory                      通过
-cargo test --workspace --exclude novel-http  264 passed, 0 failed（1345.54s）
-clean worktree all-targets --no-run              PASS
-current worktree all-targets                     BLOCKED by preserved untracked integration_runs.rs (不修改)
-p13_adversarial_retrieval             1 passed
-knowledge_lifecycle                   3 passed
-memory-extraction WDIO                1 passing
-knowledge CRUD WDIO                   1 passing
-memory forms WDIO                     1 passing
-Director WDIO                         4 passing
+p13_memory_extraction        5 passed（含冲突裁决）
+p13_index_jobs               2 passed
+p13_retrieval_comparison     1 passed
+p13_large_benchmark          1 passed
+p13_scale_baseline           1 passed
+p13_story_memory             1 passed
+p13_adversarial_retrieval     1 passed
+knowledge_lifecycle           3 passed
+```
+
+Native：
+
+```text
+Director                      4 passing
+memory                        1 passing
+memory-extraction             1 passing
+conflict                      1 passing
+knowledge CRUD                1 passing
+Index Retry                  未完成
 ```
 
 ## 未完成
 
-- P13.5：身份/别名、关系、地点、能力物品的独立事实结构；真实模型抽取质量。
-- P13.6：地点冲突、死亡后行动、时间线循环、伏笔重复回收、裁决 UI。
-- P13.7：持久化索引任务、重启恢复、归档、最后成功时间/失败原因的完整管理页。
-- P13.8：Vector/Hybrid/RRF/Context Policy 同快照对照；人工语义标注；生成质量合同。
-- P13.9：内存峰值、冷启动/预热、真实双窗口、系统输入法、真实 Provider。
+- 结构化身份/关系/地点/死亡/能力物品事实；
+- 冲突地点/死亡/时间线循环/伏笔重复回收检测；
+- 章节保存自动 enqueue 索引 job、旧 job revision 强校验、启动恢复循环；
+- 真实 Embedding 与真实 Provider；
+- 真实双窗口/输入法；
+- 最终 C4 全量测试与生产构建数字见 `P13_EXIT_REPORT.md`。
 
-## Native 构建
+## C4 最终构建
 
-- `.app` 21.04 MiB
-- DMG 9.4 MiB
-- Commands / Handlers / Capabilities：82 / 82 / 82
-- Production audit：PASS
+- `.app` 21.35 MiB
+- DMG 9.5 MiB，hdiutil verify VALID
+- Commands / Handlers / Capabilities：89 / 89 / 89
+- Tauri release audit PASS
+- Rust：268 passed（current）；clean worktree all-targets 327 passed
+- Frontend：186 passed；typecheck/build PASS

@@ -41,3 +41,9 @@ p13_index_jobs 2 passed
 - Embedding 失败分类仅保留文本错误。
 
 因此 G5 仍为 PARTIAL。
+
+
+## Native
+
+Director 知识索引面板显示队列、状态、尝试次数、错误与“重试任务”“刷新队列”。
+未做 Index Retry WDIO。
