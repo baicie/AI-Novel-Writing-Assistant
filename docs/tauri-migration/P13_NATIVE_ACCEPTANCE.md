@@ -84,3 +84,10 @@ Director 4 passing（含长篇记忆只读面板）
 
 
 第 4 轮新增：Director 长篇记忆区域支持作者记录时间线事实（真实 Tauri Command）。
+
+
+第 4 轮最新构建：
+
+```text
+Director 4 passing（含长篇记忆面板与时间线记录表单）
+```
