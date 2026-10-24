@@ -13,6 +13,7 @@ pub type Tx<'a> = sqlx::Transaction<'a, Sqlite>;
 
 pub struct SqliteKernel {
     pub(crate) pool: SqlitePool,
+    pub(crate) index_write_lock: tokio::sync::Mutex<()>,
 }
 
 impl SqliteKernel {
@@ -32,7 +33,10 @@ impl SqliteKernel {
             .await
             .map_err(map_sql)?;
         migrate(&pool).await?;
-        let kernel = Self { pool };
+        let kernel = Self {
+            pool,
+            index_write_lock: tokio::sync::Mutex::new(()),
+        };
         kernel.seed_prompts().await?;
         Ok(kernel)
     }

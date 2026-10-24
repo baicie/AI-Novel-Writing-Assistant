@@ -14,6 +14,9 @@ use crate::db::{SqliteKernel, map_sql};
 #[async_trait]
 impl KnowledgeRepository for SqliteKernel {
     async fn index_document(&self, document: NewDocument) -> Result<(), PortError> {
+        // Serialize index writers in this process so an older revision cannot
+        // race a newer builder after both read the same pre-write snapshot.
+        let _index_guard = self.index_write_lock.lock().await;
         let source_hash = document
             .source_content_hash
             .clone()
@@ -158,14 +161,22 @@ impl KnowledgeRepository for SqliteKernel {
                 .bind(i64::from(u8::from(embedding.normalized))).bind(encode_f32(&embedding.vector))
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
         }
-        sqlx::query(
-            "UPDATE knowledge_document SET index_status = 'ready', indexed_at = ? WHERE id = ?",
+        let ready = sqlx::query(
+            "UPDATE knowledge_document SET index_status = 'ready', indexed_at = ?
+             WHERE id = ? AND index_version = ? AND source_revision = ?",
         )
         .bind(document.created_at)
         .bind(&document.id)
+        .bind(next_version)
+        .bind(&source_revision)
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
+        if ready.rows_affected() != 1 {
+            return Err(PortError::Conflict(
+                "索引写入已被更新的来源版本取代，本次重建已回滚。".into(),
+            ));
+        }
         tx.commit().await.map_err(map_sql)?;
         Ok(())
     }

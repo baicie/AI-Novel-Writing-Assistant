@@ -1,5 +1,6 @@
 use novel_application::{
-    IndexJobRepository, KnowledgeRepository, NewDocument, NewIndexJob, NewNovel, NovelRepository,
+    IndexJobRepository, KnowledgeRepository, NewChapter, NewDocument, NewIndexJob, NewNovel,
+    NovelRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 
@@ -197,7 +198,7 @@ async fn stale_epoch_and_stale_source_revision_cannot_complete() {
             .is_err()
     );
     // Source revision changed after the job was claimed: the job is obsolete for completion.
-    let mut newer = novel_application::NewDocument {
+    let newer = novel_application::NewDocument {
         id: "ch1".into(),
         novel_id: "n".into(),
         owner_type: "document".into(),
@@ -232,4 +233,45 @@ async fn stale_epoch_and_stale_source_revision_cannot_complete() {
         .await
         .unwrap();
     assert_eq!(obsolete.status, "obsolete");
+}
+
+#[tokio::test]
+async fn chapter_save_records_automatic_succeeded_index_job() {
+    let (_dir, kernel) = fixture().await;
+    NovelRepository::create_chapter(
+        &kernel,
+        NewChapter {
+            id: "chx".into(),
+            novel_id: "n".into(),
+            title: "自动索引章".into(),
+            sort_order: 2,
+            volume_id: None,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::save_user_chapter(
+        &kernel,
+        novel_application::SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "chx".into(),
+            expected_version: 0,
+            title: "自动索引章".into(),
+            content: "自动入队章节正文。".into(),
+            revision_id: "rev-auto".into(),
+            artifact_id: "artifact-auto".into(),
+            content_sha256: "hash-auto".into(),
+            now_ms: 5,
+        },
+    )
+    .await
+    .unwrap();
+    let jobs = kernel.list_index_jobs("n").await.unwrap();
+    let job = jobs
+        .iter()
+        .find(|job| job.source_id == "chapter:chx")
+        .expect("automatic chapter index job");
+    assert_eq!(job.status, "succeeded");
+    assert_eq!(job.source_revision, "rev-auto@v1");
 }

@@ -89,3 +89,20 @@ async fn generic_delete_cannot_remove_system_chapter_index() {
     );
     assert_eq!(revision(&kernel, "chapter:ch1").await, "rev@v1");
 }
+
+#[tokio::test]
+async fn concurrent_old_and_new_revision_write_keeps_new_chunk() {
+    let (_dir, kernel) = kernel().await;
+    let kernel = std::sync::Arc::new(kernel);
+    let old =
+        KnowledgeRepository::index_document(kernel.as_ref(), doc("d1", "n1", "document", "rev@v2"));
+    let new =
+        KnowledgeRepository::index_document(kernel.as_ref(), doc("d1", "n1", "document", "rev@v3"));
+    let (old_result, new_result) = tokio::join!(old, new);
+    assert!(old_result.is_ok() || new_result.is_ok());
+    assert_eq!(revision(&kernel, "d1").await, "rev@v3");
+    let chunk_revision: String = sqlx::query_scalar(
+        "SELECT c.source_revision FROM knowledge_chunk c JOIN knowledge_document d ON d.id = c.document_id WHERE d.id = 'd1'",
+    ).fetch_one(kernel.pool()).await.unwrap();
+    assert_eq!(chunk_revision, "rev@v3");
+}

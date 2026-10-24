@@ -729,6 +729,15 @@ impl NovelRepository for SqliteKernel {
             input.now_ms,
         )
         .await?;
+        record_chapter_index_job(
+            &mut tx,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.revision_id,
+            next_version,
+            input.now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         self.get_chapter(&input.novel_id, &input.chapter_id).await
     }
@@ -1474,9 +1483,19 @@ impl NovelRepository for SqliteKernel {
             now_ms,
         )
         .await?;
+        record_chapter_index_job(
+            &mut tx,
+            &chapter_novel,
+            chapter_id,
+            revision_id,
+            version,
+            now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }
+
     async fn promote_candidate_fenced(
         &self,
         fence: &novel_application::LeaseFence,
@@ -1590,6 +1609,37 @@ async fn invalidate_story_facts(
     .bind(now_ms)
     .bind(chapter_id)
     .bind(new_revision)
+    .execute(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    Ok(())
+}
+
+async fn record_chapter_index_job(
+    tx: &mut crate::db::Tx<'_>,
+    novel_id: &str,
+    chapter_id: &str,
+    source_revision: &str,
+    index_version: i64,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    let document_id = format!("chapter:{chapter_id}");
+    let revision = format!("{source_revision}@v{index_version}");
+    sqlx::query(
+        "INSERT INTO knowledge_index_job
+           (id, command_id, novel_id, source_type, source_id, source_revision, index_version,
+            status, attempt_count, max_attempts, claim_epoch, next_run_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'chapter', ?, ?, ?, 'succeeded', 0, 5, 0, 0, ?, ?)
+         ON CONFLICT(command_id) DO NOTHING",
+    )
+    .bind(format!("auto-index-{chapter_id}-{index_version}"))
+    .bind(format!("auto-chapter-index:{chapter_id}:{index_version}"))
+    .bind(novel_id)
+    .bind(&document_id)
+    .bind(revision)
+    .bind(index_version)
+    .bind(now_ms)
+    .bind(now_ms)
     .execute(tx.deref_mut())
     .await
     .map_err(map_sql)?;

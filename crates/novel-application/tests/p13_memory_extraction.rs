@@ -602,3 +602,77 @@ async fn concurrent_resolution_writes_once_and_hash_guards_command_reuse() {
         "same commandId with different decision must conflict"
     );
 }
+
+#[tokio::test]
+async fn decision_write_failure_rolls_back_confirmed_fact() {
+    let (kernel, service, novel, _chapter, conflicts) = conflict_fixture().await;
+    let conflict = conflicts
+        .into_iter()
+        .find(|conflict| conflict.status == "open")
+        .unwrap();
+    let chosen = conflict.candidate_ids[0].clone();
+    sqlx::query(
+        "CREATE TRIGGER fail_conflict_decision BEFORE INSERT ON memory_conflict_decision
+         BEGIN SELECT RAISE(ABORT, 'injected decision failure'); END",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    let failed = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "atomic-fail",
+            "confirm_new",
+            Some(&chosen),
+            "注入失败",
+            "author",
+        )
+        .await;
+    assert!(failed.is_err());
+    let facts = NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+        .await
+        .unwrap();
+    assert!(
+        facts.is_empty(),
+        "fact write must roll back when decision insert fails"
+    );
+    let decisions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_conflict_decision")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(decisions, 0);
+    let current = service.list_conflicts(&novel).await.unwrap();
+    assert_eq!(
+        current
+            .iter()
+            .find(|item| item.id == conflict.id)
+            .unwrap()
+            .status,
+        "open"
+    );
+    sqlx::query("DROP TRIGGER fail_conflict_decision")
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    let retried = service
+        .resolve_conflict(
+            &conflict.id,
+            conflict.version,
+            "atomic-fail",
+            "confirm_new",
+            Some(&chosen),
+            "注入失败",
+            "author",
+        )
+        .await
+        .unwrap();
+    assert_eq!(retried.status, "resolved");
+    assert_eq!(
+        NovelRepository::list_story_facts(kernel.as_ref(), &novel, 2)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
