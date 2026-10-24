@@ -1,6 +1,6 @@
 # P13 Acceptance
 
-基线：`02d4c414`（P13.8/P13.9 测试提交后；文档提交另行记录）。
+基线：`70b03f61`（P13.8/P13.9 测试与文档提交后）。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
@@ -24,6 +24,7 @@ p13_memory_extraction                 4 passed
 p13_large_benchmark                   1 passed
 p13_scale_baseline                    1 passed
 p13_story_memory                      通过
+cargo test --workspace --exclude novel-http  264 passed, 0 failed（1345.54s）
 p13_adversarial_retrieval             1 passed
 knowledge_lifecycle                   3 passed
 memory-extraction WDIO                1 passing

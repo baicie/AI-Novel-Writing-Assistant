@@ -49,3 +49,8 @@ source_revision_accuracy=1.00 future_leak=0
 - Literature quality.
 
 These must not be inferred from ScriptedLlm clean output.
+
+
+## P13.8 更新
+
+50 章/50 问题 `p13-large-v1` 结果见 `P13_ADVERSARIAL_BENCHMARK.md`；仍为 Lexical-only，不能替代 Vector/Hybrid 对照。
