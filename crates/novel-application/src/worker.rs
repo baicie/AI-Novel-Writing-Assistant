@@ -1797,4 +1797,16 @@ mod structured_validation_tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
+
+    #[test]
+    fn adversarial_issue_identity_does_not_merge_uncertain_evidence() {
+        let same = super::stable_issue_key("timeline", Some("ch-1"), "证据不同描述");
+        let same_other_description =
+            super::stable_issue_key("timeline", Some("ch-1"), "证据不同描述");
+        let different_evidence = super::stable_issue_key("timeline", Some("ch-1"), "另一条证据");
+        let different_source = super::stable_issue_key("timeline", Some("ch-2"), "证据不同描述");
+        assert_eq!(same, same_other_description);
+        assert_ne!(same, different_evidence);
+        assert_ne!(same, different_source);
+    }
 }

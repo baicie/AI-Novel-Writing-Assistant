@@ -20,6 +20,8 @@ async fn index(kernel: &SqliteKernel, id: &str, owner: &str, body: &str, vector:
             body: body.into(),
             terms: fts_query(&tokenize(body, &lexicon)),
             created_at: 1,
+            source_revision: None,
+            source_content_hash: None,
             embedding: vector.map(|vector| NewEmbedding {
                 model: "local".into(),
                 normalized: true,

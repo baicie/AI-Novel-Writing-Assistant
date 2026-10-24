@@ -161,6 +161,17 @@ pub struct NewAttempt {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoryFactView {
+    pub id: String,
+    pub fact_type: String,
+    pub body: String,
+    pub chapter_order: i32,
+    pub source_revision: Option<String>,
+    pub status: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewCandidate {
     pub id: String,
@@ -257,6 +268,9 @@ pub struct SearchHit {
     pub chunk_id: String,
     pub owner_type: String,
     pub body: String,
+    pub source_revision: Option<String>,
+    pub chunk_hash: Option<String>,
+    pub index_version: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +376,11 @@ pub trait NovelRepository: Send + Sync {
         &self,
         novel_id: &str,
     ) -> Result<Vec<novel_domain::World>, PortError>;
+    async fn list_story_facts(
+        &self,
+        novel_id: &str,
+        before_chapter_order: i32,
+    ) -> Result<Vec<StoryFactView>, PortError>;
     async fn get_chapter(
         &self,
         novel_id: &str,

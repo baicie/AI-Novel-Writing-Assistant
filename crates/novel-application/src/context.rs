@@ -282,6 +282,31 @@ pub async fn assemble_director_context(
         });
     }
 
+    let story_facts = novels.list_story_facts(novel_id, target.sort_order).await?;
+    if story_facts.is_empty() {
+        drafts.push(SourceDraft {
+            source_type: "story_facts",
+            source_id: novel_id.to_string(),
+            source_version: None,
+            source_status: "missing".into(),
+            text: String::new(),
+            mandatory: false,
+            priority: 6,
+        });
+    } else {
+        let text = serde_json::to_string(&story_facts)
+            .map_err(|_| AppError::integrity("剧情事实无法序列化"))?;
+        drafts.push(SourceDraft {
+            source_type: "story_facts",
+            source_id: novel_id.to_string(),
+            source_version: None,
+            source_status: "confirmed".into(),
+            text,
+            mandatory: false,
+            priority: 6,
+        });
+    }
+
     let chapters = novels.list_chapters(novel_id).await?;
     let mut recent: Vec<&ChapterSnapshot> = chapters
         .iter()

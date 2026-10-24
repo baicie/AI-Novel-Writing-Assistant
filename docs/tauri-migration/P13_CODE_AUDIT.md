@@ -34,9 +34,9 @@
 
 ### P2-1 SearchHit 不携带 sourceRevision
 
-当前 chunk 表已记录 `source_revision`/`chunk_hash`，但 `SearchHit` 只返回 chunk_id/owner/body，Native UI 无法直接展示来源修订。
+Chunk 表已记录 source_revision/chunk_hash，但 SearchHit 原先只返回 chunk_id/owner/body。
 
-状态：**OPEN**，P13.1 后续补 API。
+状态：**FIXED**（SearchHit 现在返回 sourceRevision、chunkHash、indexVersion）。
 
 ### P2-2 正式章节变更不会自动重建索引
 
@@ -55,3 +55,10 @@ RRF/decay 是排序函数，Context Assembly 主要按 source priority/budget；
 - promptText 只存储在本地 workflow artifact；未发现外部导出/上报路径。
 - 生产 Bundle 未包含 WDIO、E2E Key、recovery_worker。
 - 用户 untracked `integration_runs.rs` 未触碰。
+
+
+### P2-4 长期事实写入链路未闭环
+
+Character State / Timeline / Plot Thread 已有读取与 Context 集成，但没有 Native 写入 Command/UI 与 AI 抽取确认链路。
+
+状态：**OPEN（P13.2 PARTIAL）**。

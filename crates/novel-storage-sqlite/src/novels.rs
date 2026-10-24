@@ -6,7 +6,7 @@ use novel_application::{
     CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult,
     NewChapter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary, PortError,
     PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord, SaveChapterRecord,
-    UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
+    StoryFactView, UpdateChapterMetaRecord, UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
 use novel_workflow::chapter_scope;
@@ -1059,6 +1059,85 @@ impl NovelRepository for SqliteKernel {
                 })
             })
             .collect()
+    }
+
+    async fn list_story_facts(
+        &self,
+        novel_id: &str,
+        before_chapter_order: i32,
+    ) -> Result<Vec<StoryFactView>, PortError> {
+        let mut facts = Vec::new();
+        let states = sqlx::query(
+            "SELECT cs.id, cs.body, cs.chapter_order, cs.source_revision, cs.status
+             FROM character_state cs JOIN character c ON c.id = cs.character_id
+             WHERE c.novel_id = ? AND cs.status = 'confirmed' AND cs.chapter_order <= ?
+               AND cs.rowid = (
+                 SELECT cs2.rowid FROM character_state cs2
+                 WHERE cs2.character_id = cs.character_id AND cs2.chapter_order <= ?
+                 ORDER BY cs2.chapter_order DESC, cs2.updated_at DESC, cs2.rowid DESC LIMIT 1
+               )
+             ORDER BY cs.chapter_order",
+        )
+        .bind(novel_id)
+        .bind(before_chapter_order)
+        .bind(before_chapter_order)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        for row in &states {
+            facts.push(StoryFactView {
+                id: row.try_get("id").map_err(map_sql)?,
+                fact_type: "character_state".into(),
+                body: row.try_get("body").map_err(map_sql)?,
+                chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
+                source_revision: row.try_get("source_revision").map_err(map_sql)?,
+                status: row.try_get("status").map_err(map_sql)?,
+            });
+        }
+        let events = sqlx::query(
+            "SELECT id, body, chapter_order, source_revision, status
+             FROM timeline_event
+             WHERE novel_id = ? AND status = 'confirmed' AND chapter_order <= ?
+             ORDER BY chapter_order, id",
+        )
+        .bind(novel_id)
+        .bind(before_chapter_order)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        for row in &events {
+            facts.push(StoryFactView {
+                id: row.try_get("id").map_err(map_sql)?,
+                fact_type: "timeline_event".into(),
+                body: row.try_get("body").map_err(map_sql)?,
+                chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
+                source_revision: row.try_get("source_revision").map_err(map_sql)?,
+                status: row.try_get("status").map_err(map_sql)?,
+            });
+        }
+        let threads = sqlx::query(
+            "SELECT id, title || '：' || body AS body, opened_chapter_order AS chapter_order,
+                    source_revision, status
+             FROM plot_thread
+             WHERE novel_id = ? AND opened_chapter_order <= ? AND status IN ('open','resolved')
+             ORDER BY opened_chapter_order, id",
+        )
+        .bind(novel_id)
+        .bind(before_chapter_order)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        for row in &threads {
+            facts.push(StoryFactView {
+                id: row.try_get("id").map_err(map_sql)?,
+                fact_type: "plot_thread".into(),
+                body: row.try_get("body").map_err(map_sql)?,
+                chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
+                source_revision: row.try_get("source_revision").map_err(map_sql)?,
+                status: row.try_get("status").map_err(map_sql)?,
+            });
+        }
+        Ok(facts)
     }
 
     async fn create_volume(&self, volume: NewVolume) -> Result<VolumeSnapshot, PortError> {

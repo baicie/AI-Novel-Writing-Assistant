@@ -45,7 +45,8 @@ cargo test -p novel-storage-sqlite --test knowledge_lifecycle
 
 ## 未完成
 
-- SearchHit 尚未返回 sourceRevision/chunkHash。
+- SearchHit 已返回 sourceRevision/chunkHash/indexVersion。
+- 正式章节保存仍未自动触发章节索引。
 - 正式章节保存未自动触发章节索引。
 - 索引失败重试队列与后台重建未实现。
 - 跨小说/未来章节的章节索引 E2E 尚未完成。

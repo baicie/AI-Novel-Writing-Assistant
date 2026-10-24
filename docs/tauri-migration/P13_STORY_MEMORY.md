@@ -1,8 +1,23 @@
 # P13.2 Long-Term Story Memory
 
-## 状态：NOT_STARTED
+## 状态：IMPLEMENTED / PARTIAL
 
-本轮已完成 P13.0/P13.1 审计与索引生命周期；尚未实施 P13.2。
+已实现最小长期记忆基础：
+
+- 复用 character_state / timeline_event，新增 plot_thread。
+- 事实字段：source_revision、status、updated_at。
+- Context 新增 `story_facts` 来源。
+- 人物状态按目标章节之前的最新有效状态选择。
+- 时间线事件与未回收伏笔按目标章节过滤。
+- 30 章合成测试：目标第 20 章使用“掌门”状态，不使用早期“外门弟子”、不使用未来“死亡”和未来事件；目标第 30 章可看到死亡与大战事实。
+
+仍未完成：
+
+- 写入 Command/UI 与 AI 抽取链路。
+- proposed / disputed / superseded 状态流转。
+- 作者修改早期章节后的派生事实失效/重核对。
+- 地点迁移、能力限制、关系变更的完整领域字段。
+- 别名/同名人物解析。
 
 ## 现有基础
 

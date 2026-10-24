@@ -207,7 +207,7 @@ impl KnowledgeRepository for SqliteKernel {
             return Ok(Vec::new());
         }
         let rows = sqlx::query(
-            "SELECT knowledge_fts.chunk_id, d.owner_type, c.body
+            "SELECT knowledge_fts.chunk_id, d.owner_type, c.body, c.source_revision, c.chunk_hash, d.index_version
              FROM knowledge_fts
              JOIN knowledge_chunk c ON c.id = knowledge_fts.chunk_id
              JOIN knowledge_document d ON d.id = c.document_id
@@ -232,7 +232,8 @@ impl KnowledgeRepository for SqliteKernel {
         limit: i64,
     ) -> Result<Vec<SearchHit>, PortError> {
         let rows = sqlx::query(
-            "SELECT c.id AS chunk_id, d.owner_type, c.body, e.vector_blob
+            "SELECT c.id AS chunk_id, d.owner_type, c.body, c.source_revision, c.chunk_hash,
+                    d.index_version, e.vector_blob
              FROM embedding e
              JOIN knowledge_chunk c ON c.id = e.chunk_id
              JOIN knowledge_document d ON d.id = c.document_id
@@ -303,5 +304,8 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<SearchHit, PortError> {
         chunk_id: row.try_get("chunk_id").map_err(map_sql)?,
         owner_type: row.try_get("owner_type").map_err(map_sql)?,
         body: row.try_get("body").map_err(map_sql)?,
+        source_revision: row.try_get("source_revision").map_err(map_sql)?,
+        chunk_hash: row.try_get("chunk_hash").map_err(map_sql)?,
+        index_version: row.try_get("index_version").map_err(map_sql)?,
     })
 }

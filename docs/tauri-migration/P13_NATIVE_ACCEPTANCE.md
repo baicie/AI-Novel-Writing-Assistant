@@ -1,6 +1,6 @@
 # P13.4 Native Acceptance
 
-## 状态：NOT_STARTED / PARTIAL
+## 状态：PARTIAL / NOT_STARTED
 
 本轮未修改 Native UI，仅新增索引 Tauri Command 与文档。
 
@@ -19,3 +19,6 @@
 - Editor SIGKILL / Candidate Journal SIGKILL
 
 知识库管理 UI 未在本轮做 Native 验收。
+
+
+本轮新增 Tauri `delete_knowledge_document` 与 index source fields，但未做 Native UI 验收；不能以 Rust 测试替代。

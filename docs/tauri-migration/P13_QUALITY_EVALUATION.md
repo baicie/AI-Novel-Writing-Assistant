@@ -1,6 +1,16 @@
 # P13.3 Quality Debt Association & Adversarial Evaluation
 
-## 状态：PARTIAL（沿用 P11.3 核心，P13.3 对抗集未实施）
+## 状态：PARTIAL
+
+本轮新增：
+
+- 同一问题不同描述不改变稳定 key。
+- 相同描述不同证据生成不同 key（保持独立问题）。
+- Source 变化生成不同 key。
+- 作者 accepted 后同一问题再次出现，不会静默重新 open。
+- accepted ≠ resolved 回归。
+
+仍未实施完整 adversarial retrieval 集与指标。
 
 已有：
 

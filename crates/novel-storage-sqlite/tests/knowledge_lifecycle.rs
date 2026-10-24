@@ -83,6 +83,9 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     .await
     .unwrap();
     assert_eq!(fresh.len(), 1);
+    assert_eq!(fresh[0].source_revision.as_deref(), Some("rev-2"));
+    assert_eq!(fresh[0].index_version, 2);
+    assert!(fresh[0].chunk_hash.is_some());
 
     // Simulate a crash after the "building" marker: stale rows must not be served.
     sqlx::query("UPDATE knowledge_document SET index_status='building' WHERE id='char'")
