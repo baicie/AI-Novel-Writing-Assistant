@@ -41,3 +41,12 @@ Start HEAD: `27cf1bf5`
 - workspace: 286 passed.
 - all-targets in progress.
 - Native H/E/F/G/I phases still not started or partial.
+
+## 2026-10-26 01:05 Final
+
+- workspace: 286 passed
+- clean all-targets: 345 passed
+- exact open_run-before-bind recovery test: PASS
+- Native batch 5 PASS; batch two-process restart PASS
+- production .app 21.99 MiB; DMG 9.8 MiB; audit PASS; commands 99/99
+- not started: Task Center, Native Save/volume, Native Index Retry, multi-window, structured memory
