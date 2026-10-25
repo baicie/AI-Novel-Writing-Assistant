@@ -32,3 +32,20 @@ Start HEAD: `f0140edd`
 - Batch crash window deterministic SIGKILL not yet added.
 - 10 chapter stress not run.
 - Task Center not unified.
+
+## 2026-10-25 19:45 Final
+
+- Native 3-chapter batch E2E: PASS
+  - 3 distinct Run IDs
+  - 3 official chapter revisions
+  - existing gates/approval used
+  - full-book export after completion contains chapters
+- Batch cancel through existing Run cancel: PASS
+- Batch domain: 2 repository tests PASS
+- Full workspace: 285 passed
+- Clean worktree all-targets: 344 passed
+- editor/candidate crash/restart: PASS on final UI
+- production .app: 21.96 MiB
+- DMG: 9.7 MiB; hdiutil VALID; audit PASS
+- Commands 99 / Capabilities 99
+- Main remaining gap: batch restart/resume E2E; pause E2E; deterministic crash window; 10-chapter stress; Task Center.
