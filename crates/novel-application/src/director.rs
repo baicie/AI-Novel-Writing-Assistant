@@ -1049,6 +1049,10 @@ impl DirectorService {
             .await?)
     }
 
+    pub async fn run_id_for_command(&self, command_id: &str) -> Result<Option<String>, AppError> {
+        Ok(self.runs.run_id_for_command(command_id).await?)
+    }
+
     pub async fn list_runs(&self, novel_id: &str) -> Result<Vec<crate::dto::RunSummary>, AppError> {
         Ok(self.runs.list_runs(novel_id).await?)
     }

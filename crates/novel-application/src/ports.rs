@@ -917,6 +917,8 @@ pub trait WorkflowRepository: Send + Sync {
     async fn list_all_runs(&self) -> Result<Vec<RunSummary>, PortError>;
     /// 读取持久化控制状态，供 Director 投影使用。
     async fn run_control(&self, run_id: &str) -> Result<RunControl, PortError>;
+    /// Resolve an idempotent open-run command to its committed Run, if any.
+    async fn run_id_for_command(&self, command_id: &str) -> Result<Option<String>, PortError>;
     /// 读取某个 Run 的产物，按版本倒序。
     async fn run_artifacts(&self, run_id: &str) -> Result<Vec<RunArtifactView>, PortError>;
     /// 读取某个 Run 的模型调用汇总。

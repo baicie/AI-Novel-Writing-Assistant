@@ -1601,6 +1601,14 @@ impl WorkflowRepository for SqliteKernel {
             .collect()
     }
 
+    async fn run_id_for_command(&self, command_id: &str) -> Result<Option<String>, PortError> {
+        sqlx::query_scalar("SELECT run_id FROM workflow_command WHERE command_id = ?")
+            .bind(command_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)
+    }
+
     async fn run_control(&self, run_id: &str) -> Result<RunControl, PortError> {
         let row = sqlx::query(
             "SELECT status, version, pause_json, gate_json, cursor_step_id, failure_reason

@@ -225,17 +225,31 @@ impl BatchService {
         expected_version: i64,
         now_ms: i64,
     ) -> Result<BatchRunView, AppError> {
+        // Close the scheduling boundary before cancelling an attached Run.
+        let cancelled = self
+            .set_status_retry(id, expected_version, "cancelled", now_ms)
+            .await?;
         let current = self.repository.get_batch(id).await?;
-        if let Some(item) = current.items.get(current.cursor.max(0) as usize)
-            && let Some(run_id) = &item.run_id
-        {
-            // Cancel through the existing Run command, never by rewriting Run status.
+        let current_item = current.items.get(current.cursor.max(0) as usize);
+        if let Some(run_id) = current_item.and_then(|item| item.run_id.as_deref()) {
             let _ = director
                 .cancel(&format!("batch:{id}:cancel-current-run"), run_id)
                 .await;
+        } else if let Some(item) = current_item {
+            // An open_run may have committed just before cancellation.
+            let command = format!("batch:{}:item:{}:open", id, item.id);
+            if let Some(run_id) = director.run_id_for_command(&command).await?
+                && !current
+                    .items
+                    .iter()
+                    .any(|entry| entry.run_id.as_deref() == Some(run_id.as_str()))
+            {
+                let _ = director
+                    .cancel(&format!("batch:{id}:cancel-orphan"), &run_id)
+                    .await;
+            }
         }
-        self.set_status_retry(id, expected_version, "cancelled", now_ms)
-            .await
+        Ok(cancelled)
     }
 
     async fn set_status_retry(
@@ -451,14 +465,22 @@ impl BatchService {
         {
             Ok(updated) => Ok(Some(updated)),
             Err(PortError::Conflict(_)) => {
-                // A concurrent Cancel or newer Scheduler claimed the Batch while the
-                // Run was being opened. Cancel the orphan Run through the legal command.
-                let _ = director
-                    .cancel(
-                        &format!("batch:{}:orphan:{}", batch.id, outcome.run_id),
-                        &outcome.run_id,
-                    )
-                    .await;
+                // A lost fence never proves the Run is orphaned: a newer Scheduler may
+                // legally adopt the same deterministic Run. Only a cancelled Batch
+                // with no persisted binding may be cleaned up.
+                let current = self.repository.get_batch(&batch.id).await?;
+                let bound = current
+                    .items
+                    .iter()
+                    .any(|entry| entry.run_id.as_deref() == Some(outcome.run_id.as_str()));
+                if current.status == "cancelled" && !bound {
+                    let _ = director
+                        .cancel(
+                            &format!("batch:{}:cancelled:{}", batch.id, outcome.run_id),
+                            &outcome.run_id,
+                        )
+                        .await;
+                }
                 Ok(None)
             }
             Err(error) => Err(error.into()),
