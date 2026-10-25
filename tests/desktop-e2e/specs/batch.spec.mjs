@@ -36,9 +36,13 @@ describe("Native batch writing", () => {
       if (item?.runId) {
         const detail = await invoke("get_run_detail", { novelId: novel.id, runId: item.runId });
         if (Array.isArray(detail.legalActions) && detail.legalActions.includes("confirm")) {
-          await invoke("approve_run", { commandId: `batch-approve-${item.runId}-${detail.controlVersion}`, runId: item.runId, expectedVersion: detail.controlVersion });
+          const approve = await $("[data-testid=director-approve-button]");
+          await approve.waitForDisplayed({ timeout: 10_000 });
+          await approve.click();
         } else if (Array.isArray(detail.legalActions) && detail.legalActions.includes("resume") && detail.latestCandidate) {
-          await invoke("resume_run", { commandId: `batch-resume-${item.runId}-${detail.controlVersion}`, runId: item.runId, acceptCandidate: true });
+          const resume = await $("[data-testid=director-resume-button]");
+          await resume.waitForDisplayed({ timeout: 10_000 });
+          await resume.click();
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 700));
