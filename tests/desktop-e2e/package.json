@@ -21,6 +21,8 @@
     "test:conflict": "wdio run wdio.conf.mjs --spec specs/conflict.spec.mjs",
     "test:chapter-history": "wdio run wdio.conf.mjs --spec specs/chapter-history.spec.mjs",
     "test:export": "wdio run wdio.conf.mjs --spec specs/export.spec.mjs",
-    "test:batch": "wdio run wdio.conf.mjs --spec specs/batch.spec.mjs"
+    "test:batch": "wdio run wdio.conf.mjs --spec specs/batch.spec.mjs",
+    "test:batch-crash": "wdio run wdio.conf.mjs --spec specs/batch-crash.spec.mjs",
+    "test:batch-restart": "wdio run wdio.conf.mjs --spec specs/batch-restart.spec.mjs"
   }
 }

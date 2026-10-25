@@ -8,6 +8,7 @@ const reuseDir = process.env.BIZ_NOVEL_E2E_DATA_DIR;
 const dataDir = reuseDir || fs.mkdtempSync(path.join(os.tmpdir(), "biz-novel-wdio-"));
 const keepData = process.env.BIZ_NOVEL_E2E_KEEP === "1" || Boolean(reuseDir);
 const binary = path.join(root, "target/aarch64-apple-darwin/release/novel-desktop");
+const externalEndpoint = process.env.BIZ_NOVEL_E2E_EXTERNAL_ENDPOINT;
 let mock;
 
 export const config = {
@@ -39,13 +40,17 @@ export const config = {
   reporters: ["spec"],
   mochaOpts: { ui: "bdd", timeout: 180_000 },
   onPrepare: async () => {
-    mock = await startMockProvider();
-    process.env.BIZ_NOVEL_E2E_ENDPOINT = mock.endpoint;
+    if (externalEndpoint) {
+      process.env.BIZ_NOVEL_E2E_ENDPOINT = externalEndpoint;
+    } else {
+      mock = await startMockProvider();
+      process.env.BIZ_NOVEL_E2E_ENDPOINT = mock.endpoint;
+    }
     process.env.BIZ_NOVEL_DATA_DIR = dataDir;
     process.env.BIZ_NOVEL_E2E_SCENARIO = process.env.BIZ_NOVEL_E2E_SCENARIO ?? "clean";
     process.env.BIZ_NOVEL_E2E_DATA_DIR = dataDir;
     process.env.BIZ_NOVEL_E2E_BINARY = binary;
-    console.log(`[e2e] data=${dataDir} endpoint=${mock.endpoint}`);
+    console.log(`[e2e] data=${dataDir} endpoint=${process.env.BIZ_NOVEL_E2E_ENDPOINT}`);
   },
   onComplete: async () => {
     await mock?.close();

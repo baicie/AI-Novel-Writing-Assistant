@@ -37,11 +37,11 @@ describe("Native batch writing", () => {
         const detail = await invoke("get_run_detail", { novelId: novel.id, runId: item.runId });
         if (Array.isArray(detail.legalActions) && detail.legalActions.includes("confirm")) {
           const approve = await $("[data-testid=director-approve-button]");
-          await approve.waitForDisplayed({ timeout: 10_000 });
+          await approve.waitForDisplayed({ timeout: 30_000 });
           await approve.click();
         } else if (Array.isArray(detail.legalActions) && detail.legalActions.includes("resume") && detail.latestCandidate) {
           const resume = await $("[data-testid=director-resume-button]");
-          await resume.waitForDisplayed({ timeout: 10_000 });
+          await resume.waitForDisplayed({ timeout: 30_000 });
           await resume.click();
         }
       }
