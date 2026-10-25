@@ -111,7 +111,12 @@ pub async fn cancel_batch(
 ) -> Result<BatchRunView, AppError> {
     state
         .batch
-        .cancel(&batch_id, expected_version, novel_platform::now_ms())
+        .cancel(
+            &state.runtime.director,
+            &batch_id,
+            expected_version,
+            novel_platform::now_ms(),
+        )
         .await
 }
 

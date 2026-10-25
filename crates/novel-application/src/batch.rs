@@ -197,10 +197,8 @@ impl BatchService {
         expected_version: i64,
         now_ms: i64,
     ) -> Result<BatchRunView, AppError> {
-        Ok(self
-            .repository
-            .set_batch_status(id, expected_version, "paused", now_ms)
-            .await?)
+        self.set_status_retry(id, expected_version, "paused", now_ms)
+            .await
     }
 
     pub async fn resume(
@@ -216,22 +214,52 @@ impl BatchService {
         {
             return Err(AppError::conflict("这个批量任务已经结束，不能继续。"));
         }
-        Ok(self
-            .repository
-            .set_batch_status(id, expected_version, "running", now_ms)
-            .await?)
+        self.set_status_retry(id, expected_version, "running", now_ms)
+            .await
     }
 
     pub async fn cancel(
         &self,
+        director: &DirectorService,
         id: &str,
         expected_version: i64,
         now_ms: i64,
     ) -> Result<BatchRunView, AppError> {
-        Ok(self
-            .repository
-            .set_batch_status(id, expected_version, "cancelled", now_ms)
-            .await?)
+        let current = self.repository.get_batch(id).await?;
+        if let Some(item) = current.items.get(current.cursor.max(0) as usize)
+            && let Some(run_id) = &item.run_id
+        {
+            // Cancel through the existing Run command, never by rewriting Run status.
+            let _ = director
+                .cancel(&format!("batch:{id}:cancel-current-run"), run_id)
+                .await;
+        }
+        self.set_status_retry(id, expected_version, "cancelled", now_ms)
+            .await
+    }
+
+    async fn set_status_retry(
+        &self,
+        id: &str,
+        expected_version: i64,
+        status: &str,
+        now_ms: i64,
+    ) -> Result<BatchRunView, AppError> {
+        let mut version = expected_version;
+        for _ in 0..4 {
+            match self
+                .repository
+                .set_batch_status(id, version, status, now_ms)
+                .await
+            {
+                Ok(view) => return Ok(view),
+                Err(PortError::Conflict(_)) => {
+                    version = self.repository.get_batch(id).await?.version;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(AppError::conflict("批量任务持续变化，请刷新后再试。"))
     }
 
     pub async fn tick(
@@ -359,6 +387,19 @@ impl BatchService {
                     ));
                 }
                 "failed" | "cancelled" => {
+                    self.repository
+                        .update_item(
+                            &fence,
+                            &item.id,
+                            if detail.status == "cancelled" {
+                                "cancelled"
+                            } else {
+                                "failed"
+                            },
+                            Some("当前章节创作失败。"),
+                            now_ms,
+                        )
+                        .await?;
                     return Ok(Some(
                         self.repository
                             .update_batch(
@@ -388,14 +429,6 @@ impl BatchService {
                     .await?,
             ));
         }
-        let active = director.active_run(&batch.novel_id).await?;
-        if active.is_some() {
-            return Ok(Some(
-                self.repository
-                    .update_batch(&fence, "running", batch.cursor, None, now_ms)
-                    .await?,
-            ));
-        }
         let input = OpenRunInput {
             command_id: format!("batch:{}:item:{}:open", batch.id, item.id),
             novel_id: batch.novel_id.clone(),
@@ -411,10 +444,24 @@ impl BatchService {
             allow_localhost_http: request.allow_localhost_http,
         };
         let outcome = director.open_run(input).await?;
-        let updated = self
+        match self
             .repository
             .bind_item_run(&fence, &item.id, &outcome.run_id, now_ms)
-            .await?;
-        Ok(Some(updated))
+            .await
+        {
+            Ok(updated) => Ok(Some(updated)),
+            Err(PortError::Conflict(_)) => {
+                // A concurrent Cancel or newer Scheduler claimed the Batch while the
+                // Run was being opened. Cancel the orphan Run through the legal command.
+                let _ = director
+                    .cancel(
+                        &format!("batch:{}:orphan:{}", batch.id, outcome.run_id),
+                        &outcome.run_id,
+                    )
+                    .await;
+                Ok(None)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 }
