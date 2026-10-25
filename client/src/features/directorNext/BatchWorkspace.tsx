@@ -77,10 +77,13 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
   const create = () => run(async () => {
     if (!model) throw new Error("请先配置模型。");
     createCommandId.current ??= `batch-create-${crypto.randomUUID()}`;
+    const ordered = [...selected].sort((left, right) =>
+      (chapters.find((chapter) => chapter.id === left)?.sortOrder ?? 0)
+      - (chapters.find((chapter) => chapter.id === right)?.sortOrder ?? 0));
     const created = await createBatch({
       commandId: createCommandId.current,
       novelId,
-      chapterIds: selected,
+      chapterIds: ordered,
       provider: "openai-compatible",
       model: model.model,
       promptVersions: { chapter_draft: "chapter-draft-v2" },
