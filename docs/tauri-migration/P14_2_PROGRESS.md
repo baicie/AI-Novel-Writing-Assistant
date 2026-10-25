@@ -49,3 +49,19 @@ E2E export 2 passing（单章/范围/全书/隔离）
 - Commands 92 / capabilities 92
 - S3/S4/S5/S7 NOT_STARTED
 - S6 Native Retry missing
+
+## 2026-10-25 17:35 Final
+
+- final code HEAD: `65e09e36`（docs commit follows）
+- clean worktree all-targets: **342 passed, 0 failed**
+- workspace tests: 282 passed（opaque guard 前；guard 由 all-targets 覆盖）
+- chapter-history E2E: PASS
+- export E2E: 2 PASS（单章/范围/全书/隔离）
+- editor + candidate crash/restart: PASS（final UI build）
+- production .app: 21.54 MiB
+- DMG: 9.6 MiB, hdiutil VALID
+- audit: PASS
+- Commands 92 / Capabilities 92（execute_index_job 为内部 helper）
+- S3/S4/S5/S7: NOT_STARTED
+- S6: Native Index Retry 未完成
+- S2: 按卷 + Native 文件保存对话框未完成
