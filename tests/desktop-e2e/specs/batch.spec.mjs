@@ -81,3 +81,27 @@ describe("Native batch writing", () => {
     expect(after.items.filter((item) => item.runId).length).toBe(before.items.filter((item) => item.runId).length);
   });
 });
+
+describe("Native batch pause and resume", () => {
+  it("pauses scheduling, resumes, then cancels without opening extra runs", async () => {
+    const novel = await invoke("create_novel", { title: "WDIO 批量暂停", description: "" });
+    for (let index = 1; index <= 2; index += 1) {
+      await invoke("create_chapter", { novelId: novel.id, title: `第${index}章`, sortOrder: index });
+    }
+    await browser.execute((id) => { window.location.hash = `#/lab/director/${id}`; }, novel.id);
+    await (await $("[data-testid=batch-workspace]")).waitForDisplayed({ timeout: 20_000 });
+    await (await $("[data-testid=batch-create]")).click();
+    await browser.waitUntil(async () => (await invoke("list_batches", { novelId: novel.id })).length === 1, { timeout: 20_000 });
+    await (await $("[data-testid=batch-pause]")).click();
+    await browser.waitUntil(async () => (await invoke("list_batches", { novelId: novel.id }))[0].status === "paused", { timeout: 20_000 });
+    const paused = (await invoke("list_batches", { novelId: novel.id }))[0];
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const stillPaused = (await invoke("list_batches", { novelId: novel.id }))[0];
+    expect(stillPaused.status).toBe("paused");
+    expect(stillPaused.items.filter((item) => item.runId).length).toBe(paused.items.filter((item) => item.runId).length);
+    await (await $("[data-testid=batch-resume]")).click();
+    await browser.waitUntil(async () => (await invoke("list_batches", { novelId: novel.id }))[0].status !== "paused", { timeout: 20_000 });
+    await (await $("[data-testid=batch-cancel]")).click();
+    await browser.waitUntil(async () => (await invoke("list_batches", { novelId: novel.id }))[0].status === "cancelled", { timeout: 20_000 });
+  });
+});
