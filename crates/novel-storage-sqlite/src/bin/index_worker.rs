@@ -14,11 +14,21 @@ async fn main() {
         .unwrap_or_else(|_| "500".into())
         .parse::<i64>()
         .unwrap_or(500);
-    let kernel = Arc::new(
-        SqliteKernel::open(std::path::Path::new(&db))
-            .await
-            .expect("open db"),
-    );
+    let mut last_error = None;
+    let mut kernel = None;
+    for _ in 0..100 {
+        match SqliteKernel::open(std::path::Path::new(&db)).await {
+            Ok(value) => {
+                kernel = Some(Arc::new(value));
+                break;
+            }
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    let kernel = kernel.unwrap_or_else(|| panic!("open db {db}: {last_error:?}"));
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
