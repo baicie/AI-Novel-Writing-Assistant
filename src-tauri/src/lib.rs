@@ -117,6 +117,30 @@ pub fn run() {
                 }
             });
 
+            let worker_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut seq = 0u64;
+                loop {
+                    seq += 1;
+                    if let Some(state) = worker_handle.try_state::<state::AppState>() {
+                        let now = novel_platform::now_ms();
+                        let owner = format!("index-worker-{}-{seq}", std::process::id());
+                        if let Ok(Some(job)) = state
+                            .kernel
+                            .claim_next_due_index_job(&owner, now + 120_000, now)
+                            .await
+                        {
+                            let _ = commands::knowledge::execute_index_job(
+                                state.inner(),
+                                job,
+                                &owner,
+                            ).await;
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+
             let worker = runtime.clone();
             tauri::async_runtime::spawn(async move {
                 loop {

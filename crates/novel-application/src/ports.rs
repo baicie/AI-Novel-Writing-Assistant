@@ -601,6 +601,12 @@ pub trait IndexJobRepository: Send + Sync {
         lease_until: i64,
         now_ms: i64,
     ) -> Result<Option<IndexJobView>, PortError>;
+    async fn claim_next_due_index_job(
+        &self,
+        owner: &str,
+        lease_until: i64,
+        now_ms: i64,
+    ) -> Result<Option<IndexJobView>, PortError>;
     async fn complete_index_job(
         &self,
         job_id: &str,

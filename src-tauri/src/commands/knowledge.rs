@@ -505,7 +505,7 @@ pub async fn retry_knowledge_document_with_job(
     execute_index_job(&state, claimed, &owner).await
 }
 
-async fn execute_index_job(
+pub(crate) async fn execute_index_job(
     state: &AppState,
     job: IndexJobView,
     owner: &str,

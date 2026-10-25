@@ -67,15 +67,8 @@ impl IndexJobRepository for SqliteKernel {
              SET status = 'running', lease_owner = ?, lease_until = ?, claim_epoch = claim_epoch + 1,
                  updated_at = ?
              WHERE id = ? AND status IN ('pending','retry_wait') AND next_run_at <= ?",
-        )
-        .bind(owner)
-        .bind(lease_until)
-        .bind(now_ms)
-        .bind(job_id)
-        .bind(now_ms)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sql)?;
+        ).bind(owner).bind(lease_until).bind(now_ms).bind(job_id).bind(now_ms)
+        .execute(&self.pool).await.map_err(map_sql)?;
         if result.rows_affected() == 0 {
             return Ok(None);
         }
@@ -84,12 +77,29 @@ impl IndexJobRepository for SqliteKernel {
                     attempt_count, max_attempts, claim_epoch, next_run_at, last_error_category, last_error,
                     created_at, updated_at
              FROM knowledge_index_job WHERE id = ?",
+        ).bind(job_id).fetch_one(&self.pool).await.map_err(map_sql)?;
+        Ok(Some(job_from_row(&row)?))
+    }
+
+    async fn claim_next_due_index_job(
+        &self,
+        owner: &str,
+        lease_until: i64,
+        now_ms: i64,
+    ) -> Result<Option<IndexJobView>, PortError> {
+        let id: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM knowledge_index_job
+             WHERE status IN ('pending','retry_wait') AND next_run_at <= ?
+             ORDER BY next_run_at, created_at, id LIMIT 1",
         )
-        .bind(job_id)
-        .fetch_one(&self.pool)
+        .bind(now_ms)
+        .fetch_optional(&self.pool)
         .await
         .map_err(map_sql)?;
-        Ok(Some(job_from_row(&row)?))
+        let Some(id) = id else {
+            return Ok(None);
+        };
+        self.claim_index_job(&id, owner, lease_until, now_ms).await
     }
 
     async fn complete_index_job(
