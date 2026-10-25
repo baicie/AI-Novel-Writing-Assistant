@@ -38,7 +38,7 @@ Start HEAD: `f0140edd`
 - Native 3-chapter batch E2E: PASS
   - 3 distinct Run IDs
   - 3 official chapter revisions
-  - existing gates/approval used
+  - approval executed through Native `director-approve-button`, not direct Rust test writes
   - full-book export after completion contains chapters
 - Batch cancel through existing Run cancel: PASS
 - Batch domain: 2 repository tests PASS
@@ -49,3 +49,13 @@ Start HEAD: `f0140edd`
 - DMG: 9.7 MiB; hdiutil VALID; audit PASS
 - Commands 99 / Capabilities 99
 - Main remaining gap: batch restart/resume E2E; pause E2E; deterministic crash window; 10-chapter stress; Task Center.
+
+## 2026-10-25 19:50
+
+- Native batch UI approval E2E: 3 passing
+  - create batch via Native button
+  - each chapter approved via Native approve button
+  - 3 official revisions and export verified
+  - cancel through Native button PASS
+- HEAD code: `1e3b109f` (test-only after be8ad002)
+- production app built from code `be8ad002`; 21.96 MiB / DMG 9.7 MiB
