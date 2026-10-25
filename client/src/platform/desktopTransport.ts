@@ -1085,3 +1085,42 @@ export function openDesktopShellLogsDirectory(): Promise<void> {
 export function restartDesktopShell(): Promise<void> {
   return invoke("restart_desktop_app");
 }
+
+export interface BatchRunView {
+  id: string;
+  novelId: string;
+  commandId: string;
+  requestHash: string;
+  status: string;
+  cursor: number;
+  version: number;
+  claimEpoch: number;
+  failureReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+  items: Array<{
+    id: string;
+    chapterId: string;
+    ordinal: number;
+    runId: string | null;
+    status: string;
+    version: number;
+    lastError: string | null;
+    startedAt: number | null;
+    completedAt: number | null;
+  }>;
+}
+
+export function createBatch(input: {
+  commandId: string; novelId: string; chapterIds: string[];
+  provider: string; model: string; promptVersions: Record<string, string>;
+  tokenBudget?: number | null; contextTokenBudget?: number | null;
+  maxAutomaticRetries: number; repairBudget?: number | null;
+  endpoint: string; allowLocalhostHttp: boolean;
+}): Promise<BatchRunView> { return invoke("create_batch", { request: input }); }
+export function listBatches(novelId: string): Promise<BatchRunView[]> { return invoke("list_batches", { novelId }); }
+export function getBatch(batchId: string): Promise<BatchRunView> { return invoke("get_batch", { batchId }); }
+export function pauseBatch(batchId: string, expectedVersion: number): Promise<BatchRunView> { return invoke("pause_batch", { batchId, expectedVersion }); }
+export function resumeBatch(batchId: string, expectedVersion: number): Promise<BatchRunView> { return invoke("resume_batch", { batchId, expectedVersion }); }
+export function cancelBatch(batchId: string, expectedVersion: number): Promise<BatchRunView> { return invoke("cancel_batch", { batchId, expectedVersion }); }
+export function tickBatches(): Promise<BatchRunView[]> { return invoke("tick_batches"); }

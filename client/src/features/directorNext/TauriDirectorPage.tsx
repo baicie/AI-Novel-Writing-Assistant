@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import BatchWorkspace from "./BatchWorkspace";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -578,7 +579,7 @@ export default function TauriDirectorPage() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
         <div>
           <h1 className="text-lg font-semibold">{novelQuery.data?.title ?? "自动导演"}</h1>
-          <p className="mt-1 text-xs text-muted-foreground">当前仅支持单章节创作流程。多章节批量、世界模式和自定义策略暂未支持。</p>
+          <p className="mt-1 text-xs text-muted-foreground">单章创作和连续多章节创作都从当前页面开始；每章仍需人工确认后才会提交正式正文。</p>
         </div>
         <div className="flex gap-2">
           <Button asChild variant="ghost"><Link to="/novels">返回书架</Link></Button>
@@ -587,6 +588,12 @@ export default function TauriDirectorPage() {
       </header>
 
       {error ? <p role="alert" className="rounded-md bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
+      <BatchWorkspace
+        novelId={novelId}
+        chapters={chapters}
+        model={model ?? undefined}
+        onOpenChapter={(id) => setChapterId(id)}
+      />
 
       {!runId ? (
         <section data-tauri-director-start className="max-w-xl space-y-4 rounded-md bg-muted/20 p-4">
@@ -828,9 +835,10 @@ export default function TauriDirectorPage() {
               </form> : null}
             </section>
 
+
             <section className="rounded-md bg-muted/20 p-4 text-xs text-muted-foreground">
               <h2 className="text-sm font-semibold text-foreground">暂未支持</h2>
-              <p className="mt-2 leading-5">多章节批量、世界模式、自定义 driver、handoff 和修改后确认的编辑界面仍待接入；不会把未接入能力显示为可执行按钮。</p>
+              <p className="mt-2 leading-5">世界模式、自定义 driver、handoff 和修改后确认的编辑界面仍待接入；不会把未接入能力显示为可执行按钮。</p>
             </section>
           </aside>
         </div>

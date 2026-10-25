@@ -1,4 +1,5 @@
 mod app;
+mod batch;
 mod context;
 mod director;
 mod dto;
@@ -24,6 +25,10 @@ mod tasks;
 mod usecase;
 mod worker;
 
+pub use batch::{
+    BatchFence, BatchItemView, BatchRepository, BatchRunRequest, BatchRunView, BatchService,
+    NewBatchRun,
+};
 pub use context::{
     CONTEXT_ASSEMBLY_VERSION, ContextAssembly, ContextSourceTrace, ContextTrace,
     DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, assemble_director_context,

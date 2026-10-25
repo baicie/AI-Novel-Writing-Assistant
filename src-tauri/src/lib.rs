@@ -4,7 +4,7 @@ mod state;
 use std::sync::Arc;
 
 use novel_application::{
-    IndexJobRepository, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
+    BatchService, IndexJobRepository, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
 };
 use novel_llm::OpenAiCompatibleProvider;
 
@@ -101,8 +101,10 @@ pub fn run() {
             })?;
 
             let recovery_kernel = kernel.clone();
+            let batch = Arc::new(BatchService::new(kernel.clone(), Arc::new(UuidIds)));
             app.manage(AppState {
                 runtime: runtime.clone(),
+                batch,
                 kernel,
                 secrets,
                 llm,
@@ -136,6 +138,17 @@ pub fn run() {
                                 &owner,
                             ).await;
                         }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+
+            let batch_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Some(state) = batch_handle.try_state::<state::AppState>() {
+                        let owner = format!("batch-scheduler-{}", std::process::id());
+                        let _ = state.batch.tick(&state.runtime.director, &owner, novel_platform::now_ms()).await;
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
@@ -245,6 +258,13 @@ commands::novel::create_character,
             commands::run::get_run_detail,
             commands::run::list_all_runs,
             commands::run::open_run,
+            commands::batch::create_batch,
+            commands::batch::list_batches,
+            commands::batch::get_batch,
+            commands::batch::pause_batch,
+            commands::batch::resume_batch,
+            commands::batch::cancel_batch,
+            commands::batch::tick_batches,
             commands::run::approve_run,
 commands::run::reject_run,
             commands::run::regenerate_run,

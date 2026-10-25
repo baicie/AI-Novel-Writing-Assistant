@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-batch"
+description = "Enables the get_batch command without any pre-configured scope."
+commands.allow = ["get_batch"]
+
+[[permission]]
+identifier = "deny-get-batch"
+description = "Denies the get_batch command without any pre-configured scope."
+commands.deny = ["get_batch"]

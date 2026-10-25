@@ -1,3 +1,4 @@
+mod batch;
 mod db;
 mod index_jobs;
 mod knowledge;

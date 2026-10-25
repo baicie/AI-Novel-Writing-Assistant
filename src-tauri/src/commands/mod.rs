@@ -1,3 +1,4 @@
+pub mod batch;
 pub mod editor;
 pub mod generation;
 pub mod knowledge;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use novel_application::Runtime;
+use novel_application::{BatchService, Runtime};
 use novel_llm::LlmProvider;
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 /// application calls. They never acquire business logic of their own.
 pub struct AppState {
     pub runtime: Arc<Runtime>,
+    pub batch: Arc<BatchService>,
     pub kernel: Arc<SqliteKernel>,
     pub secrets: Arc<OsSecretStore>,
     pub llm: Arc<dyn LlmProvider>,
