@@ -207,7 +207,7 @@ export default function TauriDirectorPage() {
   const novelQuery = useQuery({ queryKey: ["tauri-director", novelId, "novel"], queryFn: () => getNovel(novelId), enabled: !!novelId });
   const chaptersQuery = useQuery({ queryKey: ["tauri-director", novelId, "chapters"], queryFn: () => listChapters(novelId), enabled: !!novelId });
   const modelQuery = useQuery({ queryKey: ["tauri-director", "model"], queryFn: getModelSetup });
-  const activeQuery = useQuery({ queryKey: ["tauri-director", novelId, "active"], queryFn: () => getActiveRun(novelId), enabled: !!novelId, refetchInterval: 3000 });
+  const activeQuery = useQuery({ queryKey: ["tauri-director", novelId, "active"], queryFn: () => getActiveRun(novelId), enabled: !!novelId, refetchInterval: 3000, refetchIntervalInBackground: true });
   const historyQuery = useQuery({ queryKey: ["tauri-director", novelId, "history"], queryFn: () => listRuns(novelId), enabled: !!novelId, refetchInterval: 5000 });
   const runId = activeQuery.data?.id ?? selectedRunId;
   const detailQuery = useQuery<RunDetailView>({ queryKey: ["tauri-director", novelId, "detail", runId], queryFn: () => getRunDetail(novelId, runId), enabled: !!runId, refetchInterval: 3000 });
@@ -593,6 +593,7 @@ export default function TauriDirectorPage() {
         chapters={chapters}
         model={model ?? undefined}
         onOpenChapter={(id) => setChapterId(id)}
+        onBatchChanged={() => { void queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }); }}
       />
 
       {!runId ? (

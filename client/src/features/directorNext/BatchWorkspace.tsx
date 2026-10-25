@@ -15,6 +15,7 @@ interface BatchWorkspaceProps {
   chapters: Array<{ id: string; title: string; sortOrder: number }>;
   model: { model: string; endpoint: string; allowLocalhostHttp: boolean; hasApiKey: boolean } | undefined;
   onOpenChapter: (chapterId: string) => void;
+  onBatchChanged?: () => void;
 }
 
 const statusLabel: Record<string, string> = {
@@ -22,7 +23,7 @@ const statusLabel: Record<string, string> = {
   paused: "已暂停", cancelled: "已取消", failed: "失败", completed: "已完成",
 };
 
-export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter }: BatchWorkspaceProps) {
+export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter, onBatchChanged }: BatchWorkspaceProps) {
   const [selected, setSelected] = useState<string[]>([]);
   const [batches, setBatches] = useState<BatchRunView[]>([]);
   const [batchId, setBatchId] = useState("");
@@ -67,6 +68,7 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
         setBatchId(String((result as { id: string }).id));
       }
       setBatches(await listBatches(novelId));
+      onBatchChanged?.();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
