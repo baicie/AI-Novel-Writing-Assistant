@@ -49,3 +49,14 @@ p13_source_integrity 3 passed
 - M2 Tauri worker: 2s due-job claim loop + 30s lease recovery implemented
 - Remaining: Native Index Retry WDIO, multi-process index, pending auto enqueue on failed chapter index
 - Tests: 279 passed (workspace); clean all-targets in progress
+
+
+## 2026-10-25 11:54 CST 最终
+
+- HEAD: `0edc44bc`（本地领先 origin 10，未 Push）
+- workspace tests: 279 passed, 1291.21s
+- clean worktree all-targets: 338 passed
+- M1: editor/candidate crash+restart, director restart, confirm-after-edit restart PASS
+- M2: independent index_worker SIGKILL/recover PASS; Tauri 2s due-job worker + 30s lease recovery
+- production: .app 21.42 MiB; DMG 9.5 MiB; audit PASS; 89/89/89 commands（`execute_index_job` 是内部 helper，不计 Command）
+- Native Index Retry WDIO 未完成
