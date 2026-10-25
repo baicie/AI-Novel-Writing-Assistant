@@ -22,3 +22,25 @@ describe("Native chapter export", () => {
     expect(txt).not.toContain("第一章中文正文");
   });
 });
+
+describe("Native novel export selection", () => {
+  it("exports full book, range and selected chapter with novel isolation", async () => {
+    const novel = await invoke("create_novel", { title: "WDIO 范围导出", description: "说明" });
+    const ids = [];
+    for (let index = 1; index <= 3; index += 1) {
+      const chapter = await invoke("create_chapter", { novelId: novel.id, title: `第${index}章`, sortOrder: index });
+      await invoke("save_chapter", { novelId: novel.id, chapterId: chapter.id, expectedVersion: 0, title: `第${index}章`, content: `范围导出正文${index}` });
+      ids.push(chapter.id);
+    }
+    const full = await invoke("export_novel_selection", { novelId: novel.id, selection: "entire_book", format: "markdown" });
+    expect(full).toContain("范围导出正文1");
+    expect(full).toContain("范围导出正文3");
+    const range = await invoke("export_novel_selection", { novelId: novel.id, selection: "range", format: "txt", startOrder: 1, endOrder: 2 });
+    expect(range).toContain("范围导出正文1");
+    expect(range).toContain("范围导出正文2");
+    expect(range).not.toContain("范围导出正文3");
+    const selected = await invoke("export_novel_selection", { novelId: novel.id, selection: "chapter", format: "markdown", chapterId: ids[2] });
+    expect(selected).toContain("范围导出正文3");
+    expect(selected).not.toContain("范围导出正文1");
+  });
+});

@@ -10,6 +10,7 @@ import { exportChapters } from "@/platform/desktopTransport";
 import { stripLegacyTaskUrlParams } from "@/lib/legacyTaskUrlParams";
 import ChapterEditorShell from "./components/chapterEditor/ChapterEditorShell";
 import NativeChapterHistoryDialog from "./components/NativeChapterHistoryDialog";
+import NovelExportDialog from "./components/NovelExportDialog";
 
 function PageStateCard(props: { message: string }) {
   return (
@@ -24,6 +25,7 @@ export default function NovelChapterEdit() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -101,6 +103,9 @@ export default function NovelChapterEdit() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 justify-end gap-2">
+        <Button type="button" variant="outline" data-testid="novel-export-button" onClick={() => setExportOpen(true)}>
+          导出小说
+        </Button>
         <Button type="button" variant="outline" data-testid="chapter-export-button" onClick={() => { void handleExportChapter(); }}>
           <Download className="mr-2 h-4 w-4" />
           导出本章
@@ -127,6 +132,7 @@ export default function NovelChapterEdit() {
         onRefreshWorkspace={() => { void chapterEditorWorkspaceQuery.refetch(); }}
         isRefreshingWorkspace={chapterEditorWorkspaceQuery.isFetching}
       />
+      <NovelExportDialog novelId={id} chapterCount={detail?.chapters.length ?? 0} open={exportOpen} onOpenChange={setExportOpen} />
       <NativeChapterHistoryDialog
         novelId={id}
         chapterId={chapterId}

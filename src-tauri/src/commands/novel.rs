@@ -361,6 +361,72 @@ pub async fn list_chapter_revisions(
 }
 
 #[tauri::command]
+pub async fn export_novel_selection(
+    state: State<'_, AppState>,
+    novel_id: String,
+    selection: String,
+    format: String,
+    chapter_id: Option<String>,
+    chapter_ids: Option<Vec<String>>,
+    start_order: Option<i32>,
+    end_order: Option<i32>,
+) -> Result<String, AppError> {
+    let novel = state.runtime.director.get_novel(&novel_id).await?;
+    let mut chapters = state.runtime.director.list_chapters(&novel_id).await?;
+    let selected = match selection.as_str() {
+        "chapter" => {
+            let id = chapter_id.ok_or_else(|| AppError::validation("请选择要导出的章节。"))?;
+            chapters.retain(|chapter| chapter.id == id);
+            chapters
+        }
+        "chapter_ids" => {
+            let ids = chapter_ids.ok_or_else(|| AppError::validation("请选择要导出的章节。"))?;
+            chapters.retain(|chapter| ids.contains(&chapter.id));
+            if chapters.is_empty() {
+                return Err(AppError::validation("没有找到可导出的正式章节。"));
+            }
+            chapters
+        }
+        "range" => {
+            let start = start_order.ok_or_else(|| AppError::validation("请选择起始章节。"))?;
+            let end = end_order.ok_or_else(|| AppError::validation("请选择结束章节。"))?;
+            if start > end {
+                return Err(AppError::validation("起始章节不能晚于结束章节。"));
+            }
+            chapters.retain(|chapter| chapter.sort_order >= start && chapter.sort_order <= end);
+            if chapters.is_empty() {
+                return Err(AppError::validation("所选范围内没有正式章节。"));
+            }
+            chapters
+        }
+        "entire_book" => chapters,
+        _ => return Err(AppError::validation("不支持的导出范围。")),
+    };
+    let export = novel_platform::ExportNovel {
+        title: novel.title,
+        description: novel.description,
+        chapters: selected
+            .into_iter()
+            .map(|chapter| novel_platform::ExportChapter {
+                title: chapter.title,
+                content: chapter.content,
+            })
+            .collect(),
+    };
+    match format.as_str() {
+        "markdown" | "md" => Ok(novel_platform::chapter_markdown(&export)),
+        "txt" => {
+            let mut output = format!("{}\n\n{}\n", export.title, export.description);
+            for chapter in export.chapters {
+                output.push_str(&format!("\n{}\n\n{}\n", chapter.title, chapter.content));
+            }
+            Ok(output)
+        }
+        _ => Err(AppError::validation("导出格式只支持 markdown 或 txt。")),
+    }
+}
+
+#[tauri::command]
 pub async fn export_chapters(
     state: State<'_, AppState>,
     novel_id: String,
