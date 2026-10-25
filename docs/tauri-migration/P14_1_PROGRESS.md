@@ -45,3 +45,20 @@ chapter_history ... ok
 - export E2E PASS
 - cross-process index test PASS
 - all-targets in progress
+
+## 2026-10-25 14:05 Final
+
+- HEAD final code: see git
+- Rust workspace: 281 passed（2dfc7fa8；worker-only后续由 all-targets 覆盖）
+- Clean worktree all-targets: 340 passed
+- Native:
+  - chapter-history PASS
+  - export PASS
+  - editor crash/restart PASS
+  - candidate journal crash/restart PASS
+  - director restart PASS
+  - confirm-edit restart PASS
+- production .app 21.46 MiB; DMG 9.6 MiB; audit PASS
+- commands 91 / capabilities 91; `execute_index_job` 为内部 helper
+- S5 仅单章；范围/按卷/保存对话框未完成
+- S6/S7/S8 NOT_STARTED
