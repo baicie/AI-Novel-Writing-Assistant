@@ -33,6 +33,7 @@ run_crash() {
     echo "[e2e-crash] $name app still alive after SIGKILL" >&2
     return 1
   fi
+  cp "$dir/$state" "$EVIDENCE/$name-state.json"
   echo "[e2e-crash] $name durable state=$dir/$state crash_exit=$code (expected SIGKILL path)"
 }
 

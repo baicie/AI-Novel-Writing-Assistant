@@ -19,10 +19,10 @@ describe("Chapter editor crash recovery", () => {
     await editor.click();
     await editor.addValue("SIGKILL 前未保存的正文");
     await (await $("[data-testid=chapter-local-draft-saved]")).waitForDisplayed({ timeout: 20_000 });
-    fs.writeFileSync(`${dataDir}/editor-crash-state.json`, JSON.stringify({ novelId: novel.id, chapterId: chapter.id }));
     const pids = execSync(`pgrep -f ${JSON.stringify(binary)}`, { encoding: "utf8" })
       .trim().split(/\s+/).filter(Boolean);
     if (!pids.length) throw new Error("test Tauri app pid not found");
+    fs.writeFileSync(`${dataDir}/editor-crash-state.json`, JSON.stringify({ novelId: novel.id, chapterId: chapter.id, pids }));
     for (const pid of pids) process.kill(Number(pid), "SIGKILL");
     try { await browser.pause(1000); } catch { /* expected: the WebView process is gone */ }
   });

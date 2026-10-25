@@ -45,8 +45,8 @@ describe("Candidate edit journal SIGKILL", () => {
     await input.clearValue();
     await input.addValue("候选草稿跨进程恢复正文");
     await browser.waitUntil(async () => (await (await $("[data-testid=director-candidate-draft-status]")).getText()).includes("已本地保存"), { timeout: 20_000, timeoutMsg: "candidate journal was not saved" });
-    fs.writeFileSync(`${dataDir}/candidate-state.json`, JSON.stringify({ ...f, runId, edited: "候选草稿跨进程恢复正文" }));
     const pids = execSync(`pgrep -f ${JSON.stringify(binary)}`, { encoding: "utf8" }).trim().split(/\s+/).filter(Boolean);
+    fs.writeFileSync(`${dataDir}/candidate-state.json`, JSON.stringify({ ...f, runId, edited: "候选草稿跨进程恢复正文", pids }));
     for (const pid of pids) process.kill(Number(pid), "SIGKILL");
     try { await browser.pause(1000); } catch { /* expected */ }
   });
