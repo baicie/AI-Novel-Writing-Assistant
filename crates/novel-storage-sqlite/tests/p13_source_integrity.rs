@@ -106,3 +106,42 @@ async fn concurrent_old_and_new_revision_write_keeps_new_chunk() {
     ).fetch_one(kernel.pool()).await.unwrap();
     assert_eq!(chunk_revision, "rev@v3");
 }
+
+#[tokio::test]
+async fn second_process_cannot_overwrite_newer_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cross.sqlite");
+    let first = SqliteKernel::open(&path).await.unwrap();
+    let second = SqliteKernel::open(&path).await.unwrap();
+    NovelRepository::create_novel(
+        &first,
+        novel_application::NewNovel {
+            id: "n1".into(),
+            title: "跨进程".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    KnowledgeRepository::index_document(&first, doc("d1", "n1", "document", "rev@v2"))
+        .await
+        .unwrap();
+    KnowledgeRepository::index_document(&second, doc("d1", "n1", "document", "rev@v3"))
+        .await
+        .unwrap();
+    let stale =
+        KnowledgeRepository::index_document(&first, doc("d1", "n1", "document", "rev@v2")).await;
+    assert!(
+        stale.is_err(),
+        "older process must not overwrite newer revision"
+    );
+    assert_eq!(revision(&second, "d1").await, "rev@v3");
+    let chunk_revision: String = sqlx::query_scalar(
+        "SELECT c.source_revision FROM knowledge_chunk c WHERE c.document_id = 'd1'",
+    )
+    .fetch_one(second.pool())
+    .await
+    .unwrap();
+    assert_eq!(chunk_revision, "rev@v3");
+}

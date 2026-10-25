@@ -86,11 +86,12 @@ impl KnowledgeRepository for SqliteKernel {
             .source_revision
             .clone()
             .unwrap_or_else(|| format!("v{next_version}"));
-        sqlx::query(
+        let source_revision_rank = revision_rank(&source_revision).unwrap_or(0);
+        let write = sqlx::query(
             "INSERT INTO knowledge_document
                (id, novel_id, owner_type, title, body, version, index_status, created_at,
-                source_revision, source_content_hash, index_version, indexed_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'building', ?, ?, ?, ?, ?)
+                source_revision, source_content_hash, index_version, indexed_at, source_revision_rank)
+             VALUES (?, ?, ?, ?, ?, ?, 'building', ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                novel_id = excluded.novel_id,
                owner_type = excluded.owner_type,
@@ -101,7 +102,9 @@ impl KnowledgeRepository for SqliteKernel {
                source_revision = excluded.source_revision,
                source_content_hash = excluded.source_content_hash,
                index_version = excluded.index_version,
-               indexed_at = excluded.indexed_at",
+               indexed_at = excluded.indexed_at,
+               source_revision_rank = excluded.source_revision_rank
+             WHERE excluded.source_revision_rank >= knowledge_document.source_revision_rank",
         )
         .bind(&document.id)
         .bind(&document.novel_id)
@@ -114,9 +117,15 @@ impl KnowledgeRepository for SqliteKernel {
         .bind(&source_hash)
         .bind(next_version)
         .bind(document.created_at)
+        .bind(source_revision_rank)
         .execute(&self.pool)
         .await
         .map_err(map_sql)?;
+        if write.rows_affected() != 1 {
+            return Err(PortError::Conflict(
+                "知识来源 revision 已过期，不能覆盖较新的索引。".into(),
+            ));
+        }
 
         // Phase 2: replace all derived rows atomically.
         let old_chunks: Vec<String> =
@@ -163,12 +172,13 @@ impl KnowledgeRepository for SqliteKernel {
         }
         let ready = sqlx::query(
             "UPDATE knowledge_document SET index_status = 'ready', indexed_at = ?
-             WHERE id = ? AND index_version = ? AND source_revision = ?",
+             WHERE id = ? AND index_version = ? AND source_revision = ? AND source_revision_rank = ?",
         )
         .bind(document.created_at)
         .bind(&document.id)
         .bind(next_version)
         .bind(&source_revision)
+        .bind(source_revision_rank)
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
