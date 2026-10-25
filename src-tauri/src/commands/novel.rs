@@ -361,6 +361,46 @@ pub async fn list_chapter_revisions(
 }
 
 #[tauri::command]
+pub async fn export_chapters(
+    state: State<'_, AppState>,
+    novel_id: String,
+    chapter_ids: Vec<String>,
+    format: String,
+) -> Result<String, AppError> {
+    if chapter_ids.is_empty() {
+        return Err(AppError::validation("请选择要导出的章节。"));
+    }
+    let novel = state.runtime.director.get_novel(&novel_id).await?;
+    let mut chapters = state.runtime.director.list_chapters(&novel_id).await?;
+    chapters.retain(|chapter| chapter_ids.contains(&chapter.id));
+    if chapters.is_empty() {
+        return Err(AppError::validation("没有找到可导出的正式章节。"));
+    }
+    let export = novel_platform::ExportNovel {
+        title: novel.title,
+        description: novel.description,
+        chapters: chapters
+            .into_iter()
+            .map(|chapter| novel_platform::ExportChapter {
+                title: chapter.title,
+                content: chapter.content,
+            })
+            .collect(),
+    };
+    match format.as_str() {
+        "markdown" | "md" => Ok(novel_platform::chapter_markdown(&export)),
+        "txt" => {
+            let mut output = format!("{}\n\n{}\n", export.title, export.description);
+            for chapter in export.chapters {
+                output.push_str(&format!("\n{}\n\n{}\n", chapter.title, chapter.content));
+            }
+            Ok(output)
+        }
+        _ => Err(AppError::validation("导出格式只支持 markdown 或 txt。")),
+    }
+}
+
+#[tauri::command]
 pub async fn restore_chapter_revision(
     state: State<'_, AppState>,
     novel_id: String,

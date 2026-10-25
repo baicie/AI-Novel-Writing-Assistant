@@ -19,6 +19,7 @@
     "test:memory-extraction": "wdio run wdio.conf.mjs --spec specs/memory-extraction.spec.mjs",
     "test:knowledge": "wdio run wdio.conf.mjs --spec specs/knowledge.spec.mjs",
     "test:conflict": "wdio run wdio.conf.mjs --spec specs/conflict.spec.mjs",
-    "test:chapter-history": "wdio run wdio.conf.mjs --spec specs/chapter-history.spec.mjs"
+    "test:chapter-history": "wdio run wdio.conf.mjs --spec specs/chapter-history.spec.mjs",
+    "test:export": "wdio run wdio.conf.mjs --spec specs/export.spec.mjs"
   }
 }

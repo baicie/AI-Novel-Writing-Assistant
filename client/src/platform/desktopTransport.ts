@@ -595,6 +595,14 @@ export function exportNovel(input: {
   return invoke("export_novel", input);
 }
 
+export function exportChapters(input: {
+  novelId: string;
+  chapterIds: string[];
+  format: "markdown" | "txt";
+}): Promise<string> {
+  return invoke("export_chapters", input);
+}
+
 export function listChapterRevisions(input: {
   novelId: string;
   chapterId: string;

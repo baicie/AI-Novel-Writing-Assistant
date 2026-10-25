@@ -29,6 +29,7 @@
     "allow-delete-chapter",
     "allow-update-chapter-meta",
     "allow-export-novel",
+    "allow-export-chapters",
     "allow-list-chapter-revisions",
     "allow-restore-chapter-revision",
     "allow-list-volumes",

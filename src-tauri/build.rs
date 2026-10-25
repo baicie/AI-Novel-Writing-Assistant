@@ -20,6 +20,7 @@ fn main() {
         "delete_chapter",
         "update_chapter_meta",
         "export_novel",
+        "export_chapters",
         "list_chapter_revisions",
         "restore_chapter_revision",
         "list_volumes",
