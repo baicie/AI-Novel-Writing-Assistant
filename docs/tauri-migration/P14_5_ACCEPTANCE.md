@@ -12,9 +12,13 @@ Final HEAD: updated by this commit.
 - Cross-process index revision rank, chapter history restore, editor/candidate crash recovery.
 - Full tests and production audit.
 
+## Exact crash window
+
+`p145_batch_crash_binding` verifies: open_run commit → no Item binding → close/reopen SQLite → replay deterministic command → one Run bound, no duplicate.
+
 ## Not verified
 
-- Exact SIGKILL between open_run commit and Item bind.
+- Exact SIGKILL between open_run commit and Item bind: database-reopen recovery test PASS; real process SIGKILL at that exact point not injected.
 - Two Scheduler process interleaving.
 - Reject/Repair/Unknown Remote batch tests.
 - Unified Task Center.

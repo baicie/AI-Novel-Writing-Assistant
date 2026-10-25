@@ -5,7 +5,7 @@ Start HEAD: `27cf1bf5`
 | Phase | Status | Commit | Evidence |
 | --- | --- | --- | --- |
 | A Audit | IMPLEMENTED | 07842a2c | safe stale-scheduler cleanup |
-| B Crash/10 chapters | IMPLEMENTED / PARTIAL | ac6bed5d | 10 chapters Native PASS; exact open-before-bind SIGKILL missing |
+| B Crash/10 chapters | IMPLEMENTED | ac6bed5d / c3ca0e11 | 10 chapters Native PASS; opened-before-bind reopen recovery PASS |
 | C Task Center | NOT_STARTED | — | — |
 | D Native Export | PARTIAL | previous | range/book; volume/native dialog missing |
 | E Index Retry Native | PARTIAL | previous | Rust worker only |
@@ -34,3 +34,10 @@ Start HEAD: `27cf1bf5`
 - production .app: 21.99 MiB; DMG 9.8 MiB; hdiutil VALID; audit PASS
 - Commands 99 / Capabilities 99
 - Exact open_run→bind SIGKILL harness, Task Center, Native Save/Volume, Native Index Retry, two-window restore, structured memory remain incomplete.
+
+## 2026-10-26 00:40
+
+- exact crash window test `p145_batch_crash_binding`: open_run committed, binding absent, reopen, replay same command, one Run binded — PASS.
+- workspace: 286 passed.
+- all-targets in progress.
+- Native H/E/F/G/I phases still not started or partial.
