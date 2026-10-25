@@ -35,3 +35,17 @@ p13_source_integrity 3 passed
 2. Clean worktree all-targets actual.
 3. Native key specs + production bundle.
 4. G3 auto enqueue/SIGKILL or G5 if time remains.
+
+
+## 2026-10-25 11:30 CST — M1/M2 final
+
+- M1: `scripts/run-tauri-crash-e2e.sh` PASS
+  - Editor crash/restart PASS (PID 20805)
+  - Candidate journal crash/restart PASS (PID 20967)
+  - Director restart PASS
+  - Confirm After Edit restart PASS
+- M2: independent `index_worker` SIGKILL test PASS
+  - recovered under new epoch, one chunk, rev-1
+- M2 Tauri worker: 2s due-job claim loop + 30s lease recovery implemented
+- Remaining: Native Index Retry WDIO, multi-process index, pending auto enqueue on failed chapter index
+- Tests: 279 passed (workspace); clean all-targets in progress
