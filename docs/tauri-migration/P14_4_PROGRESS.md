@@ -32,3 +32,16 @@ process SIGKILL -> new process -> resume -> complete 3 chapters
 - failed/cancelled Run marks Item terminal before Batch failure;
 - cancel supports fresh-version CAS retry;
 - persistent BatchWorkspace + background active-run polling.
+
+## 2026-10-25 22:05 Final
+
+- workspace: 285 passed
+- clean all-targets: 344 passed
+- Native batch: 4 passing (create, 3-chapter Native approval, cancel, pause/resume)
+- Native batch process restart: PASS (`scripts/run-tauri-batch-restart-e2e.sh`)
+- editor/candidate crash/restart: PASS
+- production .app: 21.99 MiB
+- DMG: 9.8 MiB; hdiutil VALID; audit PASS
+- Commands 99 / Capabilities 99
+- Task Center / structured memory / Native export save: NOT_STARTED or PARTIAL
+- open_run-before-bind deterministic SIGKILL: code path present, not separately fault-injected
