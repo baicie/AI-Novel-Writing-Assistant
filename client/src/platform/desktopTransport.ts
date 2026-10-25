@@ -102,6 +102,9 @@ export interface ChapterRevisionSnapshot {
   content: string;
   contentSha256: string;
   createdAt: number;
+  originDetail?: string;
+  restoredFromRevisionId?: string | null;
+  restoredBy?: string | null;
 }
 
 export interface VolumeSnapshot {
@@ -615,6 +618,10 @@ export function restoreChapterRevision(input: {
   chapterId: string;
   revisionId: string;
   expectedVersion: number;
+  commandId: string;
+  draftDecision: "reject" | "keep" | "discard_own";
+  draftClientId?: string;
+  expectedDraftRevision?: number;
 }): Promise<ChapterSnapshot> {
   return invoke("restore_chapter_revision", input);
 }

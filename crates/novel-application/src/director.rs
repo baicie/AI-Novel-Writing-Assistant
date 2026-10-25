@@ -380,6 +380,10 @@ impl DirectorService {
         chapter_id: &str,
         source_revision_id: &str,
         expected_version: i64,
+        command_id: &str,
+        draft_decision: &str,
+        draft_client_id: Option<&str>,
+        expected_draft_revision: Option<i64>,
     ) -> Result<ChapterSnapshot, AppError> {
         Ok(self
             .novels
@@ -390,6 +394,12 @@ impl DirectorService {
                 expected_version,
                 revision_id: self.ids.new_id(),
                 artifact_id: self.ids.new_id(),
+                command_id: command_id.to_string(),
+                operator: "desktop-author".into(),
+                reason: String::new(),
+                draft_decision: draft_decision.to_string(),
+                draft_client_id: draft_client_id.map(str::to_string),
+                expected_draft_revision,
                 now_ms: self.clock.now_ms(),
             })
             .await?)

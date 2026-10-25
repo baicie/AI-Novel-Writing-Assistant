@@ -183,6 +183,9 @@ pub struct ChapterRevisionSnapshot {
     pub content: String,
     pub content_sha256: String,
     pub created_at: i64,
+    pub origin_detail: String,
+    pub restored_from_revision_id: Option<String>,
+    pub restored_by: Option<String>,
 }
 
 /// 知识文档只读摘要，用于桌面知识库列表。

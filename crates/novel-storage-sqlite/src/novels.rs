@@ -1048,6 +1048,17 @@ impl NovelRepository for SqliteKernel {
         &self,
         input: RestoreChapterRecord,
     ) -> Result<ChapterSnapshot, PortError> {
+        if !input.command_id.is_empty() {
+            let existing: Option<String> =
+                sqlx::query_scalar("SELECT chapter_id FROM chapter_revision WHERE command_id = ?")
+                    .bind(&input.command_id)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(map_sql)?;
+            if existing.as_deref() == Some(input.chapter_id.as_str()) {
+                return self.get_chapter(&input.novel_id, &input.chapter_id).await;
+            }
+        }
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         let current = sqlx::query(
             "SELECT c.title, c.protection, r.version AS official_version
@@ -1067,6 +1078,58 @@ impl NovelRepository for SqliteKernel {
                 "章节内容已经变化，请重新打开历史后再恢复。".into(),
             ));
         }
+        // Acquire a write lock before inspecting drafts so a concurrent draft
+        // writer cannot slip in after the restore decision is made.
+        sqlx::query("UPDATE chapter SET updated_at = updated_at WHERE novel_id = ? AND id = ?")
+            .bind(&input.novel_id)
+            .bind(&input.chapter_id)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
+        let drafts: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT client_id, local_revision FROM chapter_local_draft
+             WHERE novel_id = ? AND chapter_id = ? ORDER BY updated_at DESC",
+        )
+        .bind(&input.novel_id)
+        .bind(&input.chapter_id)
+        .fetch_all(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        if !drafts.is_empty() {
+            match input.draft_decision.as_str() {
+                "reject" => {
+                    return Err(PortError::Conflict(
+                        "本章还有未保存的本地草稿。请先保存，或选择保留/放弃草稿后再恢复。".into(),
+                    ));
+                }
+                "keep" => {}
+                "discard_own" => {
+                    let client_id = input.draft_client_id.as_deref().ok_or_else(|| {
+                        PortError::Integrity("放弃草稿时必须指定草稿所属客户端。".into())
+                    })?;
+                    let expected = input.expected_draft_revision.ok_or_else(|| {
+                        PortError::Integrity("放弃草稿时必须指定草稿版本。".into())
+                    })?;
+                    let own = drafts
+                        .iter()
+                        .any(|(id, revision)| id == client_id && *revision == expected);
+                    if !own {
+                        return Err(PortError::Conflict(
+                            "本地草稿已经变化，请重新打开后再恢复。".into(),
+                        ));
+                    }
+                    if drafts.iter().any(|(id, _)| id != client_id) {
+                        return Err(PortError::Conflict(
+                            "其他窗口还有本地草稿，不能代为放弃。".into(),
+                        ));
+                    }
+                    sqlx::query("DELETE FROM chapter_local_draft WHERE novel_id = ? AND chapter_id = ? AND client_id = ? AND local_revision = ?")
+                        .bind(&input.novel_id).bind(&input.chapter_id).bind(client_id).bind(expected)
+                        .execute(tx.deref_mut()).await.map_err(map_sql)?;
+                }
+                _ => return Err(PortError::Integrity("草稿决策不合法。".into())),
+            }
+        }
         let source = sqlx::query(
             "SELECT r.content, r.content_sha256, r.version
              FROM chapter_revision r JOIN chapter c ON c.id = r.chapter_id
@@ -1084,10 +1147,24 @@ impl NovelRepository for SqliteKernel {
         let source_version: i64 = source.try_get("version").map_err(map_sql)?;
         let title: String = current.try_get("title").map_err(map_sql)?;
         let next_version = version + 1;
-        sqlx::query("INSERT INTO chapter_revision(id, chapter_id, version, origin, content, content_sha256, created_at) VALUES (?, ?, ?, 'user', ?, ?, ?)")
-            .bind(&input.revision_id).bind(&input.chapter_id).bind(next_version)
-            .bind(&content).bind(&content_sha256).bind(input.now_ms)
-            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        sqlx::query(
+            "INSERT INTO chapter_revision
+               (id, chapter_id, version, origin, content, content_sha256, created_at,
+                origin_detail, restored_from_revision_id, command_id, restored_by)
+             VALUES (?, ?, ?, 'user', ?, ?, ?, 'restored_from_history', ?, ?, ?)",
+        )
+        .bind(&input.revision_id)
+        .bind(&input.chapter_id)
+        .bind(next_version)
+        .bind(&content)
+        .bind(&content_sha256)
+        .bind(input.now_ms)
+        .bind(&input.source_revision_id)
+        .bind(&input.command_id)
+        .bind(&input.operator)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
         sqlx::query("UPDATE chapter SET official_revision_id = ?, protection = 'user_edited', updated_at = ? WHERE id = ? AND novel_id = ?")
             .bind(&input.revision_id).bind(input.now_ms).bind(&input.chapter_id).bind(&input.novel_id)
             .execute(tx.deref_mut()).await.map_err(map_sql)?;
@@ -1111,6 +1188,9 @@ impl NovelRepository for SqliteKernel {
                 "restoredFromRevisionId": input.source_revision_id,
                 "restoredFromVersion": source_version,
                 "revisionId": input.revision_id,
+                "commandId": input.command_id,
+                "operator": input.operator,
+                "reason": input.reason,
             })
             .to_string(),
             &content_sha256,
@@ -1147,7 +1227,8 @@ impl NovelRepository for SqliteKernel {
         chapter_id: &str,
     ) -> Result<Vec<ChapterRevisionSnapshot>, PortError> {
         let rows = sqlx::query(
-            "SELECT r.id, r.chapter_id, r.version, r.origin, r.content, r.content_sha256, r.created_at
+            "SELECT r.id, r.chapter_id, r.version, r.origin, r.content, r.content_sha256, r.created_at,
+                    r.origin_detail, r.restored_from_revision_id, r.restored_by
              FROM chapter_revision r
              JOIN chapter c ON c.id = r.chapter_id
              WHERE c.novel_id = ? AND c.id = ?
@@ -1180,6 +1261,11 @@ impl NovelRepository for SqliteKernel {
                     content: row.try_get("content").map_err(map_sql)?,
                     content_sha256: row.try_get("content_sha256").map_err(map_sql)?,
                     created_at: row.try_get("created_at").map_err(map_sql)?,
+                    origin_detail: row.try_get("origin_detail").map_err(map_sql)?,
+                    restored_from_revision_id: row
+                        .try_get("restored_from_revision_id")
+                        .map_err(map_sql)?,
+                    restored_by: row.try_get("restored_by").map_err(map_sql)?,
                 })
             })
             .collect()

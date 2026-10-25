@@ -64,6 +64,12 @@ pub struct RestoreChapterRecord {
     pub expected_version: i64,
     pub revision_id: String,
     pub artifact_id: String,
+    pub command_id: String,
+    pub operator: String,
+    pub reason: String,
+    pub draft_decision: String,
+    pub draft_client_id: Option<String>,
+    pub expected_draft_revision: Option<i64>,
     pub now_ms: i64,
 }
 

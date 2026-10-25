@@ -30,7 +30,10 @@ describe("Native chapter history restore", () => {
     }, { timeout: 20_000, timeoutMsg: "restore did not create a new official revision" });
     const revisions = await invoke("list_chapter_revisions", { novelId: novel.id, chapterId: chapter.id });
     expect(revisions.length).toBe(3);
-    expect(revisions[2].content).toBe("第一版历史正文");
+    expect(revisions[0].content).toBe("第一版历史正文");
+    expect(revisions[0].originDetail).toBe("restored_from_history");
+    expect(revisions[0].restoredFromRevisionId).toBe(revisions[2].id);
+    expect(revisions.some((revision) => revision.content === "第二版历史正文")).toBe(true);
     expect(revisions.some((revision) => revision.content === "第二版历史正文")).toBe(true);
   });
 });

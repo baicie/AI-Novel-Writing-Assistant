@@ -407,11 +407,24 @@ pub async fn restore_chapter_revision(
     chapter_id: String,
     revision_id: String,
     expected_version: i64,
+    command_id: String,
+    draft_decision: String,
+    draft_client_id: Option<String>,
+    expected_draft_revision: Option<i64>,
 ) -> Result<ChapterSnapshot, AppError> {
     state
         .runtime
         .director
-        .restore_chapter_revision(&novel_id, &chapter_id, &revision_id, expected_version)
+        .restore_chapter_revision(
+            &novel_id,
+            &chapter_id,
+            &revision_id,
+            expected_version,
+            &command_id,
+            &draft_decision,
+            draft_client_id.as_deref(),
+            expected_draft_revision,
+        )
         .await
 }
 
