@@ -37,3 +37,15 @@ E2E export 2 passing（单章/范围/全书/隔离）
 - S5 Task Center
 - S7 结构化记忆
 - S6 Native Index Retry
+
+## 2026-10-25 Final
+
+- workspace tests: 282 passed (before opaque-revision guard)
+- clean all-targets: 341 passed (before opaque guard; final rerun pending)
+- chapter-history E2E PASS
+- export E2E PASS (2 tests)
+- editor/candidate crash/restart PASS
+- production .app 21.54 MiB; DMG 9.6 MiB; audit PASS
+- Commands 92 / capabilities 92
+- S3/S4/S5/S7 NOT_STARTED
+- S6 Native Retry missing
