@@ -45,7 +45,7 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     .unwrap();
     KnowledgeRepository::index_document(
         &kernel,
-        doc("char", "旧正文 林动遇见魂兽", "rev-1", "hash-1"),
+        doc("char", "旧正文 林动遇见魂兽", "rev@v1", "hash-1"),
     )
     .await
     .unwrap();
@@ -61,7 +61,7 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
 
     KnowledgeRepository::index_document(
         &kernel,
-        doc("char", "新正文 林动进入祖祠", "rev-2", "hash-2"),
+        doc("char", "新正文 林动进入祖祠", "rev@v2", "hash-2"),
     )
     .await
     .unwrap();
@@ -83,7 +83,7 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     .await
     .unwrap();
     assert_eq!(fresh.len(), 1);
-    assert_eq!(fresh[0].source_revision.as_deref(), Some("rev-2"));
+    assert_eq!(fresh[0].source_revision.as_deref(), Some("rev@v2"));
     assert_eq!(fresh[0].index_version, 2);
     assert!(fresh[0].chunk_hash.is_some());
 
@@ -103,7 +103,7 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     assert!(during.is_empty(), "building index must not be queried");
     KnowledgeRepository::index_document(
         &kernel,
-        doc("char", "重建正文 苏晚在祖祠", "rev-3", "hash-3"),
+        doc("char", "重建正文 苏晚在祖祠", "rev@v3", "hash-3"),
     )
     .await
     .unwrap();
@@ -120,7 +120,7 @@ async fn reindex_replaces_old_chunks_and_failed_rebuild_is_not_queryable() {
     let source: (String, String, i64) = sqlx::query_as(
         "SELECT source_revision, source_content_hash, index_version FROM knowledge_document WHERE id='char'",
     ).fetch_one(kernel.pool()).await.unwrap();
-    assert_eq!(source, ("rev-3".into(), "hash-3".into(), 3));
+    assert_eq!(source, ("rev@v3".into(), "hash-3".into(), 3));
 
     // Wrong embedding model is not silently mixed in.
     let wrong =
