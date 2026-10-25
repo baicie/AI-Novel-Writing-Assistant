@@ -602,6 +602,15 @@ export function listChapterRevisions(input: {
   return invoke("list_chapter_revisions", input);
 }
 
+export function restoreChapterRevision(input: {
+  novelId: string;
+  chapterId: string;
+  revisionId: string;
+  expectedVersion: number;
+}): Promise<ChapterSnapshot> {
+  return invoke("restore_chapter_revision", input);
+}
+
 export function listVolumes(novelId: string): Promise<VolumeSnapshot[]> {
   return invoke("list_volumes", { novelId });
 }

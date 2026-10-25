@@ -361,6 +361,21 @@ pub async fn list_chapter_revisions(
 }
 
 #[tauri::command]
+pub async fn restore_chapter_revision(
+    state: State<'_, AppState>,
+    novel_id: String,
+    chapter_id: String,
+    revision_id: String,
+    expected_version: i64,
+) -> Result<ChapterSnapshot, AppError> {
+    state
+        .runtime
+        .director
+        .restore_chapter_revision(&novel_id, &chapter_id, &revision_id, expected_version)
+        .await
+}
+
+#[tauri::command]
 pub async fn list_volumes(
     state: State<'_, AppState>,
     novel_id: String,

@@ -30,6 +30,7 @@
     "allow-update-chapter-meta",
     "allow-export-novel",
     "allow-list-chapter-revisions",
+    "allow-restore-chapter-revision",
     "allow-list-volumes",
     "allow-create-volume",
     "allow-update-volume",

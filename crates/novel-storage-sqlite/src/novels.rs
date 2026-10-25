@@ -5,9 +5,9 @@ use novel_application::{
     CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
     CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult,
     NewChapter, NewCharacter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary,
-    PortError, PromoteOutcome, SaveCandidateEditDraftRecord, SaveChapterDraftRecord,
-    SaveChapterRecord, StoryFactView, UpdateChapterMetaRecord, UpdateNovelFields,
-    UpdateVolumeRecord, VolumeSnapshot,
+    PortError, PromoteOutcome, RestoreChapterRecord, SaveCandidateEditDraftRecord,
+    SaveChapterDraftRecord, SaveChapterRecord, StoryFactView, UpdateChapterMetaRecord,
+    UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_domain::{ChapterProtection, CreationExperience, ensure_can_promote};
@@ -1040,6 +1040,103 @@ impl NovelRepository for SqliteKernel {
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        self.get_chapter(&input.novel_id, &input.chapter_id).await
+    }
+
+    async fn restore_chapter_revision(
+        &self,
+        input: RestoreChapterRecord,
+    ) -> Result<ChapterSnapshot, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let current = sqlx::query(
+            "SELECT c.title, c.protection, r.version AS official_version
+             FROM chapter c LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE c.novel_id = ? AND c.id = ?",
+        )
+        .bind(&input.novel_id)
+        .bind(&input.chapter_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到这一章。".into()))?;
+        let official_version: Option<i64> = current.try_get("official_version").map_err(map_sql)?;
+        let version = official_version.unwrap_or(0);
+        if version != input.expected_version {
+            return Err(PortError::Conflict(
+                "章节内容已经变化，请重新打开历史后再恢复。".into(),
+            ));
+        }
+        let source = sqlx::query(
+            "SELECT r.content, r.content_sha256, r.version
+             FROM chapter_revision r JOIN chapter c ON c.id = r.chapter_id
+             WHERE c.novel_id = ? AND c.id = ? AND r.id = ?",
+        )
+        .bind(&input.novel_id)
+        .bind(&input.chapter_id)
+        .bind(&input.source_revision_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?
+        .ok_or_else(|| PortError::NotFound("没有找到要恢复的历史版本。".into()))?;
+        let content: String = source.try_get("content").map_err(map_sql)?;
+        let content_sha256: String = source.try_get("content_sha256").map_err(map_sql)?;
+        let source_version: i64 = source.try_get("version").map_err(map_sql)?;
+        let title: String = current.try_get("title").map_err(map_sql)?;
+        let next_version = version + 1;
+        sqlx::query("INSERT INTO chapter_revision(id, chapter_id, version, origin, content, content_sha256, created_at) VALUES (?, ?, ?, 'user', ?, ?, ?)")
+            .bind(&input.revision_id).bind(&input.chapter_id).bind(next_version)
+            .bind(&content).bind(&content_sha256).bind(input.now_ms)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        sqlx::query("UPDATE chapter SET official_revision_id = ?, protection = 'user_edited', updated_at = ? WHERE id = ? AND novel_id = ?")
+            .bind(&input.revision_id).bind(input.now_ms).bind(&input.chapter_id).bind(&input.novel_id)
+            .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        invalidate_story_facts(
+            &mut tx,
+            &input.chapter_id,
+            &format!("{}@v{}", input.revision_id, next_version),
+            input.now_ms,
+        )
+        .await?;
+        insert_artifact(
+            &mut tx,
+            &input.artifact_id,
+            &input.novel_id,
+            None,
+            "chapter_restore",
+            &chapter_scope(&input.chapter_id),
+            "user_edited",
+            true,
+            &serde_json::json!({
+                "restoredFromRevisionId": input.source_revision_id,
+                "restoredFromVersion": source_version,
+                "revisionId": input.revision_id,
+            })
+            .to_string(),
+            &content_sha256,
+            input.now_ms,
+        )
+        .await?;
+        sync_chapter_knowledge(
+            &mut tx,
+            &input.novel_id,
+            &input.chapter_id,
+            &title,
+            &content,
+            &input.revision_id,
+            next_version,
+            input.now_ms,
+        )
+        .await?;
+        record_chapter_index_job(
+            &mut tx,
+            &input.novel_id,
+            &input.chapter_id,
+            &input.revision_id,
+            next_version,
+            input.now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         self.get_chapter(&input.novel_id, &input.chapter_id).await
     }

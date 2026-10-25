@@ -57,6 +57,16 @@ pub struct SaveChapterRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct RestoreChapterRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub source_revision_id: String,
+    pub expected_version: i64,
+    pub revision_id: String,
+    pub artifact_id: String,
+    pub now_ms: i64,
+}
+
 pub struct SaveChapterDraftRecord {
     pub novel_id: String,
     pub chapter_id: String,
@@ -760,6 +770,11 @@ pub trait NovelRepository: Send + Sync {
         &self,
         input: UpdateChapterMetaRecord,
     ) -> Result<ChapterSnapshot, PortError>;
+    async fn restore_chapter_revision(
+        &self,
+        input: RestoreChapterRecord,
+    ) -> Result<ChapterSnapshot, PortError>;
+
     async fn list_chapter_revisions(
         &self,
         novel_id: &str,

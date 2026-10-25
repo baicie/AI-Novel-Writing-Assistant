@@ -116,8 +116,8 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
                   查看本章版本
                 </Button>
               ) : onOpenVersionHistory ? (
-                <Button size="sm" variant="outline" onClick={onOpenVersionHistory} className="w-full">
-                  版本入口
+                <Button size="sm" variant="outline" onClick={onOpenVersionHistory} className="w-full" data-testid="chapter-version-history-button">
+                  查看本章历史
                 </Button>
               ) : null}
               {onRefreshWorkspace ? (

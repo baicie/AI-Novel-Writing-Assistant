@@ -19,8 +19,9 @@ use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
 use crate::ports::{
     Clock, CommandOutcome, DeleteChapterRecord, Ids, NewChapter, NewNovel, NewVolume,
-    NovelRepository, OpenRunRecord, SaveCandidateEditDraftRecord, SaveChapterDraftRecord,
-    SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord, WorkflowRepository,
+    NovelRepository, OpenRunRecord, RestoreChapterRecord, SaveCandidateEditDraftRecord,
+    SaveChapterDraftRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
+    WorkflowRepository,
 };
 
 #[derive(Debug, Clone)]
@@ -370,6 +371,27 @@ impl DirectorService {
         Ok(self
             .novels
             .list_chapter_revisions(novel_id, chapter_id)
+            .await?)
+    }
+
+    pub async fn restore_chapter_revision(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+        source_revision_id: &str,
+        expected_version: i64,
+    ) -> Result<ChapterSnapshot, AppError> {
+        Ok(self
+            .novels
+            .restore_chapter_revision(RestoreChapterRecord {
+                novel_id: novel_id.to_string(),
+                chapter_id: chapter_id.to_string(),
+                source_revision_id: source_revision_id.to_string(),
+                expected_version,
+                revision_id: self.ids.new_id(),
+                artifact_id: self.ids.new_id(),
+                now_ms: self.clock.now_ms(),
+            })
             .await?)
     }
 

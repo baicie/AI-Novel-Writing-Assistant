@@ -670,7 +670,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           isSaving={saveMutation.isPending}
           selectedDiagnosticId={selectedDiagnosticId}
           onBack={onBack ? () => leaveEditor(onBack) : undefined}
-          onOpenChapterVersions={() => setIsVersionDrawerOpen(true)}
+          onOpenChapterVersions={onOpenVersionHistory ? undefined : () => setIsVersionDrawerOpen(true)}
           onOpenVersionHistory={onOpenVersionHistory ? () => leaveEditor(onOpenVersionHistory) : undefined}
           onRefreshWorkspace={onRefreshWorkspace}
           isRefreshingWorkspace={isRefreshingWorkspace}

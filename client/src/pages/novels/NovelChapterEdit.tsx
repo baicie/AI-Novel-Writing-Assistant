@@ -1,12 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getChapterEditorWorkspace, getNovelDetail } from "@/api/novel";
 import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { stripLegacyTaskUrlParams } from "@/lib/legacyTaskUrlParams";
 import ChapterEditorShell from "./components/chapterEditor/ChapterEditorShell";
+import NativeChapterHistoryDialog from "./components/NativeChapterHistoryDialog";
 
 function PageStateCard(props: { message: string }) {
   return (
@@ -19,6 +20,8 @@ function PageStateCard(props: { message: string }) {
 export default function NovelChapterEdit() {
   const { id = "", chapterId = "" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -98,9 +101,22 @@ export default function NovelChapterEdit() {
             ? "error"
             : "ready"}
         onBack={() => navigate(`/novels/${id}/edit`)}
-        onOpenVersionHistory={() => navigate(`/novels/${id}/edit`)}
+        onOpenVersionHistory={() => setHistoryOpen(true)}
         onRefreshWorkspace={() => { void chapterEditorWorkspaceQuery.refetch(); }}
         isRefreshingWorkspace={chapterEditorWorkspaceQuery.isFetching}
+      />
+      <NativeChapterHistoryDialog
+        novelId={id}
+        chapterId={chapterId}
+        chapterTitle={chapter.title}
+        currentVersion={chapter.officialVersion ?? 0}
+        currentContent={chapter.content ?? ""}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onRestored={() => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.novels.detail(id) });
+          void chapterEditorWorkspaceQuery.refetch();
+        }}
       />
     </div>
   );

@@ -21,6 +21,7 @@ fn main() {
         "update_chapter_meta",
         "export_novel",
         "list_chapter_revisions",
+        "restore_chapter_revision",
         "list_volumes",
         "create_volume",
         "update_volume",
