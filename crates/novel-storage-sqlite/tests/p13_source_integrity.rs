@@ -145,3 +145,18 @@ async fn second_process_cannot_overwrite_newer_revision() {
     .unwrap();
     assert_eq!(chunk_revision, "rev@v3");
 }
+
+#[tokio::test]
+async fn opaque_revisions_cannot_overwrite_without_ordering() {
+    let (_dir, kernel) = kernel().await;
+    KnowledgeRepository::index_document(&kernel, doc("d1", "n1", "document", "alpha"))
+        .await
+        .unwrap();
+    let replaced =
+        KnowledgeRepository::index_document(&kernel, doc("d1", "n1", "document", "beta")).await;
+    assert!(
+        replaced.is_err(),
+        "unversioned revisions must not silently replace each other"
+    );
+    assert_eq!(revision(&kernel, "d1").await, "alpha");
+}

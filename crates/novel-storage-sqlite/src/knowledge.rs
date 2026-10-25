@@ -52,15 +52,30 @@ impl KnowledgeRepository for SqliteKernel {
         }
         if let (Some((_, _, _, _, _, _, _, Some(existing_revision))), Some(incoming_revision)) =
             (&existing, document.source_revision.as_deref())
-            && let (Some(existing_rank), Some(incoming_rank)) = (
+            && existing_revision != incoming_revision
+        {
+            match (
                 revision_rank(existing_revision),
                 revision_rank(incoming_revision),
-            )
-            && incoming_rank < existing_rank
-        {
-            return Err(PortError::Conflict(
-                "知识来源 revision 已过期，不能覆盖较新的索引。".into(),
-            ));
+            ) {
+                (Some(existing_rank), Some(incoming_rank)) if incoming_rank < existing_rank => {
+                    return Err(PortError::Conflict(
+                        "知识来源 revision 已过期，不能覆盖较新的索引。".into(),
+                    ));
+                }
+                (None, None) => {
+                    return Err(PortError::Conflict(
+                        "知识来源 revision 缺少可比较版本；请使用 vN 或 revision@vN 后再更新。"
+                            .into(),
+                    ));
+                }
+                (Some(_), None) => {
+                    return Err(PortError::Conflict(
+                        "不能用无版本的来源覆盖已有版本化索引。".into(),
+                    ));
+                }
+                _ => {}
+            }
         }
         if let Some((
             _version,
