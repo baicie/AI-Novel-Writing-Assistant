@@ -16,7 +16,6 @@ required-features = ["test-harness"]
 [[bin]]
 name = "index_worker"
 path = "src/bin/index_worker.rs"
-required-features = ["test-harness"]
 
 [dependencies]
 async-trait.workspace = true
