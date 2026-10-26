@@ -1,0 +1,1 @@
+ALTER TABLE structured_story_fact ADD COLUMN version INTEGER NOT NULL DEFAULT 0;

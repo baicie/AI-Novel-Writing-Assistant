@@ -22,6 +22,7 @@ fn view(row: &sqlx::sqlite::SqliteRow) -> Result<StructuredFactView, PortError> 
         superseded_by: row.try_get("superseded_by").map_err(map_sql)?,
         created_at: row.try_get("created_at").map_err(map_sql)?,
         updated_at: row.try_get("updated_at").map_err(map_sql)?,
+        version: row.try_get("version").map_err(map_sql)?,
     })
 }
 

@@ -198,6 +198,10 @@ async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
             "0020",
             include_str!("../../../migrations/0020_structured_story_fact.sql"),
         ),
+        (
+            "0021",
+            include_str!("../../../migrations/0021_structured_fact_version.sql"),
+        ),
     ];
     ensure_schema_migration_table(pool).await?;
     for (version, script) in SCRIPTS {

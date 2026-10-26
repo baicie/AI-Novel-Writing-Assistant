@@ -1017,10 +1017,13 @@ async fn resolve_structured_fact_conflict(
     }
     match decision {
         "confirm_new" | "supersede_with_evidence" => {
-            sqlx::query("UPDATE structured_story_fact SET status='superseded', superseded_by=?, updated_at=? WHERE id=? AND novel_id=? AND status='active' AND truthfulness='confirmed'")
+            let old_updated = sqlx::query("UPDATE structured_story_fact SET status='superseded', superseded_by=?, version=version+1, updated_at=? WHERE id=? AND novel_id=? AND status='active' AND truthfulness='confirmed'")
                 .bind(new_id).bind(now_ms).bind(old_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
-            let updated = sqlx::query("UPDATE structured_story_fact SET truthfulness='confirmed', status='active', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed' AND status IN ('disputed','proposed')")
+            if old_updated.rows_affected() != 1 {
+                return Err(PortError::Conflict("旧事实已变化，请刷新冲突。".into()));
+            }
+            let updated = sqlx::query("UPDATE structured_story_fact SET truthfulness='confirmed', status='active', version=version+1, updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed' AND status IN ('disputed','proposed')")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
             if updated.rows_affected() != 1 {
@@ -1028,14 +1031,20 @@ async fn resolve_structured_fact_conflict(
             }
         }
         "keep_existing" | "reject_extraction" => {
-            sqlx::query("UPDATE structured_story_fact SET status='rejected', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
+            let updated = sqlx::query("UPDATE structured_story_fact SET status='rejected', version=version+1, updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
+            if updated.rows_affected() != 1 {
+                return Err(PortError::Conflict("新事实已变化，请刷新冲突。".into()));
+            }
         }
         "mark_disputed" => {
-            sqlx::query("UPDATE structured_story_fact SET status='disputed', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
+            let updated = sqlx::query("UPDATE structured_story_fact SET status='disputed', version=version+1, updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
+            if updated.rows_affected() != 1 {
+                return Err(PortError::Conflict("新事实已变化，请刷新冲突。".into()));
+            }
         }
         _ => return Err(PortError::Integrity("未知结构化冲突裁决。".into())),
     }

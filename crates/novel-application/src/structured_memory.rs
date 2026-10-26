@@ -20,6 +20,7 @@ pub struct StructuredFactView {
     pub superseded_by: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

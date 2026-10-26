@@ -1181,6 +1181,7 @@ export interface StructuredFactView {
   effectiveChapterOrder: number;
   status: string;
   supersededBy: string | null;
+  version: number;
   createdAt: number;
   updatedAt: number;
 }

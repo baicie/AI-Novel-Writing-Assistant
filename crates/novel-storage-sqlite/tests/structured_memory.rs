@@ -450,3 +450,96 @@ async fn context_only_uses_confirmed_active_facts_at_target() {
             .all(|fact| fact.status == "active" && fact.truthfulness == "confirmed")
     );
 }
+
+#[tokio::test]
+async fn concurrent_conflicts_do_not_lose_fact_updates() {
+    use novel_application::MemoryRepository;
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("concurrent.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "并发".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "old".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 1,
+            evidence_quote: "山门".into(),
+            effective_chapter_order: 1,
+            now_ms: 10,
+        })
+        .await
+        .unwrap();
+    for (id, location) in [("new-a", "祖祠"), ("new-b", "后山")] {
+        kernel
+            .confirm_structured_fact(NewStructuredFact {
+                id: id.into(),
+                novel_id: "n1".into(),
+                entity_id: "lin".into(),
+                fact_type: "location".into(),
+                value_json: format!(r#"{{"location":"{location}"}}"#),
+                source_chapter_id: "c1".into(),
+                source_revision: 1,
+                evidence_quote: location.into(),
+                effective_chapter_order: 1,
+                now_ms: 20,
+            })
+            .await
+            .unwrap();
+    }
+    let conflicts = kernel.list_memory_conflicts("n1").await.unwrap();
+    assert_eq!(conflicts.len(), 2);
+    kernel
+        .resolve_memory_conflict(
+            &conflicts[0].id,
+            0,
+            "cmd-a",
+            "hash-a",
+            "confirm_new",
+            None,
+            "a",
+            "author",
+            30,
+        )
+        .await
+        .unwrap();
+    let second = kernel
+        .resolve_memory_conflict(
+            &conflicts[1].id,
+            0,
+            "cmd-b",
+            "hash-b",
+            "confirm_new",
+            None,
+            "b",
+            "author",
+            31,
+        )
+        .await;
+    assert!(
+        second.is_err(),
+        "second conflict must fail after old fact changed"
+    );
+    let context = NovelRepository::list_structured_facts_for_context(&kernel, "n1", 1)
+        .await
+        .unwrap();
+    assert_eq!(context.len(), 1);
+    assert_eq!(context[0].id, "new-a");
+    assert_eq!(context[0].version, 1);
+}
