@@ -105,6 +105,7 @@ mod tests {
             novel_id: "n1".into(),
             title: "第一章".into(),
             sort_order: 3,
+            volume_id: None,
             protection: "user_edited".into(),
             official_version: 7,
             content: "林动入山\n风雪扑面".into(),
