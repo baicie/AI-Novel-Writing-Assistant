@@ -48,6 +48,7 @@ export const config = {
     }
     process.env.BIZ_NOVEL_DATA_DIR = dataDir;
     process.env.BIZ_NOVEL_E2E_SCENARIO = process.env.BIZ_NOVEL_E2E_SCENARIO ?? "clean";
+    process.env.BIZ_NOVEL_E2E_INDEX_FAIL_ONCE = process.env.BIZ_NOVEL_E2E_INDEX_FAIL_ONCE ?? "1";
     process.env.BIZ_NOVEL_E2E_DATA_DIR = dataDir;
     process.env.BIZ_NOVEL_E2E_BINARY = binary;
     console.log(`[e2e] data=${dataDir} endpoint=${process.env.BIZ_NOVEL_E2E_ENDPOINT}`);

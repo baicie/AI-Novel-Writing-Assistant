@@ -532,6 +532,29 @@ pub(crate) async fn execute_index_job(
             .await
             .map_err(AppError::from);
     }
+    #[cfg(feature = "e2e")]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static E2E_INDEX_FAILED_ONCE: AtomicBool = AtomicBool::new(false);
+        if std::env::var("BIZ_NOVEL_E2E_INDEX_FAIL_ONCE").is_ok()
+            && !E2E_INDEX_FAILED_ONCE.swap(true, Ordering::SeqCst)
+        {
+            return state
+                .kernel
+                .fail_index_job(
+                    &job.id,
+                    owner,
+                    job.claim_epoch,
+                    "e2e_injected",
+                    "E2E 注入的首次索引失败",
+                    now + 60_000,
+                    now,
+                )
+                .await
+                .map_err(AppError::from);
+        }
+    }
+
     match state.kernel.retry_index_document(&job.source_id).await {
         Ok(true) => {
             state
@@ -541,17 +564,31 @@ pub(crate) async fn execute_index_job(
                 .map_err(AppError::from)?;
         }
         Ok(false) => {
-            return state
-                .kernel
-                .mark_index_job_obsolete(
-                    &job.id,
-                    owner,
-                    job.claim_epoch,
-                    "索引已是就绪状态但请求未执行",
-                    now,
-                )
-                .await
-                .map_err(AppError::from);
+            // A matching, already-ready document is the current index for this
+            // source revision. Completing the job is evidence-based, not a
+            // blanket success on false.
+            if current.index_status == "ready"
+                && (job.source_revision.is_empty()
+                    || current.source_revision.as_deref() == Some(job.source_revision.as_str()))
+            {
+                state
+                    .kernel
+                    .complete_index_job(&job.id, owner, job.claim_epoch, now)
+                    .await
+                    .map_err(AppError::from)?;
+            } else {
+                return state
+                    .kernel
+                    .mark_index_job_obsolete(
+                        &job.id,
+                        owner,
+                        job.claim_epoch,
+                        "索引已是就绪状态但来源修订不匹配",
+                        now,
+                    )
+                    .await
+                    .map_err(AppError::from);
+            }
         }
         Err(error) => {
             return state

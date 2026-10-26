@@ -24,6 +24,7 @@
     "test:batch": "wdio run wdio.conf.mjs --spec specs/batch.spec.mjs",
     "test:batch-crash": "wdio run wdio.conf.mjs --spec specs/batch-crash.spec.mjs",
     "test:batch-restart": "wdio run wdio.conf.mjs --spec specs/batch-restart.spec.mjs",
-    "test:task-center": "wdio run wdio.conf.mjs --spec specs/task-center.spec.mjs"
+    "test:task-center": "wdio run wdio.conf.mjs --spec specs/task-center.spec.mjs",
+    "test:index-retry": "wdio run wdio.conf.mjs --spec specs/index-retry.spec.mjs"
   }
 }

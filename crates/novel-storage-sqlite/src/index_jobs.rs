@@ -262,7 +262,7 @@ impl IndexJobRepository for SqliteKernel {
             "UPDATE knowledge_index_job SET status = 'pending', attempt_count = 0,
                     next_run_at = ?, lease_owner = NULL, lease_until = NULL,
                     last_error_category = NULL, last_error = NULL, updated_at = ?
-             WHERE id = ? AND status IN ('failed','obsolete')",
+             WHERE id = ? AND status IN ('failed','obsolete','retry_wait')",
         )
         .bind(now_ms)
         .bind(now_ms)
@@ -272,7 +272,7 @@ impl IndexJobRepository for SqliteKernel {
         .map_err(map_sql)?;
         if result.rows_affected() != 1 {
             return Err(PortError::Conflict(
-                "只有 failed/obsolete 任务可以手动重新排队。".into(),
+                "只有 failed/obsolete/retry_wait 任务可以手动重新排队。".into(),
             ));
         }
         let row = sqlx::query(
