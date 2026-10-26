@@ -40,6 +40,7 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
+    let builder = builder.plugin(tauri_plugin_dialog::init());
     builder
         .setup(|app| {
             let data_dir = std::env::var_os("BIZ_NOVEL_DATA_DIR")
@@ -249,6 +250,7 @@ commands::novel::create_character,
             commands::novel::update_chapter_meta,
             commands::novel::export_novel,
             commands::novel::export_chapters,
+            commands::novel::export_novel_to_file,
             commands::novel::export_novel_selection,
             commands::novel::list_chapter_revisions,
             commands::novel::restore_chapter_revision,

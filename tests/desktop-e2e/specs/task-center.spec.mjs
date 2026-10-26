@@ -17,10 +17,12 @@ describe("Native task center", () => {
     expect(body).toContain("连续创作");
     expect(body).toContain("任务");
 
-    const pause = await $("[data-testid=task-pause]");
-    await pause.waitForDisplayed({ timeout: 20_000 });
-    await pause.click();
-    await browser.waitUntil(async () => (await invoke("list_batches", { novelId: novel.id }))[0].status === "paused", { timeout: 20_000 });
+    expect(await $("[data-testid=task-pause]").isExisting()).toBe(false);
+    expect(await $("[data-testid=task-retry]").isExisting()).toBe(false);
+    const open = await $("button*=去原页面操作");
+    await open.waitForDisplayed({ timeout: 20_000 });
+    await open.click();
+    await browser.waitUntil(async () => (await browser.execute(() => window.location.hash)).includes("/lab/director"), { timeout: 20_000 });
     const project = await invoke("list_native_tasks", { novelId: novel.id });
     expect(project.some((task) => task.taskType === "batch")).toBe(true);
   });

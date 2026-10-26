@@ -1,15 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/toast";
-import {
-  cancelBatch,
-  getBatch,
-  listNativeTasks,
-  pauseBatch,
-  resumeBatch,
-  retryIndexJob,
-  type NativeTaskSummary,
-} from "@/platform/desktopTransport";
+import { listNativeTasks, type NativeTaskSummary } from "@/platform/desktopTransport";
 
 const statusLabel: Record<string, string> = {
   queued: "排队中", running: "进行中", waiting_approval: "等待确认", paused: "已暂停",
@@ -44,7 +35,6 @@ export default function NativeTaskCenterPage() {
   const [filter, setFilter] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState("");
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -73,32 +63,6 @@ export default function NativeTaskCenterPage() {
 
   const open = (route: string) => {
     window.location.hash = `#${route}`;
-  };
-
-  const runAction = async (task: NativeTaskSummary, action: string) => {
-    setBusy(task.taskId);
-    setError(null);
-    try {
-      if (task.taskType === "batch" && task.batchId && ["pause", "resume", "cancel"].includes(action)) {
-        const current = await getBatch(task.batchId);
-        if (action === "pause") await pauseBatch(task.batchId, current.version);
-        if (action === "resume") await resumeBatch(task.batchId, current.version);
-        if (action === "cancel") await cancelBatch(task.batchId, current.version);
-        toast.success("批量任务状态已更新。");
-      } else if (task.taskType === "index_job" && action === "retry") {
-        await retryIndexJob({ jobId: task.taskId });
-        toast.success("索引任务已重新排队。");
-      } else {
-        open(task.detailRoute);
-      }
-      await refresh();
-    } catch (cause: unknown) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError(`操作未完成：${message}。已重新读取最新任务状态。`);
-      await refresh();
-    } finally {
-      setBusy(null);
-    }
   };
 
   return (
@@ -155,13 +119,9 @@ export default function NativeTaskCenterPage() {
                 {task.lastError ? <p className="mt-1 line-clamp-2 text-xs text-destructive">{task.lastError}</p> : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                {task.availableActions.includes("open_approval") ? <Button size="sm" onClick={() => open(task.detailRoute)}>打开确认</Button> : null}
-                {task.availableActions.includes("open_batch") ? <Button size="sm" variant="outline" onClick={() => open(task.detailRoute)}>打开连续创作</Button> : null}
-                {task.availableActions.includes("pause") ? <Button size="sm" variant="outline" data-testid="task-pause" disabled={busy === task.taskId} onClick={() => void runAction(task, "pause")}>暂停</Button> : null}
-                {task.availableActions.includes("resume") ? <Button size="sm" variant="outline" data-testid="task-resume" disabled={busy === task.taskId} onClick={() => void runAction(task, "resume")}>继续</Button> : null}
-                {task.availableActions.includes("cancel") ? <Button size="sm" variant="outline" data-testid="task-cancel" disabled={busy === task.taskId} onClick={() => void runAction(task, "cancel")}>取消</Button> : null}
-                {task.availableActions.includes("retry") ? <Button size="sm" variant="outline" data-testid="task-retry" disabled={busy === task.taskId} onClick={() => void runAction(task, "retry")}>重试索引</Button> : null}
-                {task.availableActions.includes("open_detail") && !task.availableActions.some((action) => action.startsWith("open_") && action !== "open_detail") ? <Button size="sm" variant="outline" onClick={() => open(task.detailRoute)}>查看详情</Button> : null}
+                {task.availableActions.includes("open_approval") ? <Button size="sm" onClick={() => open(task.detailRoute)}>去原页面确认</Button> : null}
+                {task.availableActions.includes("open_batch") ? <Button size="sm" variant="outline" onClick={() => open(task.detailRoute)}>去原页面操作</Button> : null}
+                {task.availableActions.includes("open_detail") ? <Button size="sm" variant="outline" onClick={() => open(task.detailRoute)}>查看详情</Button> : null}
               </div>
             </div>
           </li>

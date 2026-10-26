@@ -86,7 +86,7 @@ async fn native_task_projection_merges_persisted_domains_and_maps_actions() {
         .iter()
         .find(|task| task.task_type == "index_job")
         .unwrap();
-    assert!(retry.available_actions.contains(&"retry".to_string()));
+    assert_eq!(retry.available_actions, vec!["open_detail".to_string()]);
     assert_eq!(retry.status, "failed");
     let wrong_novel = kernel
         .list_native_tasks(&NativeTaskQuery {

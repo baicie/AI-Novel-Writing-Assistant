@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
-import { exportNovelSelection, listVolumes, type VolumeSnapshot } from "@/platform/desktopTransport";
+import { exportNovelToFile, listVolumes, type VolumeSnapshot } from "@/platform/desktopTransport";
 
 interface NovelExportDialogProps {
   novelId: string;
@@ -32,20 +32,17 @@ export default function NovelExportDialog(props: NovelExportDialogProps) {
   const exportNovel = async () => {
     setExporting(true);
     try {
-      const text = await exportNovelSelection({
+      const saved = await exportNovelToFile({
         novelId, selection, format,
         startOrder: selection === "range" ? startOrder : undefined,
         endOrder: selection === "range" ? endOrder : undefined,
         volumeIds: selection === "volumes" ? volumeIds : undefined,
       });
-      const blob = new Blob([text], { type: format === "markdown" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `novel-export-${novelId}.${format === "markdown" ? "md" : "txt"}`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      toast.success("导出文件已生成。");
+      if (!saved) {
+        toast.info("已取消保存。");
+        return;
+      }
+      toast.success(`已保存到 ${saved}`);
       onOpenChange(false);
     } catch (cause: unknown) {
       toast.error(cause instanceof Error ? cause.message : "导出失败，请稍后重试。");

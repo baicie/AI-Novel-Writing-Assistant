@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-novel-to-file"
+description = "Enables the export_novel_to_file command without any pre-configured scope."
+commands.allow = ["export_novel_to_file"]
+
+[[permission]]
+identifier = "deny-export-novel-to-file"
+description = "Denies the export_novel_to_file command without any pre-configured scope."
+commands.deny = ["export_novel_to_file"]

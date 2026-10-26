@@ -620,6 +620,19 @@ export function exportNovelSelection(input: {
   return invoke("export_novel_selection", input);
 }
 
+export function exportNovelToFile(input: {
+  novelId: string;
+  selection: "chapter" | "range" | "entire_book" | "chapter_ids" | "volume" | "volumes";
+  format: "markdown" | "txt";
+  chapterId?: string;
+  chapterIds?: string[];
+  volumeIds?: string[];
+  startOrder?: number;
+  endOrder?: number;
+}): Promise<string | null> {
+  return invoke("export_novel_to_file", input);
+}
+
 export function listChapterRevisions(input: {
   novelId: string;
   chapterId: string;

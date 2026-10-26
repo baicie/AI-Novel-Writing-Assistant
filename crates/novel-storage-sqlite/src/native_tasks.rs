@@ -18,32 +18,14 @@ fn actions(task_type: &str, status: &str) -> (Vec<String>, bool) {
                 status == "waiting_approval" || status == "paused",
             )
         }
-        "batch" => {
-            let mut actions = vec!["open_batch".to_string(), "open_detail".to_string()];
-            match status {
-                "running" | "waiting_approval" | "created" => {
-                    actions.push("pause".into());
-                    actions.push("cancel".into());
-                }
-                "paused" => {
-                    actions.push("resume".into());
-                    actions.push("cancel".into());
-                }
-                _ => {}
-            }
-            (
-                actions,
-                matches!(status, "waiting_approval" | "paused" | "failed"),
-            )
-        }
-        "index_job" => {
-            let actions = if matches!(status, "failed" | "retry_wait" | "obsolete") {
-                vec!["retry".to_string(), "open_detail".to_string()]
-            } else {
-                vec!["open_detail".to_string()]
-            };
-            (actions, matches!(status, "failed" | "retry_wait"))
-        }
+        "batch" => (
+            vec!["open_batch".to_string(), "open_detail".to_string()],
+            matches!(status, "waiting_approval" | "paused" | "failed"),
+        ),
+        "index_job" => (
+            vec!["open_detail".to_string()],
+            matches!(status, "failed" | "retry_wait"),
+        ),
         "memory_extraction" => (
             vec!["open_detail".to_string()],
             status == "failed" || status == "succeeded",

@@ -31,6 +31,8 @@
     "allow-export-novel",
     "allow-export-chapters",
     "allow-export-novel-selection",
+    "allow-export-novel-to-file",
+    "dialog:default",
     "allow-list-chapter-revisions",
     "allow-restore-chapter-revision",
     "allow-list-volumes",

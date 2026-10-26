@@ -22,6 +22,7 @@ fn main() {
         "export_novel",
         "export_chapters",
         "export_novel_selection",
+        "export_novel_to_file",
         "list_chapter_revisions",
         "restore_chapter_revision",
         "list_volumes",

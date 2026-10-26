@@ -5,6 +5,7 @@ use novel_application::{
 use novel_domain::{CreationExperience, NarrativeForm, ProjectMode, WritingMode};
 use serde::Deserialize;
 use tauri::State;
+use tauri_plugin_dialog::DialogExt;
 
 use crate::state::AppState;
 
@@ -442,6 +443,53 @@ pub async fn export_novel_selection(
         }
         _ => Err(AppError::validation("导出格式只支持 markdown 或 txt。")),
     }
+}
+
+#[tauri::command]
+pub async fn export_novel_to_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    novel_id: String,
+    selection: String,
+    format: String,
+    chapter_id: Option<String>,
+    chapter_ids: Option<Vec<String>>,
+    volume_ids: Option<Vec<String>>,
+    start_order: Option<i32>,
+    end_order: Option<i32>,
+) -> Result<Option<String>, AppError> {
+    let text = export_novel_selection(
+        state,
+        novel_id.clone(),
+        selection,
+        format.clone(),
+        chapter_id,
+        chapter_ids,
+        volume_ids,
+        start_order,
+        end_order,
+    )
+    .await?;
+    let extension = if format == "txt" { "txt" } else { "md" };
+    let filter = if format == "txt" {
+        "文本文件"
+    } else {
+        "Markdown"
+    };
+    let path = app
+        .dialog()
+        .file()
+        .add_filter(filter, &[extension])
+        .set_file_name(format!("novel-{novel_id}.{extension}"))
+        .blocking_save_file();
+    let Some(file_path) = path else {
+        return Ok(None);
+    };
+    let Some(target) = file_path.into_path().ok() else {
+        return Err(AppError::validation("无法解析保存位置。"));
+    };
+    novel_platform::write_text_atomically(&target, &text).map_err(AppError::integrity)?;
+    Ok(Some(target.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
