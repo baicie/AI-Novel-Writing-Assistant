@@ -31,3 +31,11 @@ Start (actual): `612fe766`
 ## Blockers
 
 `p11_lease_fence` root cause UNRESOLVED; Native Save OS dialog, two-window draft, index SIGKILL, Batch Unknown, exact process kill, old DB upgrade and full journey not executed.
+
+## 2026-10-27 final
+
+- 295 workspace / 354 all-targets passed.
+- Chapter history diff Native E2E PASS.
+- SQLite busy/locked mapping added.
+- Production RC app/DMG rebuilt.
+- Release gate remains BETA_RC_BLOCKED.
