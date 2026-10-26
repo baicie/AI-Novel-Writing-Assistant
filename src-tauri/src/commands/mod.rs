@@ -3,6 +3,7 @@ pub mod editor;
 pub mod generation;
 pub mod knowledge;
 pub mod model;
+pub mod native_tasks;
 pub mod novel;
 pub mod run;
 pub mod setup;

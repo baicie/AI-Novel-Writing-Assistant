@@ -1124,3 +1124,31 @@ export function pauseBatch(batchId: string, expectedVersion: number): Promise<Ba
 export function resumeBatch(batchId: string, expectedVersion: number): Promise<BatchRunView> { return invoke("resume_batch", { batchId, expectedVersion }); }
 export function cancelBatch(batchId: string, expectedVersion: number): Promise<BatchRunView> { return invoke("cancel_batch", { batchId, expectedVersion }); }
 export function tickBatches(): Promise<BatchRunView[]> { return invoke("tick_batches"); }
+
+export interface NativeTaskSummary {
+  taskId: string;
+  taskType: "director_run" | "batch" | "index_job" | "memory_extraction" | "quality_debt";
+  novelId: string;
+  chapterId: string | null;
+  batchId: string | null;
+  title: string;
+  status: string;
+  currentStage: string | null;
+  progress: number | null;
+  createdAt: number;
+  updatedAt: number;
+  lastError: string | null;
+  requiresUserAction: boolean;
+  availableActions: string[];
+  detailRoute: string;
+}
+
+export function listNativeTasks(input: {
+  novelId?: string;
+  taskType?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<NativeTaskSummary[]> {
+  return invoke("list_native_tasks", input);
+}

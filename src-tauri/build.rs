@@ -40,6 +40,7 @@ fn main() {
         "resume_batch",
         "cancel_batch",
         "tick_batches",
+        "list_native_tasks",
         "approve_run",
         "reject_run",
         "regenerate_run",

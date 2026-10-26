@@ -41,6 +41,7 @@
     "allow-list-all-runs",
     "allow-open-run",
     "allow-tick-batches",
+    "allow-list-native-tasks",
     "allow-cancel-batch",
     "allow-resume-batch",
     "allow-pause-batch",

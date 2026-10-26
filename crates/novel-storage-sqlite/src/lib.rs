@@ -6,6 +6,7 @@ mod legacy_import;
 mod lookups;
 mod memory;
 mod model;
+mod native_tasks;
 mod novels;
 mod tasks;
 mod workflow;

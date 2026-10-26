@@ -14,6 +14,7 @@ mod hub;
 mod integration_tests;
 mod knowledge;
 mod memory;
+mod native_tasks;
 mod ports;
 mod runtime;
 mod services_chapter;
@@ -48,6 +49,9 @@ pub use hash::{json_hash, sha256_hex};
 pub use hub::EventHub;
 pub use knowledge::assemble_context;
 pub use memory::{ExtractMemoryInput, MemoryService};
+pub use native_tasks::{
+    NativeTaskQuery, NativeTaskRepository, NativeTaskService, NativeTaskSummary,
+};
 pub use ports::{
     CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
     DeleteChapterRecord, FaultInjector, Ids, IndexJobRepository, IndexJobView,
