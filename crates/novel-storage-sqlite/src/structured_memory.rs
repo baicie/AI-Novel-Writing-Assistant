@@ -26,6 +26,62 @@ fn view(row: &sqlx::sqlite::SqliteRow) -> Result<StructuredFactView, PortError> 
     })
 }
 
+fn relationship_value(fact: &StructuredFactView) -> (String, String, bool) {
+    let value = parse_value(&fact.value_json);
+    let target = value
+        .get("targetEntityId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let relation = value
+        .get("relation")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let active = value
+        .get("active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    (target, relation, active)
+}
+
+/// Apply As-Of visibility to confirmed facts that already passed source validity.
+/// Single-valued types keep the latest fact; relationships keep the latest per
+/// directed pair/type and omit terminated relations. Aliases coexist.
+pub(crate) fn visible_facts_at(mut rows: Vec<StructuredFactView>) -> Vec<StructuredFactView> {
+    rows.sort_by(|left, right| {
+        right
+            .effective_chapter_order
+            .cmp(&left.effective_chapter_order)
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    let mut seen_single: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_relation: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for fact in rows {
+        match fact.fact_type.as_str() {
+            "location" | "life_state" => {
+                let key = format!("{}:{}", fact.entity_id, fact.fact_type);
+                if seen_single.insert(key) {
+                    out.push(fact);
+                }
+            }
+            "alias" => out.push(fact),
+            "relationship" => {
+                let (target, relation, active) = relationship_value(&fact);
+                let key = format!("{}:{}:{}", fact.entity_id, target, relation);
+                if seen_relation.insert(key) && active {
+                    out.push(fact);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 fn parse_value(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
 }
@@ -123,22 +179,8 @@ impl StructuredMemoryRepository for SqliteKernel {
                    AND f.truthfulness = 'confirmed'
                    AND f.effective_chapter_order <= ?
                    AND EXISTS (SELECT 1 FROM chapter c JOIN chapter_revision r ON r.id = c.official_revision_id
-                               WHERE c.id = f.source_chapter_id AND c.novel_id = f.novel_id AND r.version = f.source_revision)
-                   AND (
-                     f.fact_type IN ('alias', 'relationship')
-                     OR NOT EXISTS (
-                       SELECT 1 FROM structured_story_fact newer
-                       WHERE newer.novel_id = f.novel_id AND newer.entity_id = f.entity_id
-                         AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
-                         AND newer.effective_chapter_order <= ?
-                         AND (newer.effective_chapter_order > f.effective_chapter_order
-                              OR (newer.effective_chapter_order = f.effective_chapter_order AND
-                                  (newer.updated_at > f.updated_at
-                                   OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
-                                   OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
-                   )
-                 ORDER BY f.effective_chapter_order DESC, f.updated_at DESC, f.id DESC",
-            ).bind(novel_id).bind(entity_id).bind(entity_id).bind(as_of).bind(as_of)
+                               WHERE c.id = f.source_chapter_id AND c.novel_id = f.novel_id AND r.version = f.source_revision)",
+            ).bind(novel_id).bind(entity_id).bind(entity_id).bind(as_of)
             .fetch_all(&self.pool).await.map_err(map_sql)?
         } else {
             sqlx::query(
@@ -151,7 +193,11 @@ impl StructuredMemoryRepository for SqliteKernel {
             ).bind(novel_id).bind(entity_id).bind(entity_id)
             .fetch_all(&self.pool).await.map_err(map_sql)?
         };
-        rows.iter().map(view).collect()
+        let mut facts: Vec<StructuredFactView> = rows.iter().map(view).collect::<Result<_, _>>()?;
+        if as_of_chapter_order.is_some() {
+            facts = visible_facts_at(facts);
+        }
+        Ok(facts)
     }
 
     async fn confirm_structured_fact(
@@ -223,12 +269,34 @@ impl StructuredMemoryRepository for SqliteKernel {
         }
         if matches!(fact.fact_type.as_str(), "location" | "life_state") {
             sqlx::query(
-                "UPDATE structured_story_fact SET status = 'superseded', superseded_by = ?, updated_at = ?
+                "UPDATE structured_story_fact SET status = 'superseded', superseded_by = ?, version = version + 1, updated_at = ?
                  WHERE novel_id = ? AND entity_id = ? AND fact_type = ? AND status = 'active'
                    AND effective_chapter_order <= ?",
             ).bind(&fact.id).bind(fact.now_ms).bind(&fact.novel_id).bind(&fact.entity_id)
             .bind(&fact.fact_type).bind(fact.effective_chapter_order)
             .execute(&mut *tx).await.map_err(map_sql)?;
+        } else if fact.fact_type == "relationship" {
+            let value = parse_value(&fact.value_json);
+            let active = value
+                .get("active")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let target = value
+                .get("targetEntityId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let relation = value.get("relation").and_then(|v| v.as_str()).unwrap_or("");
+            if !active {
+                sqlx::query(
+                    "UPDATE structured_story_fact SET status='superseded', superseded_by=?, version=version+1, updated_at=?
+                     WHERE novel_id=? AND entity_id=? AND fact_type='relationship' AND status='active'
+                       AND json_extract(value_json, '$.targetEntityId') = ?
+                       AND json_extract(value_json, '$.relation') = ?
+                       AND effective_chapter_order <= ?",
+                ).bind(&fact.id).bind(fact.now_ms).bind(&fact.novel_id).bind(&fact.entity_id)
+                .bind(target).bind(relation).bind(fact.effective_chapter_order)
+                .execute(&mut *tx).await.map_err(map_sql)?;
+            }
         }
         sqlx::query(
             "INSERT INTO structured_story_fact

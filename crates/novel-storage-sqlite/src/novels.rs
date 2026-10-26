@@ -1313,27 +1313,15 @@ impl NovelRepository for SqliteKernel {
     ) -> Result<Vec<novel_application::StructuredFactView>, PortError> {
         let rows = sqlx::query(
             "SELECT f.* FROM structured_story_fact f
-             WHERE f.novel_id = ? AND f.truthfulness = 'confirmed' AND f.status = 'active'
+             WHERE f.novel_id = ? AND f.truthfulness = 'confirmed'
                AND f.effective_chapter_order <= ?
                AND EXISTS (SELECT 1 FROM chapter c JOIN chapter_revision r ON r.id = c.official_revision_id
                            WHERE c.id = f.source_chapter_id AND c.novel_id = f.novel_id AND r.version = f.source_revision)
-               AND (
-                 f.fact_type IN ('alias', 'relationship')
-                 OR NOT EXISTS (
-                   SELECT 1 FROM structured_story_fact newer
-                   WHERE newer.novel_id = f.novel_id AND newer.entity_id = f.entity_id
-                     AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
-                     AND newer.status = 'active' AND newer.effective_chapter_order <= ?
-                     AND (newer.effective_chapter_order > f.effective_chapter_order
-                          OR (newer.effective_chapter_order = f.effective_chapter_order
-                              AND (newer.updated_at > f.updated_at
-                                   OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
-                                   OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
-               )
-             ORDER BY f.entity_id, f.fact_type, f.effective_chapter_order",
-        ).bind(novel_id).bind(before_chapter_order).bind(before_chapter_order)
+             ORDER BY f.effective_chapter_order DESC, f.updated_at DESC, f.id DESC",
+        ).bind(novel_id).bind(before_chapter_order)
         .fetch_all(&self.pool).await.map_err(map_sql)?;
-        rows.iter()
+        let facts: Vec<novel_application::StructuredFactView> = rows
+            .iter()
             .map(|row| {
                 Ok(novel_application::StructuredFactView {
                     id: row.try_get("id").map_err(map_sql)?,
@@ -1355,7 +1343,8 @@ impl NovelRepository for SqliteKernel {
                     version: row.try_get("version").map_err(map_sql)?,
                 })
             })
-            .collect()
+            .collect::<Result<_, PortError>>()?;
+        Ok(crate::structured_memory::visible_facts_at(facts))
     }
 
     async fn list_story_facts(

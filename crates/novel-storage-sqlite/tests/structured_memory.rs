@@ -543,3 +543,109 @@ async fn concurrent_conflicts_do_not_lose_fact_updates() {
     assert_eq!(context[0].id, "new-a");
     assert_eq!(context[0].version, 1);
 }
+
+#[tokio::test]
+async fn location_return_and_relationship_termination_follow_as_of() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("timeline.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "时间线".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    character(&kernel, "su", "苏晚").await;
+    for (id, order) in [("c1", 1), ("c3", 3), ("c5", 5), ("c8", 8), ("c12", 12)] {
+        official_chapter(&kernel, id, order, "时间线正文").await;
+    }
+    for (id, loc, chapter, order, now) in [
+        ("l1", "山门", "c1", 1, 10),
+        ("l2", "祖祠", "c5", 5, 20),
+        ("l3", "山门", "c8", 8, 30),
+    ] {
+        kernel
+            .confirm_structured_fact(NewStructuredFact {
+                id: id.into(),
+                novel_id: "n1".into(),
+                entity_id: "lin".into(),
+                fact_type: "location".into(),
+                value_json: format!(r#"{{"location":"{loc}"}}"#),
+                source_chapter_id: chapter.into(),
+                source_revision: 1,
+                evidence_quote: loc.into(),
+                effective_chapter_order: order,
+                now_ms: now,
+            })
+            .await
+            .unwrap();
+    }
+    for (order, chapter, active, now, id) in [
+        (3, "c3", true, 40, "r1"),
+        (8, "c8", false, 50, "r2"),
+        (12, "c12", true, 60, "r3"),
+    ] {
+        kernel.confirm_structured_fact(NewStructuredFact {
+            id: id.into(), novel_id: "n1".into(), entity_id: "lin".into(), fact_type: "relationship".into(),
+            value_json: serde_json::json!({"relation":"ally_of","targetEntityId":"su","targetName":"苏晚","active":active}).to_string(),
+            source_chapter_id: chapter.into(), source_revision: 1, evidence_quote: "关系变化".into(),
+            effective_chapter_order: order, now_ms: now,
+        }).await.unwrap();
+    }
+    for (order, location) in [(2, "山门"), (6, "祖祠"), (9, "山门")] {
+        let facts = kernel
+            .list_structured_facts("n1", Some("lin"), Some(order))
+            .await
+            .unwrap();
+        let locations: Vec<_> = facts
+            .iter()
+            .filter(|fact| fact.fact_type == "location")
+            .collect();
+        assert_eq!(locations.len(), 1, "location at {order}");
+        assert!(
+            locations[0].value_json.contains(location),
+            "location at {order}"
+        );
+    }
+    for (order, expected) in [(4, true), (9, false), (13, true)] {
+        let facts = kernel
+            .list_structured_facts("n1", Some("lin"), Some(order))
+            .await
+            .unwrap();
+        let relationships: Vec<_> = facts
+            .iter()
+            .filter(|f| f.fact_type == "relationship")
+            .collect();
+        assert_eq!(
+            !relationships.is_empty(),
+            expected,
+            "relationship at {order}"
+        );
+        if expected {
+            assert!(relationships[0].value_json.contains("ally_of"));
+        }
+    }
+    let context_at_two = NovelRepository::list_structured_facts_for_context(&kernel, "n1", 2)
+        .await
+        .unwrap();
+    assert!(
+        context_at_two
+            .iter()
+            .any(|f| f.fact_type == "location" && f.value_json.contains("山门"))
+    );
+    let context_at_nine = NovelRepository::list_structured_facts_for_context(&kernel, "n1", 9)
+        .await
+        .unwrap();
+    assert!(
+        !context_at_nine
+            .iter()
+            .any(|f| f.fact_type == "relationship")
+    );
+}

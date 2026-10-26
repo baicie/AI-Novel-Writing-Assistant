@@ -21,7 +21,7 @@ function displayValue(fact: StructuredFactView): string {
   try {
     const value = JSON.parse(fact.valueJson) as Record<string, unknown>;
     return String(value.location ?? value.state ?? value.alias
-      ?? (value.relation ? `${value.relation} → ${value.targetName ?? value.targetEntityId ?? ""}` : fact.valueJson));
+      ?? (value.relation ? `${value.relation} → ${value.targetName ?? value.targetEntityId ?? ""}${value.active === false ? "（已终止）" : ""}` : fact.valueJson));
   } catch {
     return fact.valueJson;
   }
@@ -109,6 +109,34 @@ export default function StructuredMemoryPanel({ novelId, onConflictChanged }: { 
     }
   };
 
+  const terminateRelationship = async (fact: StructuredFactView) => {
+    const chapter = chapters.find((row) => row.id === chapterId);
+    if (!chapter || chapter.officialVersion <= 0) {
+      setMessage("请选择有正式正文的来源章节。");
+      return;
+    }
+    setBusy(true);
+    try {
+      const value = JSON.parse(fact.valueJson) as Record<string, unknown>;
+      await confirmStructuredFact({
+        fact: {
+          id: crypto.randomUUID(), novelId, entityId, factType: "relationship",
+          valueJson: JSON.stringify({ ...value, active: false }),
+          sourceChapterId: chapter.id, sourceRevision: chapter.officialVersion,
+          evidenceQuote: evidence.trim() || "作者确认关系终止", effectiveChapterOrder: chapter.sortOrder,
+          nowMs: Date.now(),
+        },
+      });
+      await refreshFacts(entityId);
+      onConflictChanged?.();
+      setMessage("关系终止已记录并保留来源。");
+    } catch (cause: unknown) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="space-y-3 rounded-xl bg-muted/15 p-3" data-testid="structured-memory-panel">
       <div>
@@ -128,6 +156,9 @@ export default function StructuredMemoryPanel({ novelId, onConflictChanged }: { 
             <span>{displayValue(fact)}</span>
             <span className="text-muted-foreground">第{fact.effectiveChapterOrder}章 · 来源 v{fact.sourceRevision} · {fact.status}</span>
             <span className="line-clamp-1 text-muted-foreground">证据：{fact.evidenceQuote}</span>
+            {fact.factType === "relationship" && fact.status === "active" && !fact.valueJson.includes('"active":false') ? (
+              <Button size="sm" variant="outline" data-testid="memory-terminate-relationship" disabled={busy} onClick={() => void terminateRelationship(fact)}>终止关系</Button>
+            ) : null}
           </li>
         ))}
         {!facts.length ? <li className="text-xs text-muted-foreground">还没有已确认的人物状态。</li> : null}
