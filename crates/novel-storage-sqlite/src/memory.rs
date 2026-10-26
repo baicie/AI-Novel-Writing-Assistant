@@ -516,46 +516,67 @@ impl MemoryRepository for SqliteKernel {
         if conflict.version != expected_version {
             return Err(PortError::Conflict("冲突已经变化，请刷新后再裁决。".into()));
         }
-        let chosen = chosen_candidate_id
-            .or_else(|| conflict.candidate_ids.first().map(String::as_str))
-            .ok_or_else(|| PortError::Integrity("冲突没有可裁决候选。".into()))?;
-        if !conflict.candidate_ids.iter().any(|id| id == chosen) {
-            return Err(PortError::Integrity("裁决候选不属于这条冲突。".into()));
-        }
-        let candidate = load_candidate(&mut tx, chosen).await?;
-        match decision {
-            "confirm_new" => {
-                validate_candidate_source(&mut tx, &candidate, false).await?;
-                let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
-                write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
-                set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
-                    .await?;
-                reject_other_candidates(&mut tx, &conflict.candidate_ids, &candidate.id, now_ms)
-                    .await?;
+        let chosen = if conflict.candidate_ids.is_empty() {
+            if conflict.fact_ids.is_empty() {
+                return Err(PortError::Integrity("冲突没有可裁决事实。".into()));
             }
-            "supersede_with_evidence" => {
-                if conflict.fact_ids.is_empty() {
-                    return Err(PortError::Conflict(
-                        "替代裁决必须关联至少一个旧事实。".into(),
-                    ));
+            resolve_structured_fact_conflict(&mut tx, &conflict, decision, now_ms).await?;
+            None
+        } else {
+            let chosen = chosen_candidate_id
+                .or_else(|| conflict.candidate_ids.first().map(String::as_str))
+                .ok_or_else(|| PortError::Integrity("冲突没有可裁决候选。".into()))?;
+            if !conflict.candidate_ids.iter().any(|id| id == chosen) {
+                return Err(PortError::Integrity("裁决候选不属于这条冲突。".into()));
+            }
+            Some(chosen)
+        };
+        if let Some(chosen) = chosen {
+            let candidate = load_candidate(&mut tx, chosen).await?;
+            match decision {
+                "confirm_new" => {
+                    validate_candidate_source(&mut tx, &candidate, false).await?;
+                    let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
+                    write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
+                    set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
+                        .await?;
+                    reject_other_candidates(
+                        &mut tx,
+                        &conflict.candidate_ids,
+                        &candidate.id,
+                        now_ms,
+                    )
+                    .await?;
                 }
-                validate_candidate_source(&mut tx, &candidate, true).await?;
-                let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
-                write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
-                set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
+                "supersede_with_evidence" => {
+                    if conflict.fact_ids.is_empty() {
+                        return Err(PortError::Conflict(
+                            "替代裁决必须关联至少一个旧事实。".into(),
+                        ));
+                    }
+                    validate_candidate_source(&mut tx, &candidate, true).await?;
+                    let chapter_order = chapter_order_for(&mut tx, &candidate.chapter_id).await?;
+                    write_candidate_fact(&mut tx, &candidate, chapter_order, now_ms).await?;
+                    set_candidate_status(&mut tx, &candidate, "confirmed", Some(reason), now_ms)
+                        .await?;
+                    reject_other_candidates(
+                        &mut tx,
+                        &conflict.candidate_ids,
+                        &candidate.id,
+                        now_ms,
+                    )
                     .await?;
-                reject_other_candidates(&mut tx, &conflict.candidate_ids, &candidate.id, now_ms)
-                    .await?;
-                supersede_old_facts(&mut tx, &conflict.novel_id, &conflict.fact_ids, now_ms)
-                    .await?;
+                    supersede_old_facts(&mut tx, &conflict.novel_id, &conflict.fact_ids, now_ms)
+                        .await?;
+                }
+                "keep_existing" | "reject_extraction" => {
+                    reject_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
+                }
+                "mark_disputed" => {
+                    defer_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
+                }
+                _ => return Err(PortError::Integrity("未知冲突裁决动作。".into())),
             }
-            "keep_existing" | "reject_extraction" => {
-                reject_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
-            }
-            "mark_disputed" => {
-                defer_candidates(&mut tx, &conflict.candidate_ids, reason, now_ms).await?;
-            }
-            _ => return Err(PortError::Integrity("未知冲突裁决动作。".into())),
         }
         sqlx::query(
             "INSERT INTO memory_conflict_decision
@@ -568,7 +589,7 @@ impl MemoryRepository for SqliteKernel {
         .bind(command_id)
         .bind(request_hash)
         .bind(decision)
-        .bind(Some(chosen))
+        .bind(chosen)
         .bind(reason)
         .bind(operator)
         .bind(expected_version)
@@ -925,6 +946,57 @@ async fn defer_candidates(
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
+    }
+    Ok(())
+}
+
+async fn resolve_structured_fact_conflict(
+    tx: &mut crate::db::Tx<'_>,
+    conflict: &MemoryConflictView,
+    decision: &str,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    if conflict.fact_ids.len() < 2 {
+        return Err(PortError::Integrity("结构化冲突缺少事实对。".into()));
+    }
+    let old_id = &conflict.fact_ids[0];
+    let new_id = &conflict.fact_ids[1];
+    let current: Option<i64> = sqlx::query_scalar(
+        "SELECT r.version FROM structured_story_fact f
+         JOIN chapter c ON c.id = f.source_chapter_id
+         JOIN chapter_revision r ON r.id = c.official_revision_id
+         WHERE f.id = ? AND f.novel_id = ? AND r.version = f.source_revision",
+    )
+    .bind(new_id)
+    .bind(&conflict.novel_id)
+    .fetch_optional(tx.deref_mut())
+    .await
+    .map_err(map_sql)?;
+    if current.is_none() {
+        return Err(PortError::Conflict(
+            "新事实的来源章节已经变化，请重新确认。".into(),
+        ));
+    }
+    match decision {
+        "confirm_new" | "supersede_with_evidence" => {
+            sqlx::query("UPDATE structured_story_fact SET status='superseded', superseded_by=?, updated_at=? WHERE id=? AND novel_id=?")
+                .bind(new_id).bind(now_ms).bind(old_id).bind(&conflict.novel_id)
+                .execute(tx.deref_mut()).await.map_err(map_sql)?;
+            sqlx::query("UPDATE structured_story_fact SET truthfulness='confirmed', status='active', updated_at=? WHERE id=? AND novel_id=?")
+                .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
+                .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        "keep_existing" | "reject_extraction" => {
+            sqlx::query("UPDATE structured_story_fact SET status='rejected', updated_at=? WHERE id=? AND novel_id=?")
+                .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
+                .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        "mark_disputed" => {
+            sqlx::query("UPDATE structured_story_fact SET status='disputed', updated_at=? WHERE id=? AND novel_id=?")
+                .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
+                .execute(tx.deref_mut()).await.map_err(map_sql)?;
+        }
+        _ => return Err(PortError::Integrity("未知结构化冲突裁决。".into())),
     }
     Ok(())
 }

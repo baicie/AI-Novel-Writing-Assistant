@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import BatchWorkspace from "./BatchWorkspace";
 import StructuredMemoryPanel from "./StructuredMemoryPanel";
+import MemoryConflictPanel from "./MemoryConflictPanel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -596,7 +597,8 @@ export default function TauriDirectorPage() {
         onOpenChapter={(id) => setChapterId(id)}
         onBatchChanged={() => { void queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }); }}
       />
-      <StructuredMemoryPanel novelId={novelId} />
+      <StructuredMemoryPanel novelId={novelId} onConflictChanged={() => void refreshConflicts()} />
+      <MemoryConflictPanel novelId={novelId} />
 
       {!runId ? (
         <section data-tauri-director-start className="max-w-xl space-y-4 rounded-md bg-muted/20 p-4">
@@ -781,7 +783,7 @@ export default function TauriDirectorPage() {
                 {memoryConflicts.filter(conflict => conflict.status === "open").length ? <ul className="space-y-2 text-xs">
                   {memoryConflicts.filter(conflict => conflict.status === "open").map(conflict => <li key={conflict.id} className="rounded-md bg-destructive/5 px-3 py-2">
                     <p className="leading-5">{conflict.description}</p>
-                    <p className="mt-1 text-muted-foreground">{conflict.conflictType} · 章节 {conflict.chapterOrder} · 候选 {conflict.candidateIds.length}</p>
+                    <p className="mt-1 text-muted-foreground">{conflict.conflictType} · 章节 {conflict.chapterOrder} · 候选 {conflict.candidateIds.length} · 事实 {conflict.factIds.length}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Button data-testid="director-conflict-confirm-new" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "confirm_new", "采用新事实")}>采用新事实</Button>
                       <Button data-testid="director-conflict-keep-existing" variant="outline" disabled={memoryConflictBusy === conflict.id} onClick={() => void decideConflict(conflict, "keep_existing", "保留现有事实")}>保留现有</Button>

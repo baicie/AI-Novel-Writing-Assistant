@@ -20,19 +20,22 @@ const factTypeLabel: Record<string, string> = {
 function displayValue(fact: StructuredFactView): string {
   try {
     const value = JSON.parse(fact.valueJson) as Record<string, unknown>;
-    return String(value.location ?? value.state ?? value.alias ?? value.relationship ?? fact.valueJson);
+    return String(value.location ?? value.state ?? value.alias
+      ?? (value.relation ? `${value.relation} → ${value.targetName ?? value.targetEntityId ?? ""}` : fact.valueJson));
   } catch {
     return fact.valueJson;
   }
 }
 
-export default function StructuredMemoryPanel({ novelId }: { novelId: string }) {
+export default function StructuredMemoryPanel({ novelId, onConflictChanged }: { novelId: string; onConflictChanged?: () => void }) {
   const [characters, setCharacters] = useState<CharacterSnapshot[]>([]);
   const [chapters, setChapters] = useState<ChapterSnapshot[]>([]);
   const [entityId, setEntityId] = useState("");
   const [facts, setFacts] = useState<StructuredFactView[]>([]);
   const [factType, setFactType] = useState("location");
   const [value, setValue] = useState("");
+  const [targetEntityId, setTargetEntityId] = useState("");
+  const [relation, setRelation] = useState("ally_of");
   const [chapterId, setChapterId] = useState("");
   const [evidence, setEvidence] = useState("");
   const [busy, setBusy] = useState(false);
@@ -58,8 +61,8 @@ export default function StructuredMemoryPanel({ novelId }: { novelId: string }) 
 
   const addFact = async () => {
     const chapter = chapters.find((row) => row.id === chapterId);
-    if (!entityId || !chapter || !value.trim() || !evidence.trim()) {
-      setMessage("请选择人物、来源章节，并填写状态和来源证据。");
+    if (!entityId || !chapter || !evidence.trim() || (factType === "relationship" ? !targetEntityId : !value.trim())) {
+      setMessage(factType === "relationship" ? "请选择人物、关系对象、来源章节，并填写来源证据。" : "请选择人物、来源章节，并填写状态和来源证据。");
       return;
     }
     if (chapter.officialVersion <= 0) {
@@ -71,7 +74,11 @@ export default function StructuredMemoryPanel({ novelId }: { novelId: string }) 
     try {
       const structuredValue = factType === "life_state" ? { state: value.trim() }
         : factType === "alias" ? { alias: value.trim() }
-          : factType === "relationship" ? { relationship: value.trim() }
+          : factType === "relationship" ? {
+            relation,
+            targetEntityId,
+            targetName: characters.find((character) => character.id === targetEntityId)?.name ?? "",
+          }
             : { location: value.trim() };
       await confirmStructuredFact({
         fact: {
@@ -90,7 +97,11 @@ export default function StructuredMemoryPanel({ novelId }: { novelId: string }) 
       setValue("");
       setEvidence("");
       await refreshFacts(entityId);
-      setMessage("人物状态已确认并写入长篇记忆。");
+      onConflictChanged?.();
+      const latest = await listStructuredFacts({ novelId, entityId });
+      setMessage(latest.some((fact) => fact.id && fact.truthfulness !== "confirmed")
+        ? "新事实已进入待裁决冲突，请在记忆冲突区域处理。"
+        : "人物状态已确认并写入长篇记忆。");
     } catch (cause: unknown) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -126,11 +137,28 @@ export default function StructuredMemoryPanel({ novelId }: { novelId: string }) 
           <select className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5" value={factType} onChange={(event) => setFactType(event.target.value)} data-testid="memory-type">
             <option value="location">所在地点</option>
             <option value="life_state">生死状态</option>
+            <option value="alias">别名</option>
+            <option value="relationship">人物关系</option>
           </select>
         </label>
-        <label className="text-xs">状态值
-          <input className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5" value={value} placeholder={factType === "life_state" ? "alive / dead / unknown" : "山门"} onChange={(event) => setValue(event.target.value)} data-testid="memory-value" />
-        </label>
+        {factType === "relationship" ? <label className="text-xs">关系对象
+          <span className="mt-1 flex gap-1">
+            <select className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5" value={targetEntityId} onChange={(event) => setTargetEntityId(event.target.value)} data-testid="memory-target">
+              <option value="">选择人物</option>
+              {characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
+            </select>
+            <select className="w-28 rounded-md border border-input bg-background px-2 py-1.5" value={relation} onChange={(event) => setRelation(event.target.value)} data-testid="memory-relation">
+              <option value="parent_of">父母</option>
+              <option value="sibling_of">兄弟姐妹</option>
+              <option value="ally_of">盟友</option>
+              <option value="enemy_of">敌人</option>
+              <option value="mentor_of">师长</option>
+              <option value="partner_of">伴侣</option>
+            </select>
+          </span>
+        </label> : <label className="text-xs">状态值
+          <input className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5" value={value} placeholder={factType === "life_state" ? "alive / dead / unknown" : factType === "alias" ? "化名或称号" : "山门"} onChange={(event) => setValue(event.target.value)} data-testid="memory-value" />
+        </label>}
         <label className="text-xs">来源章节
           <select className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5" value={chapterId} onChange={(event) => setChapterId(event.target.value)} data-testid="memory-chapter">
             {chapters.map((chapter) => <option key={chapter.id} value={chapter.id}>第{chapter.sortOrder}章 {chapter.title}（正式 v{chapter.officialVersion}）</option>)}

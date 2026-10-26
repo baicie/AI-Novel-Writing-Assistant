@@ -25,6 +25,55 @@ fn view(row: &sqlx::sqlite::SqliteRow) -> Result<StructuredFactView, PortError> 
     })
 }
 
+fn parse_value(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
+}
+
+fn conflicts(existing: &StructuredFactView, incoming: &NewStructuredFact) -> bool {
+    if existing.fact_type != incoming.fact_type
+        || existing.effective_chapter_order != incoming.effective_chapter_order
+    {
+        return false;
+    }
+    match incoming.fact_type.as_str() {
+        "location" => {
+            let old = parse_value(&existing.value_json);
+            let new = parse_value(&incoming.value_json);
+            old.get("location") != new.get("location")
+        }
+        "life_state" => {
+            let old = parse_value(&existing.value_json)
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let new = parse_value(&incoming.value_json)
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            matches!(
+                (old.as_str(), new.as_str()),
+                ("alive", "dead") | ("dead", "alive")
+            )
+        }
+        "relationship" => {
+            let old = parse_value(&existing.value_json);
+            let new = parse_value(&incoming.value_json);
+            let old_target = old.get("targetEntityId").and_then(|v| v.as_str());
+            let new_target = new.get("targetEntityId").and_then(|v| v.as_str());
+            let old_relation = old.get("relation").and_then(|v| v.as_str()).unwrap_or("");
+            let new_relation = new.get("relation").and_then(|v| v.as_str()).unwrap_or("");
+            old_target == new_target
+                && matches!(
+                    (old_relation, new_relation),
+                    ("ally_of", "enemy_of") | ("enemy_of", "ally_of")
+                )
+        }
+        _ => false,
+    }
+}
+
 async fn verify_source(
     tx: &mut Transaction<'_, Sqlite>,
     fact: &NewStructuredFact,
@@ -80,7 +129,10 @@ impl StructuredMemoryRepository for SqliteKernel {
                        AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
                        AND newer.effective_chapter_order <= ?
                        AND (newer.effective_chapter_order > f.effective_chapter_order
-                            OR (newer.effective_chapter_order = f.effective_chapter_order AND newer.updated_at > f.updated_at)))
+                            OR (newer.effective_chapter_order = f.effective_chapter_order AND
+                                (newer.updated_at > f.updated_at
+                                 OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
+                                 OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
                  ORDER BY f.effective_chapter_order DESC, f.updated_at DESC, f.id DESC",
             ).bind(novel_id).bind(entity_id).bind(entity_id).bind(as_of).bind(as_of)
             .fetch_all(&self.pool).await.map_err(map_sql)?
@@ -104,6 +156,67 @@ impl StructuredMemoryRepository for SqliteKernel {
     ) -> Result<StructuredFactView, PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         verify_source(&mut tx, &fact).await?;
+        let existing_rows = sqlx::query(
+            "SELECT * FROM structured_story_fact
+             WHERE novel_id = ? AND entity_id = ? AND fact_type = ?
+               AND truthfulness = 'confirmed' AND status = 'active'
+               AND effective_chapter_order = ?",
+        )
+        .bind(&fact.novel_id)
+        .bind(&fact.entity_id)
+        .bind(&fact.fact_type)
+        .bind(fact.effective_chapter_order)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        let existing: Option<StructuredFactView> = existing_rows.iter().find_map(|row| {
+            let view = view(row).ok()?;
+            if conflicts(&view, &fact) {
+                Some(view)
+            } else {
+                None
+            }
+        });
+        if let Some(old) = existing {
+            let new_view = sqlx::query(
+                "INSERT INTO structured_story_fact
+                 (id, novel_id, entity_id, fact_type, value_json, source_chapter_id, source_revision,
+                  evidence_quote, truthfulness, effective_chapter_order, status, superseded_by, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, 'disputed', NULL, ?, ?)",
+            ).bind(&fact.id).bind(&fact.novel_id).bind(&fact.entity_id).bind(&fact.fact_type)
+            .bind(&fact.value_json).bind(&fact.source_chapter_id).bind(fact.source_revision)
+            .bind(&fact.evidence_quote).bind(fact.effective_chapter_order).bind(fact.now_ms).bind(fact.now_ms)
+            .execute(&mut *tx).await.map_err(map_sql)?;
+            let _ = new_view;
+            let conflict_id = format!("structured-{}", fact.id);
+            let description = format!(
+                "同一人物在第{}章存在冲突的{}事实。",
+                fact.effective_chapter_order,
+                match fact.fact_type.as_str() {
+                    "location" => "地点",
+                    "life_state" => "生死",
+                    "relationship" => "关系",
+                    _ => "人物",
+                }
+            );
+            sqlx::query(
+                "INSERT INTO memory_conflict
+                 (id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                  candidate_ids_json, fact_ids_json, status, version, description, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, '[]', ?, 'open', 0, ?, ?, ?)",
+            ).bind(&conflict_id).bind(&fact.novel_id).bind(format!("structured_{}", fact.fact_type))
+            .bind(&fact.entity_id).bind(&fact.source_chapter_id).bind(fact.effective_chapter_order)
+            .bind(serde_json::json!([old.id, fact.id]).to_string()).bind(description)
+            .bind(fact.now_ms).bind(fact.now_ms).execute(&mut *tx).await.map_err(map_sql)?;
+            let row = sqlx::query("SELECT * FROM structured_story_fact WHERE id = ?")
+                .bind(&fact.id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_sql)?;
+            let result = view(&row)?;
+            tx.commit().await.map_err(map_sql)?;
+            return Ok(result);
+        }
         sqlx::query(
             "UPDATE structured_story_fact SET status = 'superseded', superseded_by = ?, updated_at = ?
              WHERE novel_id = ? AND entity_id = ? AND fact_type = ? AND status = 'active'
