@@ -4,8 +4,8 @@ mod state;
 use std::sync::Arc;
 
 use novel_application::{
-    BatchService, IndexJobRepository, NativeTaskService, Runtime, RuntimeDeps, SystemClock,
-    TickOutcome, UuidIds,
+    BatchService, IndexJobRepository, NativeTaskService, Runtime, RuntimeDeps,
+    StructuredMemoryService, SystemClock, TickOutcome, UuidIds,
 };
 use novel_llm::OpenAiCompatibleProvider;
 
@@ -105,10 +105,12 @@ pub fn run() {
             let recovery_kernel = kernel.clone();
             let batch = Arc::new(BatchService::new(kernel.clone(), Arc::new(UuidIds)));
             let native_tasks = Arc::new(NativeTaskService::new(kernel.clone()));
+            let structured_memory = Arc::new(StructuredMemoryService::new(kernel.clone()));
             app.manage(AppState {
                 runtime: runtime.clone(),
                 batch,
                 native_tasks,
+                structured_memory,
                 kernel,
                 secrets,
                 llm,
@@ -271,6 +273,8 @@ commands::novel::create_character,
             commands::batch::cancel_batch,
             commands::batch::tick_batches,
             commands::native_tasks::list_native_tasks,
+            commands::structured_memory::list_structured_facts,
+            commands::structured_memory::confirm_structured_fact,
             commands::run::approve_run,
 commands::run::reject_run,
             commands::run::regenerate_run,

@@ -8,4 +8,5 @@ pub mod novel;
 pub mod run;
 pub mod setup;
 pub mod shell;
+pub mod structured_memory;
 pub mod tasks;

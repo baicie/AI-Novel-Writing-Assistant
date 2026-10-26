@@ -22,6 +22,7 @@ mod services_integration_test;
 mod services_novel;
 mod services_run;
 mod setup;
+mod structured_memory;
 mod tasks;
 mod usecase;
 mod worker;
@@ -68,6 +69,9 @@ pub use ports::{
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;
+pub use structured_memory::{
+    NewStructuredFact, StructuredFactView, StructuredMemoryRepository, StructuredMemoryService,
+};
 pub use tasks::TaskCenterService;
 pub use usecase::{ChapterUseCases, NovelUseCases, PromoteOutcomeDto, RunUseCases};
 pub use worker::{ConcurrencyGate, TickOutcome, Worker};

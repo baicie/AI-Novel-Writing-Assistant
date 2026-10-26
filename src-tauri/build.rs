@@ -42,6 +42,8 @@ fn main() {
         "cancel_batch",
         "tick_batches",
         "list_native_tasks",
+        "list_structured_facts",
+        "confirm_structured_fact",
         "approve_run",
         "reject_run",
         "regenerate_run",

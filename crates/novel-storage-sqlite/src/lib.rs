@@ -8,6 +8,7 @@ mod memory;
 mod model;
 mod native_tasks;
 mod novels;
+mod structured_memory;
 mod tasks;
 mod workflow;
 mod worlds;

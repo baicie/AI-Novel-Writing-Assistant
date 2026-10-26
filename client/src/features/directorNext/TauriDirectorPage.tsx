@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import BatchWorkspace from "./BatchWorkspace";
+import StructuredMemoryPanel from "./StructuredMemoryPanel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -595,6 +596,7 @@ export default function TauriDirectorPage() {
         onOpenChapter={(id) => setChapterId(id)}
         onBatchChanged={() => { void queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }); }}
       />
+      <StructuredMemoryPanel novelId={novelId} />
 
       {!runId ? (
         <section data-tauri-director-start className="max-w-xl space-y-4 rounded-md bg-muted/20 p-4">

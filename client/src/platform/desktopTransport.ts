@@ -1167,3 +1167,45 @@ export function listNativeTasks(input: {
 } = {}): Promise<NativeTaskSummary[]> {
   return invoke("list_native_tasks", input);
 }
+
+export interface StructuredFactView {
+  id: string;
+  novelId: string;
+  entityId: string;
+  factType: string;
+  valueJson: string;
+  sourceChapterId: string;
+  sourceRevision: number;
+  evidenceQuote: string;
+  truthfulness: string;
+  effectiveChapterOrder: number;
+  status: string;
+  supersededBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function listStructuredFacts(input: {
+  novelId: string;
+  entityId?: string;
+  asOfChapterOrder?: number;
+}): Promise<StructuredFactView[]> {
+  return invoke("list_structured_facts", input);
+}
+
+export function confirmStructuredFact(input: {
+  fact: {
+    id: string;
+    novelId: string;
+    entityId: string;
+    factType: string;
+    valueJson: string;
+    sourceChapterId: string;
+    sourceRevision: number;
+    evidenceQuote: string;
+    effectiveChapterOrder: number;
+    nowMs: number;
+  };
+}): Promise<StructuredFactView> {
+  return invoke("confirm_structured_fact", input);
+}
