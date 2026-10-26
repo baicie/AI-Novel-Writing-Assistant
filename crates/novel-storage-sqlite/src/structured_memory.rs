@@ -123,16 +123,19 @@ impl StructuredMemoryRepository for SqliteKernel {
                    AND f.effective_chapter_order <= ?
                    AND EXISTS (SELECT 1 FROM chapter c JOIN chapter_revision r ON r.id = c.official_revision_id
                                WHERE c.id = f.source_chapter_id AND c.novel_id = f.novel_id AND r.version = f.source_revision)
-                   AND NOT EXISTS (
-                     SELECT 1 FROM structured_story_fact newer
-                     WHERE newer.novel_id = f.novel_id AND newer.entity_id = f.entity_id
-                       AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
-                       AND newer.effective_chapter_order <= ?
-                       AND (newer.effective_chapter_order > f.effective_chapter_order
-                            OR (newer.effective_chapter_order = f.effective_chapter_order AND
-                                (newer.updated_at > f.updated_at
-                                 OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
-                                 OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
+                   AND (
+                     f.fact_type IN ('alias', 'relationship')
+                     OR NOT EXISTS (
+                       SELECT 1 FROM structured_story_fact newer
+                       WHERE newer.novel_id = f.novel_id AND newer.entity_id = f.entity_id
+                         AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
+                         AND newer.effective_chapter_order <= ?
+                         AND (newer.effective_chapter_order > f.effective_chapter_order
+                              OR (newer.effective_chapter_order = f.effective_chapter_order AND
+                                  (newer.updated_at > f.updated_at
+                                   OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
+                                   OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
+                   )
                  ORDER BY f.effective_chapter_order DESC, f.updated_at DESC, f.id DESC",
             ).bind(novel_id).bind(entity_id).bind(entity_id).bind(as_of).bind(as_of)
             .fetch_all(&self.pool).await.map_err(map_sql)?
@@ -217,13 +220,15 @@ impl StructuredMemoryRepository for SqliteKernel {
             tx.commit().await.map_err(map_sql)?;
             return Ok(result);
         }
-        sqlx::query(
-            "UPDATE structured_story_fact SET status = 'superseded', superseded_by = ?, updated_at = ?
-             WHERE novel_id = ? AND entity_id = ? AND fact_type = ? AND status = 'active'
-               AND effective_chapter_order <= ?",
-        ).bind(&fact.id).bind(fact.now_ms).bind(&fact.novel_id).bind(&fact.entity_id)
-        .bind(&fact.fact_type).bind(fact.effective_chapter_order)
-        .execute(&mut *tx).await.map_err(map_sql)?;
+        if matches!(fact.fact_type.as_str(), "location" | "life_state") {
+            sqlx::query(
+                "UPDATE structured_story_fact SET status = 'superseded', superseded_by = ?, updated_at = ?
+                 WHERE novel_id = ? AND entity_id = ? AND fact_type = ? AND status = 'active'
+                   AND effective_chapter_order <= ?",
+            ).bind(&fact.id).bind(fact.now_ms).bind(&fact.novel_id).bind(&fact.entity_id)
+            .bind(&fact.fact_type).bind(fact.effective_chapter_order)
+            .execute(&mut *tx).await.map_err(map_sql)?;
+        }
         sqlx::query(
             "INSERT INTO structured_story_fact
              (id, novel_id, entity_id, fact_type, value_json, source_chapter_id, source_revision,

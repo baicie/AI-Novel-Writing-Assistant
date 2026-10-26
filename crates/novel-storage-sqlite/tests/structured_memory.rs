@@ -274,3 +274,96 @@ async fn conflict_is_atomic_and_resolves_new_or_existing() {
         .unwrap();
     assert_eq!(life.status, "active");
 }
+
+#[tokio::test]
+async fn aliases_and_relationships_coexist_and_do_not_merge_people() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("alias.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "别名".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    character(&kernel, "su", "苏晚").await;
+    official_chapter(&kernel, "c1", 1, "林动，人称林公子。").await;
+    let base = NewStructuredFact {
+        id: String::new(),
+        novel_id: "n1".into(),
+        entity_id: "lin".into(),
+        fact_type: "alias".into(),
+        value_json: String::new(),
+        source_chapter_id: "c1".into(),
+        source_revision: 1,
+        evidence_quote: "人称林公子。".into(),
+        effective_chapter_order: 1,
+        now_ms: 10,
+    };
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "a1".into(),
+            value_json: r#"{"alias":"林公子"}"#.into(),
+            ..base.clone()
+        })
+        .await
+        .unwrap();
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "a2".into(),
+            value_json: r#"{"alias":"山主"}"#.into(),
+            ..base.clone()
+        })
+        .await
+        .unwrap();
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "r1".into(),
+            entity_id: "lin".into(),
+            fact_type: "relationship".into(),
+            value_json: format!(
+                r#"{{"relation":"mentor_of","targetEntityId":"su","targetName":"苏晚"}}"#
+            ),
+            ..base.clone()
+        })
+        .await
+        .unwrap();
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "r2".into(),
+            entity_id: "lin".into(),
+            fact_type: "relationship".into(),
+            value_json: format!(
+                r#"{{"relation":"ally_of","targetEntityId":"su","targetName":"苏晚"}}"#
+            ),
+            ..base
+        })
+        .await
+        .unwrap();
+    let as_of = kernel
+        .list_structured_facts("n1", Some("lin"), Some(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        as_of
+            .iter()
+            .filter(|fact| fact.fact_type == "alias")
+            .count(),
+        2
+    );
+    assert_eq!(
+        as_of
+            .iter()
+            .filter(|fact| fact.fact_type == "relationship")
+            .count(),
+        2
+    );
+    assert!(as_of.iter().all(|fact| fact.status == "active"));
+}
