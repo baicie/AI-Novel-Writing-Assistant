@@ -8,7 +8,18 @@
 - F: IMPLEMENTED/PARTIAL — existing 100/500/1000 synthetic benchmark executed; dataset lacks all new domain tables.
 - G: IMPLEMENTED/PARTIAL — VACUUM INTO consistent backup, restore copy, migration-idempotent reopen; old-schema upgrade and interrupted backup/restore not run.
 - H: PARTIAL — modules pass separately, no one shared data-dir journey.
-- I: IN_PROGRESS — final all-targets/build pending.
+- I: IMPLEMENTED / PARTIAL — 294 workspace, 353 all-targets, production PASS.
+
+## Final evidence
+
+- workspace: 294 passed; backup test separately 1 passed.
+- clean all-targets: 353 passed, 0 failed.
+- frontend: 186 passed; typecheck/build PASS.
+- fmt/clippy PASS (warnings).
+- Native memory 2 PASS; index retry 1 PASS; task center 1 PASS; export 3 PASS; batch 5 PASS; restart PASS.
+- production 22.76 MiB app, 10 MiB DMG, audit PASS, 103/103.
+- Lease flake UNRESOLVED.
+
 
 ## Remaining
 

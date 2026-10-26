@@ -24,3 +24,10 @@ Start HEAD: `27182905`
 - 500: build 1549ms, context P50 13.14ms/P95 13.56ms, FTS P50 9.72ms/P95 12.62ms, DB 25.2MB.
 - 1000: build 2969ms, context P50 24.70ms/P95 26.09ms, FTS P50 19.0ms/P95 23.85ms, DB 49.9MB.
 - These are Mock/SQLite synthetic measurements; not real model cost.
+
+## 2026-10-27 final
+
+- Workspace 294 passed; clean all-targets 353 passed.
+- Native memory/index/task/export/batch/restart all PASS on current build.
+- Production 22.76 MiB app, 10 MiB DMG, 103/103, audit PASS.
+- Lease flake remains UNRESOLVED after 12 sequential and 8 parallel stress runs.
