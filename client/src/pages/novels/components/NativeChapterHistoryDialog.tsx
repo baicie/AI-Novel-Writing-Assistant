@@ -50,6 +50,7 @@ export default function NativeChapterHistoryDialog(props: NativeChapterHistoryDi
   const [restoring, setRestoring] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -74,6 +75,22 @@ export default function NativeChapterHistoryDialog(props: NativeChapterHistoryDi
     () => revisions.find((revision) => revision.id === selectedId) ?? null,
     [revisions, selectedId],
   );
+
+  const diffLines = useMemo(() => {
+    if (!selected) return [];
+    const before = currentContent.split("\n");
+    const after = selected.content.split("\n");
+    const out: Array<{ kind: "same" | "added" | "removed"; text: string }> = [];
+    for (let index = 0; index < Math.max(before.length, after.length); index += 1) {
+      if (before[index] === after[index]) {
+        if (before[index] !== undefined) out.push({ kind: "same", text: before[index] });
+      } else {
+        if (before[index] !== undefined) out.push({ kind: "removed", text: before[index] });
+        if (after[index] !== undefined) out.push({ kind: "added", text: after[index] });
+      }
+    }
+    return out;
+  }, [selected, currentContent]);
 
   const restore = async () => {
     if (!selected) return;
@@ -145,9 +162,24 @@ export default function NativeChapterHistoryDialog(props: NativeChapterHistoryDi
                   <span>当前正式版本 v{currentVersion} · {currentContent.length.toLocaleString()} 字</span>
                   <span>查看 v{selected.version} · {originLabel(selected, revisions)}</span>
                 </div>
-                <pre className="max-h-[46vh] min-h-[240px] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted/20 p-4 text-sm leading-7">
-                  {selected.content || "（这一版正文为空）"}
-                </pre>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant={showDiff ? "default" : "outline"} data-testid="chapter-history-diff-toggle" onClick={() => setShowDiff((current) => !current)}>
+                    {showDiff ? "查看所选版本正文" : "对比当前正式版本"}
+                  </Button>
+                </div>
+                {showDiff ? (
+                  <div data-testid="chapter-history-diff" className="max-h-[46vh] min-h-[240px] overflow-y-auto rounded-xl bg-muted/20 p-4 font-mono text-sm leading-7">
+                    {diffLines.map((line, index) => (
+                      <div key={`${line.kind}-${index}`} className={line.kind === "added" ? "text-primary" : line.kind === "removed" ? "text-destructive line-through" : "text-muted-foreground"}>
+                        {line.kind === "added" ? "+ " : line.kind === "removed" ? "- " : "  "}{line.text}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <pre className="max-h-[46vh] min-h-[240px] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-muted/20 p-4 text-sm leading-7">
+                    {selected.content || "（这一版正文为空）"}
+                  </pre>
+                )}
                 <div className="flex justify-end">
                   <Button type="button" data-testid="chapter-history-restore" disabled={restoring} onClick={() => { void restore(); }}>
                     {restoring ? "恢复中..." : confirming ? `确认恢复 v${selected.version}` : `恢复 v${selected.version} 为正式正文`}

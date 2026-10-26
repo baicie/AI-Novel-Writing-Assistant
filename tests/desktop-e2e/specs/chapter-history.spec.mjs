@@ -22,6 +22,11 @@ describe("Native chapter history restore", () => {
     await (await $("[data-testid=chapter-version-history-button]")).click();
     await (await $("[data-testid=chapter-history-version-1]")).waitForDisplayed({ timeout: 20_000 });
     await (await $("[data-testid=chapter-history-version-1]")).click();
+    await (await $("[data-testid=chapter-history-diff-toggle]")).click();
+    const diff = await $("[data-testid=chapter-history-diff]");
+    await diff.waitForDisplayed({ timeout: 20_000 });
+    const diffText = await diff.getText();
+    expect(diffText).toContain("第二版历史正文");
     await (await $("[data-testid=chapter-history-restore]")).click();
     await (await $("[data-testid=chapter-history-restore]")).click();
     await browser.waitUntil(async () => {
