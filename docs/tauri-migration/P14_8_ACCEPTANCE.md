@@ -15,7 +15,11 @@ Final status to be updated after full suite.
 
 ## Final evidence
 
+- Frontend: 186 passed; typecheck/build PASS.
+- `cargo fmt --check` and clippy PASS (warnings).
+
 - workspace: 292 passed.
+- clean all-targets: 351 passed.
 - Native index retry: PASS (`test:index-retry`) with injected first failure, visible error, Native retry, succeeded job, FTS search.
 - Native structured memory: 2 PASS.
 - Native task center: 1 PASS (read-only).

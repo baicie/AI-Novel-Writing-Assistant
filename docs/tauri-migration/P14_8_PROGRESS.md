@@ -30,5 +30,5 @@ Start HEAD: `25cc15b5`
 
 - A: structured facts now enter Context only when confirmed/active with current source revision; rejected/disputed/stale excluded.
 - C: Native index failure injection, retry from source panel, and FTS search verified. `reset_index_job_for_retry` now accepts `retry_wait`; a matching ready document completes the retry with its current revision rather than being marked obsolete.
-- Full workspace: 292 passed. All-targets pending.
+- Full workspace: 292 passed. Clean all-targets: 351 passed.
 - Native save OS dialog, two-window, batch Unknown/Reject/Repair, performance still incomplete.
