@@ -24,3 +24,12 @@ Start HEAD: `a2234b20`
 ## Remaining
 
 - Native save dialog automation; 100/500/1000 performance; multi-window; batch Unknown/Reject/Repair; Native index failure injection.
+
+## 2026-10-26 Final
+
+- Task Center read-only Native page, batch/index/memory/quality projections.
+- Volume export and native save dialog implemented.
+- Structured location/life facts with source revision, supersede, as-of.
+- Full tests: 289 workspace, 348 all-targets.
+- Production: 22.67 MiB app, 10 MiB DMG; 103 commands/103 capabilities.
+- Still missing: Native index failure E2E, multi-window, batch Unknown/Reject/Repair, 100/500/1000 performance, Native save dialog automation.
