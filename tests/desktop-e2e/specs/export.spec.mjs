@@ -44,3 +44,18 @@ describe("Native novel export selection", () => {
     expect(selected).not.toContain("范围导出正文1");
   });
 });
+
+describe("Native volume export", () => {
+  it("exports only chapters in the selected volume", async () => {
+    const novel = await invoke("create_novel", { title: "WDIO 卷导出", description: "" });
+    const volumeA = await invoke("create_volume", { novelId: novel.id, title: "第一卷", sortOrder: 1, summary: "" });
+    const volumeB = await invoke("create_volume", { novelId: novel.id, title: "第二卷", sortOrder: 2, summary: "" });
+    const first = await invoke("create_chapter", { novelId: novel.id, title: "卷一章", sortOrder: 1, volumeId: volumeA.id });
+    const second = await invoke("create_chapter", { novelId: novel.id, title: "卷二章", sortOrder: 2, volumeId: volumeB.id });
+    await invoke("save_chapter", { novelId: novel.id, chapterId: first.id, expectedVersion: 0, title: "卷一章", content: "第一卷正文" });
+    await invoke("save_chapter", { novelId: novel.id, chapterId: second.id, expectedVersion: 0, title: "卷二章", content: "第二卷正文" });
+    const text = await invoke("export_novel_selection", { novelId: novel.id, selection: "volumes", format: "markdown", volumeIds: [volumeA.id] });
+    expect(text).toContain("第一卷正文");
+    expect(text).not.toContain("第二卷正文");
+  });
+});

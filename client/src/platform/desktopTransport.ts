@@ -88,6 +88,7 @@ export interface ChapterSnapshot {
   novelId: string;
   title: string;
   sortOrder: number;
+  volumeId?: string | null;
   protection: string;
   officialVersion: number;
   content: string;
@@ -608,10 +609,11 @@ export function exportChapters(input: {
 
 export function exportNovelSelection(input: {
   novelId: string;
-  selection: "chapter" | "range" | "entire_book" | "chapter_ids";
+  selection: "chapter" | "range" | "entire_book" | "chapter_ids" | "volume" | "volumes";
   format: "markdown" | "txt";
   chapterId?: string;
   chapterIds?: string[];
+  volumeIds?: string[];
   startOrder?: number;
   endOrder?: number;
 }): Promise<string> {

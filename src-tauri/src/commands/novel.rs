@@ -368,6 +368,7 @@ pub async fn export_novel_selection(
     format: String,
     chapter_id: Option<String>,
     chapter_ids: Option<Vec<String>>,
+    volume_ids: Option<Vec<String>>,
     start_order: Option<i32>,
     end_order: Option<i32>,
 ) -> Result<String, AppError> {
@@ -384,6 +385,23 @@ pub async fn export_novel_selection(
             chapters.retain(|chapter| ids.contains(&chapter.id));
             if chapters.is_empty() {
                 return Err(AppError::validation("没有找到可导出的正式章节。"));
+            }
+            chapters
+        }
+        "volume" | "volumes" => {
+            let volume_ids =
+                volume_ids.ok_or_else(|| AppError::validation("请选择要导出的卷。"))?;
+            if volume_ids.is_empty() {
+                return Err(AppError::validation("请选择要导出的卷。"));
+            }
+            chapters.retain(|chapter| {
+                chapter
+                    .volume_id
+                    .as_ref()
+                    .is_some_and(|id| volume_ids.contains(id))
+            });
+            if chapters.is_empty() {
+                return Err(AppError::validation("所选卷中没有正式章节。"));
             }
             chapters
         }

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
-import { exportNovelSelection } from "@/platform/desktopTransport";
+import { exportNovelSelection, listVolumes, type VolumeSnapshot } from "@/platform/desktopTransport";
 
 interface NovelExportDialogProps {
   novelId: string;
@@ -13,11 +13,21 @@ interface NovelExportDialogProps {
 
 export default function NovelExportDialog(props: NovelExportDialogProps) {
   const { novelId, chapterCount, open, onOpenChange } = props;
-  const [selection, setSelection] = useState<"entire_book" | "range">("entire_book");
+  const [selection, setSelection] = useState<"entire_book" | "range" | "volumes">("entire_book");
+  const [volumes, setVolumes] = useState<VolumeSnapshot[]>([]);
+  const [volumeIds, setVolumeIds] = useState<string[]>([]);
   const [format, setFormat] = useState<"markdown" | "txt">("markdown");
   const [startOrder, setStartOrder] = useState(1);
   const [endOrder, setEndOrder] = useState(Math.max(1, chapterCount));
   const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    listVolumes(novelId).then((rows) => {
+      setVolumes(rows);
+      setVolumeIds((current) => current.length ? current : rows.map((row) => row.id));
+    }).catch(() => setVolumes([]));
+  }, [open, novelId]);
 
   const exportNovel = async () => {
     setExporting(true);
@@ -26,6 +36,7 @@ export default function NovelExportDialog(props: NovelExportDialogProps) {
         novelId, selection, format,
         startOrder: selection === "range" ? startOrder : undefined,
         endOrder: selection === "range" ? endOrder : undefined,
+        volumeIds: selection === "volumes" ? volumeIds : undefined,
       });
       const blob = new Blob([text], { type: format === "markdown" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -53,11 +64,28 @@ export default function NovelExportDialog(props: NovelExportDialogProps) {
         <div className="space-y-4 text-sm">
           <label className="block space-y-1">
             <span className="text-muted-foreground">导出范围</span>
-            <select className="w-full rounded-lg border bg-background px-3 py-2" value={selection} onChange={(event) => setSelection(event.target.value as "entire_book" | "range")} data-testid="export-selection">
+            <select className="w-full rounded-lg border bg-background px-3 py-2" value={selection} onChange={(event) => setSelection(event.target.value as "entire_book" | "range" | "volumes")} data-testid="export-selection">
               <option value="entire_book">全书（{chapterCount} 章）</option>
               <option value="range">指定章节范围</option>
+              <option value="volumes">按卷导出</option>
             </select>
           </label>
+          {selection === "volumes" ? (
+            <div className="space-y-1 rounded-lg bg-muted/20 p-2">
+              {volumes.length === 0 ? <p className="text-xs text-muted-foreground">这本书还没有分卷。</p> : volumes.map((volume) => (
+                <label key={volume.id} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={volumeIds.includes(volume.id)}
+                    onChange={(event) => setVolumeIds((current) => event.target.checked
+                      ? [...current, volume.id]
+                      : current.filter((id) => id !== volume.id))}
+                  />
+                  <span>{volume.title || `第${volume.sortOrder}卷`}</span>
+                </label>
+              ))}
+            </div>
+          ) : null}
           {selection === "range" ? (
             <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1">

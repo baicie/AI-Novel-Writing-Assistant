@@ -545,6 +545,7 @@ impl NovelRepository for SqliteKernel {
             novel_id: chapter.novel_id,
             title: chapter.title,
             sort_order: chapter.sort_order,
+            volume_id: chapter.volume_id,
             protection: "none".into(),
             official_version: 0,
             content: String::new(),
@@ -554,7 +555,7 @@ impl NovelRepository for SqliteKernel {
 
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError> {
         let rows = sqlx::query(
-            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.protection, c.updated_at, r.version AS official_version, r.content AS content
+            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.volume_id, c.protection, c.updated_at, r.version AS official_version, r.content AS content
              FROM chapter c
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
              WHERE c.novel_id = ?
@@ -640,7 +641,7 @@ impl NovelRepository for SqliteKernel {
         chapter_id: &str,
     ) -> Result<ChapterSnapshot, PortError> {
         let row = sqlx::query(
-            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.protection, c.updated_at, r.version AS official_version, r.content AS content
+            "SELECT c.id, c.novel_id, c.title, c.sort_order, c.volume_id, c.protection, c.updated_at, r.version AS official_version, r.content AS content
              FROM chapter c
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
              WHERE c.novel_id = ? AND c.id = ?",
@@ -2071,6 +2072,7 @@ fn chapter_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ChapterSnapshot, Po
         novel_id: row.try_get("novel_id").map_err(map_sql)?,
         title: row.try_get("title").map_err(map_sql)?,
         sort_order: row.try_get("sort_order").map_err(map_sql)?,
+        volume_id: row.try_get("volume_id").ok().flatten(),
         protection: row.try_get("protection").map_err(map_sql)?,
         official_version: version.unwrap_or(0),
         content: content.unwrap_or_default(),

@@ -140,6 +140,7 @@ pub struct ChapterSnapshot {
     pub novel_id: String,
     pub title: String,
     pub sort_order: i32,
+    pub volume_id: Option<String>,
     pub protection: String,
     pub official_version: i64,
     pub content: String,
