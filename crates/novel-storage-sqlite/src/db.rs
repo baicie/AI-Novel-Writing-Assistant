@@ -108,6 +108,20 @@ impl SqliteKernel {
 
 pub fn map_sql(error: sqlx::Error) -> PortError {
     let text = error.to_string();
+    if let Some(database) = error.as_database_error() {
+        match database.code().as_deref() {
+            // SQLITE_BUSY / SQLITE_LOCKED are normal contention, not corruption.
+            Some("5") | Some("6") => {
+                return PortError::Conflict("本地数据库正在写入，请稍后重试。".into());
+            }
+            // Keep corrupt/integrity failures distinguishable and non-retryable
+            // by callers that inspect the storage error.
+            Some("11") => {
+                return PortError::Storage(format!("SQLite 完整性错误：{text}"));
+            }
+            _ => {}
+        }
+    }
     if text.contains("UNIQUE constraint failed") {
         if text.contains("workflow_control") || text.contains("one_active_run") {
             PortError::Conflict("这本书已经有一个进行中的创作任务。".into())
