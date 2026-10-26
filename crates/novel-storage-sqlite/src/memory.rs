@@ -956,11 +956,49 @@ async fn resolve_structured_fact_conflict(
     decision: &str,
     now_ms: i64,
 ) -> Result<(), PortError> {
-    if conflict.fact_ids.len() < 2 {
-        return Err(PortError::Integrity("结构化冲突缺少事实对。".into()));
+    if conflict.fact_ids.len() != 2 || conflict.fact_ids[0] == conflict.fact_ids[1] {
+        return Err(PortError::Integrity("结构化冲突缺少有效事实对。".into()));
     }
     let old_id = &conflict.fact_ids[0];
     let new_id = &conflict.fact_ids[1];
+    let rows = sqlx::query(
+        "SELECT id, novel_id, entity_id, fact_type, truthfulness, status, source_chapter_id, source_revision
+         FROM structured_story_fact WHERE id IN (?, ?)",
+    ).bind(old_id).bind(new_id).fetch_all(tx.deref_mut()).await.map_err(map_sql)?;
+    if rows.len() != 2 {
+        return Err(PortError::Integrity("结构化冲突事实不存在。".into()));
+    }
+    let mut old: Option<(String, String, String, String)> = None;
+    let mut new: Option<(String, String, String, String)> = None;
+    for row in &rows {
+        let id: String = row.try_get("id").map_err(map_sql)?;
+        let novel_id: String = row.try_get("novel_id").map_err(map_sql)?;
+        let entity_id: String = row.try_get("entity_id").map_err(map_sql)?;
+        let fact_type: String = row.try_get("fact_type").map_err(map_sql)?;
+        let truthfulness: String = row.try_get("truthfulness").map_err(map_sql)?;
+        let status: String = row.try_get("status").map_err(map_sql)?;
+        if novel_id != conflict.novel_id {
+            return Err(PortError::Integrity("冲突事实不属于同一本小说。".into()));
+        }
+        if id == *old_id {
+            old = Some((entity_id, fact_type, truthfulness, status));
+        } else {
+            new = Some((entity_id, fact_type, truthfulness, status));
+        }
+    }
+    let (old_entity, old_type, old_truth, old_status) =
+        old.ok_or_else(|| PortError::Integrity("旧事实不存在。".into()))?;
+    let (new_entity, new_type, new_truth, new_status) =
+        new.ok_or_else(|| PortError::Integrity("新事实不存在。".into()))?;
+    if old_entity != new_entity || old_type != new_type {
+        return Err(PortError::Integrity("冲突事实的实体或类型不一致。".into()));
+    }
+    if old_truth != "confirmed" || old_status != "active" {
+        return Err(PortError::Conflict("旧事实已经变化，请刷新冲突。".into()));
+    }
+    if new_truth != "proposed" || !matches!(new_status.as_str(), "disputed" | "proposed") {
+        return Err(PortError::Conflict("新事实不再是待裁决状态。".into()));
+    }
     let current: Option<i64> = sqlx::query_scalar(
         "SELECT r.version FROM structured_story_fact f
          JOIN chapter c ON c.id = f.source_chapter_id
@@ -979,20 +1017,23 @@ async fn resolve_structured_fact_conflict(
     }
     match decision {
         "confirm_new" | "supersede_with_evidence" => {
-            sqlx::query("UPDATE structured_story_fact SET status='superseded', superseded_by=?, updated_at=? WHERE id=? AND novel_id=?")
+            sqlx::query("UPDATE structured_story_fact SET status='superseded', superseded_by=?, updated_at=? WHERE id=? AND novel_id=? AND status='active' AND truthfulness='confirmed'")
                 .bind(new_id).bind(now_ms).bind(old_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
-            sqlx::query("UPDATE structured_story_fact SET truthfulness='confirmed', status='active', updated_at=? WHERE id=? AND novel_id=?")
+            let updated = sqlx::query("UPDATE structured_story_fact SET truthfulness='confirmed', status='active', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed' AND status IN ('disputed','proposed')")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
+            if updated.rows_affected() != 1 {
+                return Err(PortError::Conflict("新事实已变化，请刷新冲突。".into()));
+            }
         }
         "keep_existing" | "reject_extraction" => {
-            sqlx::query("UPDATE structured_story_fact SET status='rejected', updated_at=? WHERE id=? AND novel_id=?")
+            sqlx::query("UPDATE structured_story_fact SET status='rejected', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
         }
         "mark_disputed" => {
-            sqlx::query("UPDATE structured_story_fact SET status='disputed', updated_at=? WHERE id=? AND novel_id=?")
+            sqlx::query("UPDATE structured_story_fact SET status='disputed', updated_at=? WHERE id=? AND novel_id=? AND truthfulness='proposed'")
                 .bind(now_ms).bind(new_id).bind(&conflict.novel_id)
                 .execute(tx.deref_mut()).await.map_err(map_sql)?;
         }

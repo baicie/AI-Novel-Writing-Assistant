@@ -713,6 +713,13 @@ pub trait NovelRepository: Send + Sync {
         novel_id: &str,
         before_chapter_order: i32,
     ) -> Result<Vec<StoryFactView>, PortError>;
+    /// Confirmed structured facts visible at the target chapter. Rejected,
+    /// disputed and stale-source facts must never be returned by this method.
+    async fn list_structured_facts_for_context(
+        &self,
+        novel_id: &str,
+        before_chapter_order: i64,
+    ) -> Result<Vec<crate::structured_memory::StructuredFactView>, PortError>;
     async fn upsert_character_state(&self, state: NewCharacterState) -> Result<(), PortError>;
     async fn upsert_timeline_event(&self, event: NewTimelineEvent) -> Result<(), PortError>;
     async fn upsert_plot_thread(&self, thread: NewPlotThread) -> Result<(), PortError>;

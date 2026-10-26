@@ -307,6 +307,23 @@ pub async fn assemble_director_context(
         });
     }
 
+    let structured = novels
+        .list_structured_facts_for_context(novel_id, i64::from(target.sort_order))
+        .await?;
+    if !structured.is_empty() {
+        let text = serde_json::to_string(&structured)
+            .map_err(|_| AppError::integrity("结构化人物事实无法序列化"))?;
+        drafts.push(SourceDraft {
+            source_type: "structured_story_facts",
+            source_id: novel_id.to_string(),
+            source_version: None,
+            source_status: "confirmed".into(),
+            text,
+            mandatory: false,
+            priority: 5,
+        });
+    }
+
     let chapters = novels.list_chapters(novel_id).await?;
     let mut recent: Vec<&ChapterSnapshot> = chapters
         .iter()

@@ -1306,6 +1306,57 @@ impl NovelRepository for SqliteKernel {
             .collect()
     }
 
+    async fn list_structured_facts_for_context(
+        &self,
+        novel_id: &str,
+        before_chapter_order: i64,
+    ) -> Result<Vec<novel_application::StructuredFactView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT f.* FROM structured_story_fact f
+             WHERE f.novel_id = ? AND f.truthfulness = 'confirmed' AND f.status = 'active'
+               AND f.effective_chapter_order <= ?
+               AND EXISTS (SELECT 1 FROM chapter c JOIN chapter_revision r ON r.id = c.official_revision_id
+                           WHERE c.id = f.source_chapter_id AND c.novel_id = f.novel_id AND r.version = f.source_revision)
+               AND (
+                 f.fact_type IN ('alias', 'relationship')
+                 OR NOT EXISTS (
+                   SELECT 1 FROM structured_story_fact newer
+                   WHERE newer.novel_id = f.novel_id AND newer.entity_id = f.entity_id
+                     AND newer.fact_type = f.fact_type AND newer.truthfulness = 'confirmed'
+                     AND newer.status = 'active' AND newer.effective_chapter_order <= ?
+                     AND (newer.effective_chapter_order > f.effective_chapter_order
+                          OR (newer.effective_chapter_order = f.effective_chapter_order
+                              AND (newer.updated_at > f.updated_at
+                                   OR (newer.updated_at = f.updated_at AND newer.created_at > f.created_at)
+                                   OR (newer.updated_at = f.updated_at AND newer.created_at = f.created_at AND newer.id > f.id)))))
+               )
+             ORDER BY f.entity_id, f.fact_type, f.effective_chapter_order",
+        ).bind(novel_id).bind(before_chapter_order).bind(before_chapter_order)
+        .fetch_all(&self.pool).await.map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(novel_application::StructuredFactView {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    novel_id: row.try_get("novel_id").map_err(map_sql)?,
+                    entity_id: row.try_get("entity_id").map_err(map_sql)?,
+                    fact_type: row.try_get("fact_type").map_err(map_sql)?,
+                    value_json: row.try_get("value_json").map_err(map_sql)?,
+                    source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,
+                    source_revision: row.try_get("source_revision").map_err(map_sql)?,
+                    evidence_quote: row.try_get("evidence_quote").map_err(map_sql)?,
+                    truthfulness: row.try_get("truthfulness").map_err(map_sql)?,
+                    effective_chapter_order: row
+                        .try_get("effective_chapter_order")
+                        .map_err(map_sql)?,
+                    status: row.try_get("status").map_err(map_sql)?,
+                    superseded_by: row.try_get("superseded_by").map_err(map_sql)?,
+                    created_at: row.try_get("created_at").map_err(map_sql)?,
+                    updated_at: row.try_get("updated_at").map_err(map_sql)?,
+                })
+            })
+            .collect()
+    }
+
     async fn list_story_facts(
         &self,
         novel_id: &str,

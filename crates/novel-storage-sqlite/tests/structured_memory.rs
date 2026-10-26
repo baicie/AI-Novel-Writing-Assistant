@@ -367,3 +367,86 @@ async fn aliases_and_relationships_coexist_and_do_not_merge_people() {
     );
     assert!(as_of.iter().all(|fact| fact.status == "active"));
 }
+
+#[tokio::test]
+async fn context_only_uses_confirmed_active_facts_at_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("context.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "上下文".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "f1".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 1,
+            evidence_quote: "林动在山门。".into(),
+            effective_chapter_order: 1,
+            now_ms: 10,
+        })
+        .await
+        .unwrap();
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "f2".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"祖祠"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 1,
+            evidence_quote: "林动在祖祠。".into(),
+            effective_chapter_order: 1,
+            now_ms: 20,
+        })
+        .await
+        .unwrap();
+    let before = NovelRepository::list_structured_facts_for_context(&kernel, "n1", 1)
+        .await
+        .unwrap();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].id, "f1");
+    let conflicts = novel_application::MemoryRepository::list_memory_conflicts(&kernel, "n1")
+        .await
+        .unwrap();
+    novel_application::MemoryRepository::resolve_memory_conflict(
+        &kernel,
+        &conflicts[0].id,
+        0,
+        "cmd-keep-context",
+        "hash",
+        "keep_existing",
+        None,
+        "保留",
+        "author",
+        30,
+    )
+    .await
+    .unwrap();
+    let after = NovelRepository::list_structured_facts_for_context(&kernel, "n1", 1)
+        .await
+        .unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].id, "f1");
+    assert!(
+        after
+            .iter()
+            .all(|fact| fact.status == "active" && fact.truthfulness == "confirmed")
+    );
+}
