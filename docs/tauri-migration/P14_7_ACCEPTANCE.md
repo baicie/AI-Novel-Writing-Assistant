@@ -11,7 +11,7 @@
 | G Batch Reliability | PARTIAL | 10 chapters/restart/reopen; Unknown/Reject/Repair missing |
 | H Performance | NOT_STARTED | — |
 | I Native Journey | PARTIAL | task/export/memory integrated; no one-shot journey |
-| J Final Acceptance | IN_PROGRESS | full suite finalizing |
+| J Final Acceptance | IMPLEMENTED / PARTIAL | 291 workspace, 350 all-targets, production PASS |
 
 ## Key answers
 
@@ -25,3 +25,17 @@
 8. Two-window draft: not verified.
 9. Batch Unknown: not verified.
 10. 1000 chapters: not tested.
+
+## Final evidence
+
+- `cargo test --workspace --exclude novel-http`: 291 passed, 0 failed.
+- clean worktree `cargo test --workspace --all-targets`: 350 passed, 0 failed.
+- `cargo fmt --check`: PASS.
+- `cargo clippy --workspace --exclude novel-http --all-targets`: PASS (warnings).
+- `pnpm test`: 186 passed; typecheck/build PASS.
+- Native structured memory: 2 PASS (location; alias/relationship/conflict resolution).
+- Native task center: 1 PASS (read-only).
+- Native volume export: 3 PASS.
+- Native batch: 5 PASS; batch process restart PASS.
+- Production: 22.69 MiB `.app`, 10 MiB DMG, hdiutil VALID, 103 commands/103 capabilities, audit PASS.
+- Native save dialog is implemented but not WDIO-automated; Rust atomic writer test PASS.
