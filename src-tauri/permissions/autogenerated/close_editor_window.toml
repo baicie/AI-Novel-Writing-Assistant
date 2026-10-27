@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-editor-window"
+description = "Enables the close_editor_window command without any pre-configured scope."
+commands.allow = ["close_editor_window"]
+
+[[permission]]
+identifier = "deny-close-editor-window"
+description = "Denies the close_editor_window command without any pre-configured scope."
+commands.deny = ["close_editor_window"]
