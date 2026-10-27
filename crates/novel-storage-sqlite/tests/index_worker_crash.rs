@@ -140,4 +140,8 @@ async fn killed_index_worker_is_recovered_by_fencing_and_reindexed() {
     .await
     .unwrap();
     assert_eq!(revision, "rev-1");
+    let hits = KnowledgeRepository::search_keyword(&kernel, "n", "worker", 5)
+        .await
+        .unwrap();
+    assert!(hits.iter().any(|hit| hit.body.contains("worker")));
 }
