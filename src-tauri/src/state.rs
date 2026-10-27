@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 pub struct AppState {
     pub runtime: Arc<Runtime>,
     pub batch: Arc<BatchService>,
+    pub data_dir: std::path::PathBuf,
     pub native_tasks: Arc<NativeTaskService>,
     pub structured_memory: Arc<StructuredMemoryService>,
     pub kernel: Arc<SqliteKernel>,

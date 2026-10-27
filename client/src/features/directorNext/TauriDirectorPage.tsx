@@ -5,6 +5,7 @@ import BatchWorkspace from "./BatchWorkspace";
 import StructuredMemoryPanel from "./StructuredMemoryPanel";
 import MemoryConflictPanel from "./MemoryConflictPanel";
 import IndexHealthPanel from "./IndexHealthPanel";
+import BackupPanel from "./BackupPanel";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -601,6 +602,7 @@ export default function TauriDirectorPage() {
       <StructuredMemoryPanel novelId={novelId} onConflictChanged={() => void refreshConflicts()} />
       <MemoryConflictPanel novelId={novelId} />
       <IndexHealthPanel novelId={novelId} />
+      <BackupPanel novelId={novelId} />
 
       {!runId ? (
         <section data-tauri-director-start className="max-w-xl space-y-4 rounded-md bg-muted/20 p-4">

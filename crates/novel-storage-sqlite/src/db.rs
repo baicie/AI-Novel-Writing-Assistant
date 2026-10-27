@@ -88,6 +88,31 @@ impl SqliteKernel {
         })
     }
 
+    /// Create a consistent backup using SQLite's VACUUM INTO.
+    pub async fn backup_to(&self, path: &Path) -> Result<(), PortError> {
+        sqlx::query("VACUUM INTO ?")
+            .bind(path.to_string_lossy().to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        Ok(())
+    }
+
+    pub async fn verify_database_file(path: &Path) -> Result<String, PortError> {
+        let options = SqliteConnectOptions::new().filename(path).read_only(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(map_sql)?;
+        let result: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&pool)
+            .await
+            .map_err(map_sql)?;
+        pool.close().await;
+        Ok(result)
+    }
+
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }

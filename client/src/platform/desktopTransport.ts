@@ -1210,3 +1210,13 @@ export function confirmStructuredFact(input: {
 }): Promise<StructuredFactView> {
   return invoke("confirm_structured_fact", input);
 }
+
+export interface BackupInfo {
+  fileName: string;
+  bytes: number;
+  modifiedAt: number;
+}
+
+export function listBackups(): Promise<BackupInfo[]> { return invoke("list_backups"); }
+export function createBackup(): Promise<BackupInfo> { return invoke("create_backup"); }
+export function verifyBackup(fileName: string): Promise<string> { return invoke("verify_backup", { fileName }); }

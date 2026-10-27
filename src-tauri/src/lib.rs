@@ -108,6 +108,7 @@ pub fn run() {
             let structured_memory = Arc::new(StructuredMemoryService::new(kernel.clone()));
             app.manage(AppState {
                 runtime: runtime.clone(),
+                data_dir: data_dir.clone(),
                 batch,
                 native_tasks,
                 structured_memory,
@@ -273,6 +274,9 @@ commands::novel::create_character,
             commands::batch::cancel_batch,
             commands::batch::tick_batches,
             commands::native_tasks::list_native_tasks,
+            commands::backup::list_backups,
+            commands::backup::create_backup,
+            commands::backup::verify_backup,
             commands::structured_memory::list_structured_facts,
             commands::structured_memory::confirm_structured_fact,
             commands::run::approve_run,
