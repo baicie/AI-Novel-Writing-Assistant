@@ -8,6 +8,17 @@
 - G6: IMPLEMENTED/PARTIAL; backup create/list/verify Native PASS; restore UI absent.
 - G7: PARTIAL.
 - G8: PARTIAL.
-- G9: IN_PROGRESS.
+- G9: IMPLEMENTED / PARTIAL — 295 workspace, 354 all-targets, production audit PASS.
+
+## Final evidence
+
+- workspace 295 passed; all-targets 354 passed.
+- historical 0019 fixture → 0021: PASS (integrity/fk/data/draft/idempotent reopen).
+- Native backup create/list/verify: PASS.
+- Native history diff, memory, index retry, task center, export, batch, restart: PASS.
+- frontend 186 passed; typecheck/build PASS; fmt/clippy PASS.
+- production 22.96 MiB app, 10 MiB DMG, 106 commands/106 capabilities, audit PASS.
+- `BETA_RC_BLOCKED`: multi-window, Batch process SIGKILL/Unknown, Index SIGKILL, OS Save Dialog, restore UI and full journey remain.
+
 
 Release decision remains **BETA_RC_BLOCKED**.
