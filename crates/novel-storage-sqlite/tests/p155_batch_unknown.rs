@@ -216,6 +216,10 @@ async fn unknown_remote_is_not_resent_after_worker_sigkill() {
         "provider must receive the request"
     );
     let requests_before = received.load(Ordering::SeqCst);
+    assert_eq!(
+        requests_before, 1,
+        "provider must receive exactly one request"
+    );
     child.kill().unwrap();
     let _ = child.wait();
     tokio::time::sleep(Duration::from_millis(300)).await;
