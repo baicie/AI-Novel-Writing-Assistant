@@ -28,6 +28,7 @@
     "test:index-retry": "wdio run wdio.conf.mjs --spec specs/index-retry.spec.mjs",
     "test:backup": "wdio run wdio.conf.mjs --spec specs/backup.spec.mjs",
     "test:backup-restore-request": "wdio run wdio.conf.mjs --spec specs/backup-restore-request.spec.mjs",
-    "test:backup-restore-verify": "wdio run wdio.conf.mjs --spec specs/backup-restore-verify.spec.mjs"
+    "test:backup-restore-verify": "wdio run wdio.conf.mjs --spec specs/backup-restore-verify.spec.mjs",
+    "test:batch-reject": "wdio run wdio.conf.mjs --spec specs/batch-reject.spec.mjs"
   }
 }
