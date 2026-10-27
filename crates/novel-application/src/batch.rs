@@ -458,6 +458,25 @@ impl BatchService {
             allow_localhost_http: request.allow_localhost_http,
         };
         let outcome = director.open_run(input).await?;
+        #[cfg(debug_assertions)]
+        if let Some(dir) = std::env::var_os("BIZ_NOVEL_TEST_BATCH_BARRIER_DIR") {
+            let dir = std::path::PathBuf::from(dir);
+            let _ = std::fs::create_dir_all(&dir);
+            let marker = dir.join(format!("open-{}-{}.json", batch.id, item.id));
+            let _ = std::fs::write(
+                &marker,
+                serde_json::json!({
+                    "batchId": batch.id,
+                    "itemId": item.id,
+                    "runId": outcome.run_id,
+                    "commandId": format!("batch:{}:item:{}:open", batch.id, item.id),
+                })
+                .to_string(),
+            );
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
         match self
             .repository
             .bind_item_run(&fence, &item.id, &outcome.run_id, now_ms)

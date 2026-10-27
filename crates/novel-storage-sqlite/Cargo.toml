@@ -35,3 +35,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "batch_crash_worker"
+path = "src/bin/batch_crash_worker.rs"
+required-features = ["test-harness"]
