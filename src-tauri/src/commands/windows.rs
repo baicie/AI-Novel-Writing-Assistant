@@ -11,7 +11,7 @@ pub async fn open_editor_window(
         let _ = window.set_focus();
         return Ok("editor-b".into());
     }
-    let url = format!("index.html?writer=editor-b#/novels/{novel_id}/chapters/{chapter_id}");
+    let url = format!("#/novels/{novel_id}/chapters/{chapter_id}?writer=editor-b");
     WebviewWindowBuilder::new(&app, "editor-b", WebviewUrl::App(url.into()))
         .title("Biz Novel Studio · 第二编辑窗口")
         .inner_size(1180.0, 820.0)
