@@ -21,3 +21,11 @@ Start HEAD: `5e009c20`
 - Batch barrier is compiled only under `debug_assertions`; worker binary requires `test-harness`.
 - Backup restore is staged before restart and applied in setup before any SQLite/Runtime/scheduler starts.
 - Index crash test now additionally verifies FTS search after recovery.
+
+## 2026-10-27 final
+
+- 297 workspace / 356 all-targets passed.
+- Backup restore startup protocol tests PASS; Native request PASS.
+- Batch real process SIGKILL PASS; index worker SIGKILL + FTS PASS.
+- Production 23.19 MiB app, 10 MiB DMG, 107/107, audit PASS.
+- Multi-window and Batch Unknown/Reject/Repair still blocked.

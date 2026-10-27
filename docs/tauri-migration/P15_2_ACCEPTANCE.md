@@ -6,4 +6,5 @@
 - S2: Native two-window NOT_VERIFIED.
 - S5: OS Save Dialog MANUAL_NOT_RUN.
 - S7: shared-fixture journey NOT_VERIFIED.
+- Final: 297 workspace, 356 all-targets, frontend 186, production 23.19 MiB, 107 commands/107 capabilities.
 - Release decision: **BETA_RC_BLOCKED**.
