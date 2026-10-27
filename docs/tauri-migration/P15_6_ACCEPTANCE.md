@@ -6,4 +6,6 @@
 - Batch Repair / Repair Exhausted: **PARTIAL / NOT_RUN**.
 - Native Index restart / WAL matrix / shared journey / performance / long consistency: **PARTIAL or NOT_STARTED**.
 - OS Save Dialog: **MANUAL_NOT_RUN**.
-- Release: **BETA_RC_BLOCKED**.
+- Final: 297 workspace, 356 all-targets, frontend 186, production 23.23 MiB, 110 commands/capabilities, audit PASS.
+- Native multiwindow draft isolation + official CAS + restart draft recovery PASS.
+- Release: **BETA_RC_BLOCKED** (repair, native index restart, WAL matrix, journey, performance, OS dialog).

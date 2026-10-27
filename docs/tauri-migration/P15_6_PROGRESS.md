@@ -24,3 +24,12 @@ Start HEAD: `cc4889e9`
 - `multiwindow.spec.mjs`: editor-b input accepted; two drafts with client IDs `desktop-editor-b` and main writer; stale official save rejected; B draft remains.
 - `run-tauri-multiwindow-draft-e2e.sh`: A/B drafts written, app SIGKILLed, new process lists `desktop-editor-b` draft.
 - Writer identity uses `writer` query in the hash; sessionStorage remains fallback for single-window use.
+
+## 2026-10-28 final
+
+- editor-b renders chapter editor and accepts text (Native).
+- Two windows persist independent drafts; stale official save conflicts; B draft retained.
+- SIGKILL restart: new process discovers `desktop-editor-b` draft (Native runner PASS).
+- 297 workspace / 356 all-targets; 186 frontend; clippy/fmt PASS.
+- Production 23.23 MiB app, 10 MiB DMG, 110/110, audit PASS.
+- Remaining: Batch Repair/Repair Exhausted Native, Native index restart, full WAL matrix, shared journey, performance, OS Save Dialog.
