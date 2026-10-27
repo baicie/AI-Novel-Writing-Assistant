@@ -7,4 +7,5 @@
 - Index recovery: **PARTIAL**; backend SIGKILL/FTS PASS, Native restart not rerun.
 - Save: **BLOCKED** (manual OS dialog).
 - Journey/performance: **BLOCKED / NOT_STARTED**.
+- Final: 297 workspace, 356 clean all-targets; frontend 186; production 23.23 MiB, 110 commands/capabilities, audit PASS.
 - Release: **BETA_RC_BLOCKED**.

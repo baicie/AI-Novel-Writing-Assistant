@@ -33,3 +33,11 @@ Start HEAD: `c6617ab0`
 - Product command creates a real Tauri window label `editor-b`; `list_app_windows` reports both labels; driver `browser.tauri.listWindows` also reports both.
 - The second-window chapter editor did not render its editor in the test; no two-writer draft isolation claim.
 - Writer identity now prefers a stable writer query param; backend CAS tests remain.
+
+## 2026-10-27 final
+
+- Batch Unknown exact request count == 1 verified; Run paused; no candidate; chapter 3 not started.
+- Native reject→regenerate→approve advances chapter 2.
+- Real Tauri `editor-b` window created and visible to Tauri window APIs; editor interaction not verified.
+- 297 workspace / 356 all-targets; frontend 186; production 23.23 MiB, 110/110, audit PASS.
+- Release gate remains BETA_RC_BLOCKED.
