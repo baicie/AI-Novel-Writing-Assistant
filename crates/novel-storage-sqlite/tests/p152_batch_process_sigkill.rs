@@ -114,7 +114,11 @@ async fn real_process_sigkill_between_open_run_and_item_binding_recovers() {
 
     let reopened = Arc::new(SqliteKernel::open(&db).await.unwrap());
     // The killed worker's process-local lease is still in the future; simulate lease expiry.
-    sqlx::query("UPDATE batch_run SET lease_until = 0 WHERE id = ?").bind(&batch.id).execute(reopened.pool()).await.unwrap();
+    sqlx::query("UPDATE batch_run SET lease_until = 0 WHERE id = ?")
+        .bind(&batch.id)
+        .execute(reopened.pool())
+        .await
+        .unwrap();
     let before = BatchRepository::get_batch(reopened.as_ref(), &batch.id)
         .await
         .unwrap();
