@@ -40,3 +40,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 name = "batch_crash_worker"
 path = "src/bin/batch_crash_worker.rs"
 required-features = ["test-harness"]
+
+[[bin]]
+name = "unknown_worker"
+path = "src/bin/unknown_worker.rs"
+required-features = ["test-harness"]
