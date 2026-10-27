@@ -1220,3 +1220,4 @@ export interface BackupInfo {
 export function listBackups(): Promise<BackupInfo[]> { return invoke("list_backups"); }
 export function createBackup(): Promise<BackupInfo> { return invoke("create_backup"); }
 export function verifyBackup(fileName: string): Promise<string> { return invoke("verify_backup", { fileName }); }
+export function requestRestore(fileName: string): Promise<string> { return invoke("request_restore", { fileName }); }

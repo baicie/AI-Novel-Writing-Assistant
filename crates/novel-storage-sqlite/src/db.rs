@@ -98,6 +98,29 @@ impl SqliteKernel {
         Ok(())
     }
 
+    pub fn latest_schema_version() -> &'static str {
+        MIGRATION_SCRIPTS
+            .last()
+            .map(|(version, _)| *version)
+            .unwrap_or("0000")
+    }
+
+    pub async fn schema_version(path: &Path) -> Result<String, PortError> {
+        let options = SqliteConnectOptions::new().filename(path).read_only(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(map_sql)?;
+        let version: Option<String> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_migration")
+                .fetch_one(&pool)
+                .await
+                .map_err(map_sql)?;
+        pool.close().await;
+        Ok(version.unwrap_or_else(|| "0000".into()))
+    }
+
     pub async fn verify_database_file(path: &Path) -> Result<String, PortError> {
         let options = SqliteConnectOptions::new().filename(path).read_only(true);
         let pool = SqlitePoolOptions::new()

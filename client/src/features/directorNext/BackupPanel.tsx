@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { createBackup, listBackups, verifyBackup, type BackupInfo } from "@/platform/desktopTransport";
+import { createBackup, listBackups, requestRestore, verifyBackup, type BackupInfo } from "@/platform/desktopTransport";
 
 export default function BackupPanel({ novelId }: { novelId: string }) {
   const [backups, setBackups] = useState<BackupInfo[]>([]);
@@ -20,6 +20,17 @@ export default function BackupPanel({ novelId }: { novelId: string }) {
       setMessage(`已创建备份 ${info.fileName}（${(info.bytes / 1024 / 1024).toFixed(1)} MB）`);
     } catch (cause: unknown) {
       setMessage(cause instanceof Error ? cause.message : "创建备份失败。");
+    } finally { setBusy(false); }
+  };
+
+  const restore = async (backup: BackupInfo) => {
+    if (!window.confirm(`将从备份 ${backup.fileName} 恢复。当前数据库会先保存为保护备份，应用需要在下次启动时完成切换。是否继续？`)) return;
+    setBusy(true);
+    try {
+      const message = await requestRestore(backup.fileName);
+      setMessage(message);
+    } catch (cause: unknown) {
+      setMessage(cause instanceof Error ? cause.message : "恢复准备失败。");
     } finally { setBusy(false); }
   };
 
@@ -50,7 +61,10 @@ export default function BackupPanel({ novelId }: { novelId: string }) {
         {backups.slice(0, 8).map((backup) => (
           <li key={backup.fileName} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-background/60 px-3 py-2 text-xs">
             <span>{backup.fileName} · {(backup.bytes / 1024 / 1024).toFixed(1)} MB</span>
-            <Button data-testid="backup-verify" variant="outline" onClick={() => void verify(backup)} disabled={busy}>校验</Button>
+            <span className="flex gap-2">
+              <Button data-testid="backup-verify" variant="outline" onClick={() => void verify(backup)} disabled={busy}>校验</Button>
+              <Button data-testid="backup-restore" variant="outline" onClick={() => void restore(backup)} disabled={busy}>恢复</Button>
+            </span>
           </li>
         ))}
       </ul> : <p className="text-xs text-muted-foreground">还没有备份。</p>}

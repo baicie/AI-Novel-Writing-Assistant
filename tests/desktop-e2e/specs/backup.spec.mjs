@@ -15,5 +15,7 @@ describe("Native backup", () => {
     expect(verify).toBe("ok");
     await (await $("[data-testid=backup-verify]")).click();
     await browser.waitUntil(async () => (await browser.execute(() => document.body.innerText)).includes("备份完整性"), { timeout: 20_000 });
+    const restore = await invoke("request_restore", { fileName: backups[0].fileName });
+    expect(restore).toContain("重新打开应用");
   });
 });

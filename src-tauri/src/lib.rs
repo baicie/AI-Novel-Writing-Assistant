@@ -72,6 +72,9 @@ pub fn run() {
             };
             let llm: Arc<dyn novel_llm::LlmProvider> = llm_provider();
             let (kernel, runtime) = tauri::async_runtime::block_on(async {
+                crate::commands::backup::recover_pending_restore(&data_dir, &db_path)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 let kernel = Arc::new(
                     SqliteKernel::open(&db_path)
                         .await
@@ -277,6 +280,7 @@ commands::novel::create_character,
             commands::backup::list_backups,
             commands::backup::create_backup,
             commands::backup::verify_backup,
+            commands::backup::request_restore,
             commands::structured_memory::list_structured_facts,
             commands::structured_memory::confirm_structured_fact,
             commands::run::approve_run,

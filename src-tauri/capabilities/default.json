@@ -45,6 +45,7 @@
     "allow-tick-batches",
     "allow-list-native-tasks",
     "allow-verify-backup",
+    "allow-request-restore",
     "allow-create-backup",
     "allow-list-backups",
     "allow-list-structured-facts",

@@ -45,6 +45,7 @@ fn main() {
         "list_backups",
         "create_backup",
         "verify_backup",
+        "request_restore",
         "list_structured_facts",
         "confirm_structured_fact",
         "approve_run",
