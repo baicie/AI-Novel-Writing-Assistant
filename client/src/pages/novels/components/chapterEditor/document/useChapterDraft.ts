@@ -13,6 +13,13 @@ const CLIENT_KEY = "ai-novel:chapter-editor-client:v1";
 
 function getClientId(): string {
   try {
+    // The second editor window carries its stable Tauri label as a writer id.
+    // It survives window reload and the application restart, so its local draft
+    // remains recoverable without colliding with the main window's writer.
+    const hashQuery = window.location.hash.split("?")[1] ?? "";
+    const writer = new URLSearchParams(window.location.search).get("writer")
+      ?? new URLSearchParams(hashQuery).get("writer");
+    if (writer) return `desktop-${writer}`;
     const existing = sessionStorage.getItem(CLIENT_KEY);
     if (existing) return existing;
     const next = globalThis.crypto?.randomUUID?.() ?? `editor-${Date.now()}-${Math.random().toString(36).slice(2)}`;

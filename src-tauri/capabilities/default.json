@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "本地创作窗口可以调用的创作命令",
   "windows": [
-    "main"
+    "main",
+    "editor-b"
   ],
   "permissions": [
     "core:default",
@@ -46,6 +47,9 @@
     "allow-list-native-tasks",
     "allow-verify-backup",
     "allow-request-restore",
+    "allow-close-editor-window",
+    "allow-list-app-windows",
+    "allow-open-editor-window",
     "allow-create-backup",
     "allow-list-backups",
     "allow-list-structured-facts",
