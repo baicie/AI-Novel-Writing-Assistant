@@ -258,3 +258,16 @@ fixture：`/tmp/biz-novel-journey.ZUATT3`。
   不留下半成品文件，源库仍可打开且内容不变。
 - `restore_switch_failure_keeps_the_live_database_and_the_intent`：数据目录只读导致切换重命名失败时，
   恢复必须显式报错而不是把库切坏；原库留在原位、staged 与 intent 都保留，便于修复后重试。
+## G7 收尾 — 独立 worktree 全量回归
+
+在 `HEAD` 上创建 detach worktree（不含未跟踪的本地文件），跑 `cargo test --workspace --exclude novel-http --all-targets`：
+
+```text
+cargo_exit=0
+test result: ok  ×53
+```
+
+第一次跑时暴露了一个真实问题：`a_newer_intent_replaces_the_pending_source` 用 `std::fs::copy` 复制主库文件生成 staged 库，
+而主库当时还有未 checkpoint 的 `-wal`，拷贝出来的库可能连 `schema_migration` 表都没有，用例随机失败。
+已改为用 SQLite 备份接口生成 staged 库（提交 `26ce5478`），之后在独立 worktree 上稳定通过。EOF
+tail -3 docs/tauri-migration/P15_8_PROGRESS.md
