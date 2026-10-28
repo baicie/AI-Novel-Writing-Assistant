@@ -39,6 +39,23 @@ pnpm --filter @ai-novel/client typecheck                 → PASS
 pnpm --filter @ai-novel/client test                      → 186 passed
 ```
 
+## 回归与生产形状
+
+记录于提交 `11341cb1`：
+
+```text
+cargo test -p novel-application -p novel-storage-sqlite        43 个测试二进制 ok / 0 failed
+pnpm --filter @ai-novel/client typecheck                        PASS
+pnpm --filter @ai-novel/client test                             186 passed
+cargo tauri build --target aarch64-apple-darwin --bundles app   PASS，Biz Novel Studio.app 23.27 MiB
+bash scripts/audit-tauri-release.sh                             PASS（无 Node/Electron/sidecar、无 E2E 标记）
+命令数 / capability 允许项                                       111 / 111
+生产二进制中的 BIZ_NOVEL_E2E 字符串                              0
+```
+
+未执行：`cargo test --workspace` 与 clean worktree all-targets（本轮改动作用域内的测试已单独运行）；
+`cargo fmt --check` 全仓仍会因 `crates/novel-http` 的既有格式差异失败，与本轮改动无关。
+
 ## 切片 2：原生有界修复链路验收（本轮已交付）
 
 ### 新增测试
