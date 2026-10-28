@@ -250,3 +250,11 @@ fixture：`/tmp/biz-novel-journey.ZUATT3`。
 
 **G4 状态：VERIFIED**（共享 Fixture 完整旅程）。唯一说明：双写作者的真实双窗口交互仍由
 `multiwindow-draft-*` 专项用例覆盖，本旅程用命令级入口验证同一组数据不变量。
+## G2 补充 — 再补两类崩溃/失败窗口
+
+新增两条单元用例（`cargo test -p novel-desktop --lib` 现为 11 passed）：
+
+- `backup_into_a_read_only_directory_fails_without_losing_the_source`：备份目标目录只读时备份必须失败，
+  不留下半成品文件，源库仍可打开且内容不变。
+- `restore_switch_failure_keeps_the_live_database_and_the_intent`：数据目录只读导致切换重命名失败时，
+  恢复必须显式报错而不是把库切坏；原库留在原位、staged 与 intent 都保留，便于修复后重试。

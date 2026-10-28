@@ -508,4 +508,60 @@ mod tests {
         assert!(!newer.exists(), "新的 staged 文件被切换进主库");
         assert!(!dir.path().join("restore-intent.json").exists());
     }
+
+    #[tokio::test]
+    async fn backup_into_a_read_only_directory_fails_without_losing_the_source() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&live, "n-live", "原书").await;
+        let read_only = dir.path().join("readonly");
+        std::fs::create_dir_all(&read_only).unwrap();
+        let mut permissions = std::fs::metadata(&read_only).unwrap().permissions();
+        permissions.set_mode(0o555);
+        std::fs::set_permissions(&read_only, permissions).unwrap();
+
+        let target = read_only.join("backup.sqlite");
+        let failed = live.backup_to(&target).await;
+        let mut restore = std::fs::metadata(&read_only).unwrap().permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(&read_only, restore).unwrap();
+
+        assert!(failed.is_err(), "只读目录下的备份必须失败");
+        assert!(!target.exists());
+        live.pool().close().await;
+        assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn restore_switch_failure_keeps_the_live_database_and_the_intent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&live, "n-live", "原书").await;
+        live.pool().close().await;
+        let staged = dir.path().join("restore-staged.sqlite");
+        std::fs::copy(&db, &staged).unwrap();
+        let original = dir.path().join("pre-restore-live.sqlite");
+        let marker = intent_paths(dir.path(), &staged, &original);
+
+        // 数据目录只读：切换时的重命名必须失败，而不是把库切坏。
+        let mut permissions = std::fs::metadata(dir.path()).unwrap().permissions();
+        permissions.set_mode(0o555);
+        std::fs::set_permissions(dir.path(), permissions).unwrap();
+        let failed = recover_pending_restore(dir.path(), &db).await;
+        let mut restore = std::fs::metadata(dir.path()).unwrap().permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(dir.path(), restore).unwrap();
+
+        assert!(failed.is_err(), "切换失败必须显式报错");
+        assert!(db.exists(), "原库必须还在原位");
+        assert!(marker.exists(), "intent 保留以便修复后重试");
+        assert!(staged.exists());
+        assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+    }
 }
