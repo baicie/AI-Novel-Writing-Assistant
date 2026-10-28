@@ -121,11 +121,26 @@ pub fn run() {
                 cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
             });
 
+            // E2E 构建可以缩短过期租约的回收间隔，生产构建恒为 30 秒。
+            let recover_secs = {
+                #[cfg(feature = "e2e")]
+                {
+                    std::env::var("BIZ_NOVEL_E2E_INDEX_RECOVER_SECS")
+                        .ok()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .filter(|value| *value > 0)
+                        .unwrap_or(30)
+                }
+                #[cfg(not(feature = "e2e"))]
+                {
+                    30u64
+                }
+            };
             tauri::async_runtime::spawn(async move {
                 loop {
                     let now = novel_platform::now_ms();
                     let _ = recovery_kernel.recover_expired_index_jobs(now).await;
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(recover_secs)).await;
                 }
             });
 
@@ -139,7 +154,11 @@ pub fn run() {
                         let owner = format!("index-worker-{}-{seq}", std::process::id());
                         if let Ok(Some(job)) = state
                             .kernel
-                            .claim_next_due_index_job(&owner, now + 120_000, now)
+                            .claim_next_due_index_job(
+                                &owner,
+                                now + commands::knowledge::index_claim_lease_ms(120_000),
+                                now,
+                            )
                             .await
                         {
                             let _ = commands::knowledge::execute_index_job(

@@ -8,6 +8,19 @@ use tauri::State;
 
 use crate::state::AppState;
 
+/// 索引任务的领取租约。E2E 构建可以用环境变量缩短租约，生产构建恒为默认值。
+pub(crate) fn index_claim_lease_ms(default_ms: i64) -> i64 {
+    #[cfg(feature = "e2e")]
+    if let Some(value) = std::env::var("BIZ_NOVEL_E2E_INDEX_LEASE_MS")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+    {
+        return value;
+    }
+    default_ms
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexKnowledgeRequest {
@@ -464,7 +477,7 @@ pub async fn retry_index_job(
     let owner = format!("tauri-manual-{now}");
     let job = state
         .kernel
-        .claim_index_job(&job_id, &owner, now + 60_000, now)
+        .claim_index_job(&job_id, &owner, now + index_claim_lease_ms(60_000), now)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::conflict("索引任务不可执行或已被其他执行者领取。"))?;
@@ -498,7 +511,7 @@ pub async fn retry_knowledge_document_with_job(
     let owner = format!("tauri-manual-{now}");
     let claimed = state
         .kernel
-        .claim_index_job(&job.id, &owner, now + 60_000, now)
+        .claim_index_job(&job.id, &owner, now + index_claim_lease_ms(60_000), now)
         .await
         .map_err(AppError::from)?
         .ok_or_else(|| AppError::conflict("索引任务不可执行。"))?;
@@ -510,6 +523,13 @@ pub(crate) async fn execute_index_job(
     job: IndexJobView,
     owner: &str,
 ) -> Result<IndexJobView, AppError> {
+    // 测试屏障：领取结果已经落库，这里挂住以便控制器确认状态后 SIGKILL 进程。
+    #[cfg(feature = "e2e")]
+    if std::env::var("BIZ_NOVEL_E2E_INDEX_HOLD").is_ok() {
+        for _ in 0..300 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
     let now = novel_platform::now_ms();
     let current = state
         .kernel
@@ -536,7 +556,9 @@ pub(crate) async fn execute_index_job(
     {
         use std::sync::atomic::{AtomicBool, Ordering};
         static E2E_INDEX_FAILED_ONCE: AtomicBool = AtomicBool::new(false);
-        if std::env::var("BIZ_NOVEL_E2E_INDEX_FAIL_ONCE").is_ok()
+        if std::env::var("BIZ_NOVEL_E2E_INDEX_FAIL_ONCE")
+            .ok()
+            .is_some_and(|value| !matches!(value.trim(), "0" | "false" | "off"))
             && !E2E_INDEX_FAILED_ONCE.swap(true, Ordering::SeqCst)
         {
             return state
