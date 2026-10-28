@@ -7,7 +7,7 @@ BIN="$ROOT/target/aarch64-apple-darwin/release/novel-desktop"
 PKG="pnpm --filter @ai-novel/desktop-e2e"
 DIR="$(mktemp -d /tmp/biz-novel-journey.XXXXXX)"
 KEEP="${BIZ_NOVEL_JOURNEY_KEEP:-0}"
-PHASES="${BIZ_NOVEL_JOURNEY_PHASES:-prepare batch}"
+PHASES="${BIZ_NOVEL_JOURNEY_PHASES:-prepare batch memory}"
 
 cleanup() {
   pkill -f "$BIN" 2>/dev/null || true

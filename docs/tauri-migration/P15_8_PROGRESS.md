@@ -170,10 +170,28 @@ bash scripts/audit-tauri-release.sh                             PASS
 ### 过程中确认的一件事
 
 工作流命令按 `command_id` 去重：阶段脚本最初用固定 id 反复批准，第二次起被当成重放而静默不生效。
-产品界面每��操作都会生成新的 `command_id`（`prefix:时间戳:uuid`），所以这不是产品缺陷；
+产品界面每次操作都会生成新的 `command_id`（`prefix:时间戳:uuid`），所以这不是产品缺陷；
 旅程脚本已改为按控制版本生成唯一 id。
 
 ### 未完成
 
 结构化记忆（别名/地点/生死/关系/冲突/As-Of）、编辑与历史（草稿、正式保存、Diff、恢复、双窗口）、
 知识与导出、备份恢复重启这几段尚未接入同一 fixture。
+## G4 续 — 结构化记忆阶段（已通过，同一 fixture）
+
+阶段 3 `journey-memory` 在同一个 Novel ID、同一个 SQLite 上追加：
+
+- 别名（林公子）、生死状态（alive）、有向关系（ally_of → 苏晚）、地点（第 2 章 山门 → 第 5 章 祖祠）；
+- 断言 As-Of：第 2 章仍看到山门、看不到祖祠；第 5 章之后活动地点只剩祖祠（单值事实被新版本取代）；
+- 关系终止：`{relation:"ally_of", active:false}` 生效后活动关系只剩终止记录；
+- 同一章出现两个不同地点 → 产生冲突 → 用 `resolve_memory_conflict`（`keep_existing`）裁决后活动地点仍是祖祠；
+- 断言最终地点事实带正确的 `sourceChapterId` 与 `truthfulness=confirmed`。
+
+```text
+[journey] phase: prepare
+[journey] phase: batch    → 10 章正式提交
+[journey] phase: memory   → PASS
+[journey] batch <id> runs 10
+```
+
+fixture：`/tmp/biz-novel-journey.OxXXEB`（`BIZ_NOVEL_JOURNEY_KEEP=1` 保留，供后续阶段复用）。
