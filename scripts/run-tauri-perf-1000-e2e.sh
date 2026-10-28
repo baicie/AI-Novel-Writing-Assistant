@@ -31,14 +31,37 @@ echo "[]" > "$SUMMARY"
 sample_rss() { ps -o rss= -p "$1" 2>/dev/null | tr -d ' ' || echo 0; }
 sample_cpu() { ps -o %cpu= -p "$1" 2>/dev/null | tr -d ' ' || echo 0; }
 
+sample_cpu_curve() {
+  local out="$1"
+  : >"$out"
+  while true; do
+    local pid cpu rss
+    pid=$(pgrep -f "$BIN" | head -1)
+    if [[ -n "${pid:-}" ]]; then
+      cpu=$(ps -o %cpu= -p "$pid" 2>/dev/null | tr -d ' ')
+      rss=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
+      if [[ -n "${cpu:-}" ]]; then
+        printf '{"at":%s,"cpuPercent":%s,"rssKb":%s}\n' "$(date +%s)" "$cpu" "${rss:-0}" >>"$out"
+      fi
+    fi
+    sleep 1
+  done
+}
+
 measure_size() {
   local size="$1"
   local dir="$2"
   local report="$dir/perf-report.json"
+  sample_cpu_curve "$dir/cpu-curve.jsonl" &
+  local sampler=$!
   env BIZ_NOVEL_E2E_DATA_DIR="$dir" BIZ_NOVEL_E2E_KEEP=1 \
       BIZ_NOVEL_E2E_PERF_CHAPTERS="$size" \
       BIZ_NOVEL_E2E_PERF_REPORT="$report" BIZ_NOVEL_E2E_MACHINE="$MACHINE" \
       $PKG test:perf-1000 >"$dir/measure.log" 2>&1
+  local code=$?
+  kill "$sampler" 2>/dev/null || true
+  wait "$sampler" 2>/dev/null || true
+  return $code
 }
 
 settle() {
