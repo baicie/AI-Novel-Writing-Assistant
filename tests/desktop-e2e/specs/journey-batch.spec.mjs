@@ -71,6 +71,7 @@ describe("Shared fixture journey: continuous creation", () => {
         }
       } catch (cause) {
         lastError = cause instanceof Error ? cause.message : String(cause);
+        if (lastError.includes("sessionId")) throw cause;
         console.log("[journey] retrying after:", lastError, "|", lastState);
       }
       await browser.pause(500);

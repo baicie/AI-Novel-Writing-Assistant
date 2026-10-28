@@ -226,3 +226,27 @@ fixture：`/tmp/biz-novel-journey.OxXXEB`（`BIZ_NOVEL_JOURNEY_KEEP=1` 保留，
 
 说明：本阶段用命令级入口验证两位写作者的草稿隔离与官方版本 CAS；
 真实双窗口交互由 `multiwindow-draft-*` 专项用例覆盖。
+## G4 收尾 — 备份恢复重启阶段（已通过，同一 fixture）
+
+阶段 6/7 `journey-backup` → `journey-backup-verify`，七个阶段全部在同一份 SQLite、同一个 Novel ID 上跑完：
+
+1. 备份已完成的书稿并校验（`create_backup` + `verify_backup` = ok）；
+2. 改动其中一章正文，然后提交恢复请求；
+3. SIGKILL 整个应用进程；
+4. 新进程启动时先应用恢复，再打开数据库；
+5. 校验：该章正文回到备份版本、改动消失；备份目录里同时有本次备份与 `pre-restore-*` 保护副本；
+   第十章的草稿仍在、批次仍是 `completed`（10 项全部成功）、结构化记忆的活动地点仍是祖祠、
+   知识检索仍命中、全书导出仍包含第 10 章。
+
+```text
+[journey] phase: prepare → batch（10 章正式提交）→ memory → knowledge → editor →
+                backup（请求恢复后 SIGKILL，退出码 1 属预期）→ backup-verify
+[journey] batch e51faa02… runs 10
+[journey] restore rolled back chapter to version 1 backup novel-1793193820517.sqlite
+[journey] PASS
+```
+
+fixture：`/tmp/biz-novel-journey.ZUATT3`。
+
+**G4 状态：VERIFIED**（共享 Fixture 完整旅程）。唯一说明：双写作者的真实双窗口交互仍由
+`multiwindow-draft-*` 专项用例覆盖，本旅程用命令级入口验证同一组数据不变量。
