@@ -76,6 +76,13 @@ pub async fn create_backup(state: State<'_, AppState>) -> Result<BackupInfo, App
         .backup_to(&temp)
         .await
         .map_err(|error| AppError::integrity(format!("创建备份失败：{error}")))?;
+    #[cfg(feature = "e2e")]
+    if std::env::var("BIZ_NOVEL_E2E_BACKUP_HOLD").is_ok() {
+        // 只用于崩溃用例：把进程停在"临时库已写出、还没改名为正式备份"的窗口里。
+        for _ in 0..600 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
     if let Err(error) = std::fs::rename(&temp, &target) {
         let _ = std::fs::remove_file(&temp);
         return Err(AppError::integrity(format!("保存备份失败：{error}")));

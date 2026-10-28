@@ -271,3 +271,20 @@ test result: ok  ×53
 而主库当时还有未 checkpoint 的 `-wal`，拷贝出来的库可能连 `schema_migration` 表都没有，用例随机失败。
 已改为用 SQLite 备份接口生成 staged 库（提交 `26ce5478`），之后在独立 worktree 上稳定通过。EOF
 tail -3 docs/tauri-migration/P15_8_PROGRESS.md
+## G2 续 — 备份进行中的进程级窗口（已有真实用例）
+
+新增两阶段 Native 用例 `scripts/run-tauri-backup-crash-e2e.sh`：
+
+1. 阶段一：触发备份，用 e2e 专用挂起点把进程停在"临时库已写出、还没改名为正式备份"的窗口里，
+   确认备份目录里只有 `.tmp`、没有正式 `.sqlite`，然后 SIGKILL 整个应用；
+2. 阶段二：新进程启动后 `list_backups` 返回 0（半成品不会被当成备份），`.tmp` 仍在磁盘上，
+   章节正文完好；再次备份成功并通过校验；`verify_backup("../novel.sqlite")` 被拒绝。
+
+```text
+[backup-crash] phase: kill during backup → exit=1（预期）
+[backup-crash] phase: restart and verify → 1 passing（986ms）
+[backup-crash] PASS
+```
+
+挂起点位于 `#[cfg(feature = "e2e")]`，生产构建里不存在。EOF
+tail -3 docs/tauri-migration/P15_8_PROGRESS.md
