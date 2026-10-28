@@ -112,3 +112,28 @@ bash scripts/audit-tauri-release.sh                             PASS
 | Production Audit | VERIFIED | 构建、审计、钩子隔离、111/111 |
 
 结论：`BETA_RC_BLOCKED`（缺 WAL 崩溃矩阵、共享 Fixture 旅程、Native Save 人工验收、完整回归与 100/500 档性能）。
+## G2 — WAL 备份恢复崩溃窗口（本轮已交付，PARTIAL）
+
+### 交付
+
+`src-tauri/src/commands/backup.rs` 的单元测试矩阵（`cargo test -p novel-desktop --lib`，9 passed）新增 7 条：
+
+| 用例 | 覆盖窗口与断言 |
+| --- | --- |
+| `no_intent_leaves_the_live_database_untouched` | 意图提交前（只剩 `restore-intent.tmp`）：不切换，正文不变 |
+| `missing_staged_database_keeps_the_live_database` | stage 丢失：marker 转为 `.failed.json`，主库不动 |
+| `corrupt_staged_database_is_refused` | stage 损坏：拒绝并保留 intent，主库既不移动也不被覆盖 |
+| `switch_moves_wal_sidecars_and_keeps_both_databases_readable` | 切换窗口：旧 `-wal/-shm` 随原库搬走，恢复后的库只含备份内容，保护副本能独立打开 |
+| `a_newer_intent_replaces_the_pending_source` | 重复 Restore Intent：以最后一份为准，旧 staged 文件不处理 |
+| `safety_snapshot_includes_uncheckpointed_wal_rows` | 未 checkpoint 的已提交事务：`-wal` 非空时保护副本仍能读到该数据 |
+| 既有两条 | 正常切换保留保护副本；原库已移动、staged 未切换时回滚原库 |
+
+### 说明
+
+崩溃窗口用"进程被杀后磁盘上留下的真实状态"复现，再由真实的 `recover_pending_restore` 做判定；
+进程级 SIGKILL 目前只有 P15.3 的 Native 用例覆盖了"请求恢复后杀进程"这一处。
+
+### 未覆盖
+
+备份写入中 SIGKILL、VACUUM 中途失败、磁盘空间不足、只读目录、备份与恢复竞争、两个 App 实例、
+"备份来自更新版本"在启动期的拒绝路径（`request_restore` 侧已拒绝）。

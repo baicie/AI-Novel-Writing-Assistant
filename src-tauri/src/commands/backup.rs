@@ -332,4 +332,179 @@ mod tests {
         assert!(db.exists());
         assert!(!dir.path().join("restore-intent.json").exists());
     }
+
+    fn intent_paths(dir: &Path, staged: &Path, original: &Path) -> PathBuf {
+        let intent = RestoreIntent {
+            source: "backup.sqlite".into(),
+            staged: staged.to_string_lossy().to_string(),
+            original: original.to_string_lossy().to_string(),
+            created_at: 1,
+        };
+        std::fs::write(
+            dir.join("restore-intent.json"),
+            serde_json::to_vec(&intent).unwrap(),
+        )
+        .unwrap();
+        dir.join("restore-intent.json")
+    }
+
+    async fn seed(kernel: &novel_storage_sqlite::SqliteKernel, id: &str, title: &str) {
+        novel_application::NovelRepository::create_novel(
+            kernel,
+            novel_application::NewNovel {
+                id: id.into(),
+                title: title.into(),
+                description: String::new(),
+                now_ms: 1,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn titles(path: &Path) -> Vec<String> {
+        let kernel = novel_storage_sqlite::SqliteKernel::open(path).await.unwrap();
+        let novels = novel_application::NovelRepository::list_novels(&kernel)
+            .await
+            .unwrap();
+        let mut titles: Vec<String> = novels.into_iter().map(|item| item.title).collect();
+        kernel.pool().close().await;
+        titles.sort();
+        titles
+    }
+
+    #[tokio::test]
+    async fn no_intent_leaves_the_live_database_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let kernel = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&kernel, "n-live", "现有书").await;
+        kernel.pool().close().await;
+        // 崩溃在意图提交之前：只剩临时文件，没有正式 marker。
+        std::fs::write(dir.path().join("restore-intent.tmp"), b"{\"partial\":").unwrap();
+
+        let result = recover_pending_restore(dir.path(), &db).await.unwrap();
+        assert!(result.is_none());
+        assert_eq!(titles(&db).await, vec!["现有书".to_string()]);
+        assert!(dir.path().join("restore-intent.tmp").exists());
+    }
+
+    #[tokio::test]
+    async fn missing_staged_database_keeps_the_live_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let kernel = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&kernel, "n-live", "现有书").await;
+        kernel.pool().close().await;
+        let staged = dir.path().join("restore-staged.sqlite");
+        let original = dir.path().join("pre-restore-live.sqlite");
+        let marker = intent_paths(dir.path(), &staged, &original);
+
+        let result = recover_pending_restore(dir.path(), &db).await.unwrap();
+        assert!(result.is_none());
+        assert!(!marker.exists());
+        assert!(dir.path().join("restore-intent.failed.json").exists());
+        assert_eq!(titles(&db).await, vec!["现有书".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn corrupt_staged_database_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let kernel = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&kernel, "n-live", "现有书").await;
+        kernel.pool().close().await;
+        let staged = dir.path().join("restore-staged.sqlite");
+        std::fs::write(&staged, b"this is not a sqlite database").unwrap();
+        let original = dir.path().join("pre-restore-live.sqlite");
+        let marker = intent_paths(dir.path(), &staged, &original);
+
+        let result = recover_pending_restore(dir.path(), &db).await;
+        assert!(result.is_err(), "a corrupt staged copy must be refused");
+        assert!(marker.exists(), "the intent stays for a later fix");
+        assert!(!original.exists(), "the live database must not be moved");
+        assert_eq!(titles(&db).await, vec!["现有书".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn safety_snapshot_includes_uncheckpointed_wal_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let kernel = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&kernel, "n-wal", "还在 WAL 里的书").await;
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        assert!(wal.exists(), "WAL 模式必须留下 -wal");
+        assert!(
+            std::fs::metadata(&wal).unwrap().len() > 0,
+            "未 checkpoint 的提交必须写在 WAL 里"
+        );
+        let safety = dir.path().join("pre-restore-safety.sqlite");
+        kernel.backup_to(&safety).await.unwrap();
+        assert_eq!(
+            titles(&safety).await,
+            vec!["还在 WAL 里的书".to_string()],
+            "保护副本必须包含尚未 checkpoint 的已提交数据"
+        );
+        kernel.pool().close().await;
+    }
+
+    #[tokio::test]
+    async fn switch_moves_wal_sidecars_and_keeps_both_databases_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&live, "n-live", "原书").await;
+        let backup = dir.path().join("backup.sqlite");
+        live.backup_to(&backup).await.unwrap();
+        live.pool().close().await;
+        let staged = dir.path().join("restore-staged.sqlite");
+        std::fs::copy(&backup, &staged).unwrap();
+        let original = dir.path().join("pre-restore-live.sqlite");
+        intent_paths(dir.path(), &staged, &original);
+        // 崩溃现场：主库旁边还留着未合并的 WAL/SHM。
+        let live_wal = PathBuf::from(format!("{}-wal", db.display()));
+        let live_shm = PathBuf::from(format!("{}-shm", db.display()));
+        std::fs::write(&live_wal, b"stale-wal").unwrap();
+        std::fs::write(&live_shm, b"stale-shm").unwrap();
+
+        let schema = recover_pending_restore(dir.path(), &db).await.unwrap();
+        assert_eq!(
+            schema.as_deref(),
+            Some(novel_storage_sqlite::SqliteKernel::latest_schema_version())
+        );
+        assert!(!live_wal.exists(), "旧 WAL 不能留在恢复后的主库旁边");
+        assert!(!live_shm.exists());
+        assert!(PathBuf::from(format!("{}-wal", original.display())).exists());
+        assert!(PathBuf::from(format!("{}-shm", original.display())).exists());
+        assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+        assert_eq!(
+            titles(&original).await,
+            vec!["原书".to_string()],
+            "保护副本必须能独立打开"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_newer_intent_replaces_the_pending_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&live, "n-live", "原书").await;
+        live.pool().close().await;
+        let older = dir.path().join("restore-staged-old.sqlite");
+        let newer = dir.path().join("restore-staged-new.sqlite");
+        std::fs::copy(&db, &older).unwrap();
+        std::fs::copy(&db, &newer).unwrap();
+        let original = dir.path().join("pre-restore-live.sqlite");
+        intent_paths(dir.path(), &older, &original);
+        intent_paths(dir.path(), &newer, &original);
+
+        let schema = recover_pending_restore(dir.path(), &db).await.unwrap();
+        assert!(schema.is_some());
+        assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+        assert!(older.exists(), "被替换的旧 staged 文件不做处理");
+        assert!(!newer.exists(), "新的 staged 文件被切换进主库");
+        assert!(!dir.path().join("restore-intent.json").exists());
+    }
 }
+
