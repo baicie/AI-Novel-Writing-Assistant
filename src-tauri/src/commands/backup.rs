@@ -363,7 +363,9 @@ mod tests {
     }
 
     async fn titles(path: &Path) -> Vec<String> {
-        let kernel = novel_storage_sqlite::SqliteKernel::open(path).await.unwrap();
+        let kernel = novel_storage_sqlite::SqliteKernel::open(path)
+            .await
+            .unwrap();
         let novels = novel_application::NovelRepository::list_novels(&kernel)
             .await
             .unwrap();
@@ -507,4 +509,3 @@ mod tests {
         assert!(!dir.path().join("restore-intent.json").exists());
     }
 }
-

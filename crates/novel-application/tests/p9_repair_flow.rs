@@ -712,7 +712,11 @@ async fn data_integrity_hold_is_never_resolved_through_quality_debt() {
     assert_eq!(detail.pause_signal.as_deref(), Some("data_integrity"));
     assert!(detail.legal_actions.contains(&"cancel".to_string()));
     assert!(!detail.legal_actions.contains(&"resume".to_string()));
-    assert!(!detail.legal_actions.contains(&"resume_quality_debt".to_string()));
+    assert!(
+        !detail
+            .legal_actions
+            .contains(&"resume_quality_debt".to_string())
+    );
 
     let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
         .await
@@ -730,7 +734,9 @@ async fn data_integrity_hold_is_never_resolved_through_quality_debt() {
         .await
         .unwrap();
     assert!(
-        !after.legal_actions.contains(&"resume_quality_debt".to_string()),
+        !after
+            .legal_actions
+            .contains(&"resume_quality_debt".to_string()),
         "even with every reminder confirmed, a data integrity hold must stay closed"
     );
     let refused = runtime
@@ -787,7 +793,11 @@ async fn cancelled_quality_stop_cannot_be_resumed() {
         .await
         .unwrap();
     assert_eq!(detail.status, "cancelled");
-    assert!(!detail.legal_actions.contains(&"resume_quality_debt".to_string()));
+    assert!(
+        !detail
+            .legal_actions
+            .contains(&"resume_quality_debt".to_string())
+    );
 }
 
 #[tokio::test]
@@ -816,12 +826,22 @@ async fn quality_debt_resume_is_idempotent_and_closed_afterwards() {
         .clone();
     let accepted = runtime
         .director
-        .accept_quality_debt(&run_id, &first_debt.id, first_debt.decision_version, "作者确认保留")
+        .accept_quality_debt(
+            &run_id,
+            &first_debt.id,
+            first_debt.decision_version,
+            "作者确认保留",
+        )
         .await
         .unwrap();
     let stale = runtime
         .director
-        .accept_quality_debt(&run_id, &first_debt.id, first_debt.decision_version, "重复确认")
+        .accept_quality_debt(
+            &run_id,
+            &first_debt.id,
+            first_debt.decision_version,
+            "重复确认",
+        )
         .await;
     assert!(stale.is_err(), "a stale decision version must be rejected");
     assert_eq!(accepted.decision_version, first_debt.decision_version + 1);
@@ -869,4 +889,3 @@ async fn quality_debt_resume_is_idempotent_and_closed_afterwards() {
         "a second resume with a fresh command id must be refused"
     );
 }
-
