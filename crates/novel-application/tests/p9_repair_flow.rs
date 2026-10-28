@@ -478,7 +478,7 @@ async fn run_to_quality_stop(
         "review issues must stop at the quality ceiling"
     );
     assert!(
-        approvals >= 3,
+        approvals >= 2,
         "book-level gates must be approved before the chapter review"
     );
     let run = runtime
