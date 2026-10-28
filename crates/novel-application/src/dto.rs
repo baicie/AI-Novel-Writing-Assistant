@@ -273,6 +273,8 @@ pub struct RunDetailView {
     pub control_version: i64,
     pub cursor_step_id: Option<String>,
     pub pause_kind: Option<String>,
+    /// 暂停信号名称，例如 safety / data_integrity / provider_unavailable。
+    pub pause_signal: Option<String>,
     pub pause_reason: Option<String>,
     pub failure_reason: Option<String>,
     pub gate: Option<RunGateView>,

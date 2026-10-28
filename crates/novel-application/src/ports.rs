@@ -1111,6 +1111,15 @@ pub trait WorkflowRepository: Send + Sync {
         intent: &str,
         now_ms: i64,
     ) -> Result<CommandOutcome, PortError>;
+    /// 作者逐条处理完正文质量提醒后，从质量修复上限停点继续这次创作。
+    async fn resume_accepting_quality_debt(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
     async fn cancel(
         &self,
         command_id: &str,

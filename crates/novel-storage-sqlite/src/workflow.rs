@@ -1438,6 +1438,133 @@ impl WorkflowRepository for SqliteKernel {
         Ok(outcome)
     }
 
+    async fn resume_accepting_quality_debt(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(existing) = lookup_command(&mut tx, command_id, request_hash).await? {
+            return Ok(existing);
+        }
+        let current = load_control(&mut tx, run_id)
+            .await?
+            .ok_or_else(|| PortError::NotFound("没有找到这次创作。".into()))?;
+        if current.control.status != novel_domain::RunStatus::Paused {
+            return Err(PortError::Conflict("现在还不能继续这次创作。".into()));
+        }
+        // 只放行“质量问题停点”（Safety 信号），数据完整性停点仍然必须人工判断。
+        let quality_stop = current.control.pause.as_ref().is_some_and(|pause| {
+            pause.kind == novel_domain::PauseKind::Safety
+                && pause.signal == novel_domain::StopSignalKind::Safety
+        });
+        if !quality_stop {
+            return Err(PortError::Conflict(
+                "这次暂停需要人工判断，不能用质量提醒确认继续。".into(),
+            ));
+        }
+        // 只有确有审校问题留档的停点才走这条路径，其它安全暂停仍然必须人工查看。
+        let review = sqlx::query(
+            "SELECT payload_json, scope FROM workflow_artifact
+             WHERE run_id = ? AND type = 'consistency_review'
+             ORDER BY version DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        let Some(review) = review else {
+            return Err(PortError::Conflict(
+                "这次暂停不是正文质量问题，请人工查看后再决定。".into(),
+            ));
+        };
+        let review_payload: String = review.try_get("payload_json").map_err(map_sql)?;
+        let review_scope: String = review.try_get("scope").map_err(map_sql)?;
+        let issues = serde_json::from_str::<serde_json::Value>(&review_payload)
+            .ok()
+            .and_then(|value| value.get("issues").and_then(serde_json::Value::as_i64))
+            .unwrap_or(0);
+        if issues <= 0 {
+            return Err(PortError::Conflict(
+                "这次暂停不是正文质量问题，请人工查看后再决定。".into(),
+            ));
+        }
+        let open: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chapter_quality_debt
+             WHERE run_id = ? AND status NOT IN ('accepted', 'resolved')",
+        )
+        .bind(run_id)
+        .fetch_one(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        if open > 0 {
+            return Err(PortError::Conflict(format!(
+                "还有 {open} 条质量提醒没有确认，请逐条处理后再继续。"
+            )));
+        }
+        let notes: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM workflow_artifact WHERE run_id = ? AND type = 'repair_notes'
+             ORDER BY version DESC LIMIT 1",
+        )
+        .bind(run_id)
+        .fetch_optional(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        if notes.is_none() {
+            let payload = serde_json::json!({
+                "status": "skipped_by_author",
+                "issues": issues,
+                "reason": "作者逐条确认了质量提醒，本次跳过自动修复。",
+            })
+            .to_string();
+            insert_artifact(
+                &mut tx,
+                &format!("repair-skip-{run_id}-{now_ms}"),
+                &current.novel_id,
+                Some(run_id),
+                "repair_notes",
+                &review_scope,
+                "confirmed",
+                false,
+                &payload,
+                &sha256_hex(payload.as_bytes()),
+                now_ms,
+            )
+            .await?;
+        }
+        let attempt = latest_attempt(&mut tx, run_id)
+            .await?
+            .ok_or_else(|| PortError::Conflict("没有可以确认的候选正文。".into()))?;
+        sqlx::query(
+            "UPDATE workflow_step_attempt SET resolution = 'accept', phase = 'interrupted', updated_at = ? WHERE id = ?",
+        )
+        .bind(now_ms)
+        .bind(&attempt.id)
+        .execute(tx.deref_mut())
+        .await
+        .map_err(map_sql)?;
+        let outcome = transition_command(
+            &mut tx,
+            &current,
+            run_id,
+            ControlEvent::Resume,
+            "run_resumed_with_quality_debt",
+            Some(&attempt.step_id),
+            &serde_json::json!({ "intent": "accept", "reason": reason }).to_string(),
+            command_id,
+            request_hash,
+            "resume_quality_debt",
+            now_ms,
+            true,
+        )
+        .await?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(outcome)
+    }
+
     async fn cancel(
         &self,
         command_id: &str,

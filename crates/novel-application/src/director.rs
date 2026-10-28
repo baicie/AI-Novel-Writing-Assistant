@@ -713,6 +713,40 @@ impl DirectorService {
             .await
     }
 
+    /// 作者逐条处理完正文质量提醒后，从质量修复上限停点继续这次创作。
+    /// 与普通恢复分开：只有确有审校问题留档、且质量提醒都已被作者处理时才放行。
+    pub async fn resume_accepting_quality_debt(
+        &self,
+        command_id: &str,
+        run_id: &str,
+        reason: &str,
+    ) -> Result<CommandOutcome, AppError> {
+        if command_id.trim().is_empty() {
+            return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
+        }
+        let reason = reason.trim();
+        if reason.is_empty() {
+            return Err(AppError::validation(
+                "请说明为什么可以带着这些质量提醒继续。",
+            ));
+        }
+        let request_hash = json_hash(&RunCommandHash {
+            run_id,
+            kind: "resume_quality_debt",
+            intent: Some(reason),
+        })?;
+        Ok(self
+            .runs
+            .resume_accepting_quality_debt(
+                command_id,
+                &request_hash,
+                run_id,
+                reason,
+                self.clock.now_ms(),
+            )
+            .await?)
+    }
+
     pub async fn replay(
         &self,
         run_id: &str,
@@ -810,11 +844,41 @@ impl DirectorService {
             .pause
             .as_ref()
             .map(|pause| pause_kind_name(pause.kind));
+        let pause_signal = control
+            .pause
+            .as_ref()
+            .map(|pause| stop_signal_name(pause.signal));
         let pause_reason = control.pause.as_ref().map(|pause| pause.reason.clone());
         let gate = control.gate.as_ref().map(|gate| RunGateView {
             id: gate.id.clone(),
             artifact_types: gate.artifact_types.clone(),
         });
+        let safety_pause = control.status == novel_domain::RunStatus::Paused
+            && control
+                .pause
+                .as_ref()
+                .is_some_and(|pause| pause.kind == novel_domain::PauseKind::Safety);
+        let quality_stop = safety_pause
+            && control
+                .pause
+                .as_ref()
+                .is_some_and(|pause| pause.signal == novel_domain::StopSignalKind::Safety);
+        // 质量修复上限停点：审校确实留下了问题，且每条问题都已被作者处理过。
+        let review_issues = artifacts
+            .iter()
+            .filter(|artifact| artifact.artifact_type == "consistency_review")
+            .max_by_key(|artifact| artifact.version)
+            .and_then(|artifact| {
+                serde_json::from_str::<serde_json::Value>(&artifact.payload_json).ok()
+            })
+            .and_then(|payload| payload.get("issues").and_then(serde_json::Value::as_i64))
+            .unwrap_or(0);
+        let open_debt = quality_debt
+            .iter()
+            .filter(|item| item.run_id == run_id)
+            .filter(|item| !matches!(item.status.as_str(), "accepted" | "resolved"))
+            .count();
+        let quality_stop_ready = quality_stop && review_issues > 0 && open_debt == 0;
         let mut legal_actions = Vec::new();
         match control.status {
             novel_domain::RunStatus::WaitingApproval if control.gate.is_some() => {
@@ -824,12 +888,13 @@ impl DirectorService {
                         .map(str::to_string),
                 );
             }
-            novel_domain::RunStatus::Paused
-                if control
-                    .pause
-                    .as_ref()
-                    .is_none_or(|pause| pause.kind != novel_domain::PauseKind::Safety) =>
-            {
+            novel_domain::RunStatus::Paused if safety_pause => {
+                legal_actions.push("cancel".to_string());
+                if quality_stop_ready {
+                    legal_actions.push("resume_quality_debt".to_string());
+                }
+            }
+            novel_domain::RunStatus::Paused => {
                 legal_actions.extend(["resume", "cancel"].into_iter().map(str::to_string));
             }
             novel_domain::RunStatus::Running | novel_domain::RunStatus::Queued => {
@@ -846,6 +911,7 @@ impl DirectorService {
             control_version: control.version,
             cursor_step_id: control.cursor_step_id,
             pause_kind: pause_kind.map(str::to_string),
+            pause_signal: pause_signal.map(str::to_string),
             pause_reason,
             failure_reason: control.failure_reason,
             gate,
@@ -1136,6 +1202,21 @@ struct RunCommandHash<'a> {
     run_id: &'a str,
     kind: &'a str,
     intent: Option<&'a str>,
+}
+
+fn stop_signal_name(kind: novel_domain::StopSignalKind) -> &'static str {
+    use novel_domain::StopSignalKind;
+    match kind {
+        StopSignalKind::Budget => "budget",
+        StopSignalKind::DataIntegrity => "data_integrity",
+        StopSignalKind::ProviderUnavailable => "provider_unavailable",
+        StopSignalKind::ApprovalRequired => "approval_required",
+        StopSignalKind::MigrationReviewRequired => "migration_review_required",
+        StopSignalKind::Replan => "replan",
+        StopSignalKind::Safety => "safety",
+        StopSignalKind::NoUsableContent => "no_usable_content",
+        StopSignalKind::ManualRecovery => "manual_recovery",
+    }
 }
 
 fn pause_kind_name(kind: PauseKind) -> &'static str {

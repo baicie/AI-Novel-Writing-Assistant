@@ -375,3 +375,314 @@ async fn deterministic_quality_benchmark_clean_repair_and_residual() {
             .count()
     );
 }
+
+async fn run_to_quality_stop(
+    outputs: Vec<(&'static str, String)>,
+    repair_budget: Option<u8>,
+) -> (
+    Arc<SqliteKernel>,
+    Runtime,
+    String,
+    String,
+    String,
+    Arc<ScriptedLlm>,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.keep().join("quality-stop.sqlite");
+    let kernel = Arc::new(SqliteKernel::open(&path).await.unwrap());
+    let llm = Arc::new(ScriptedLlm::new(outputs));
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm: llm.clone(),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(novel_application::NoModelSecrets),
+        owner: "p157-quality-stop-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime
+        .director
+        .create_novel("质量停点书", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "p157-quality-stop-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(512),
+            context_token_budget: Some(24_000),
+            max_automatic_retries: 1,
+            repair_budget,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+        })
+        .await
+        .unwrap();
+    let mut status = "queued".to_string();
+    let mut approvals = 0;
+    for _ in 0..80 {
+        match runtime.worker.tick().await.unwrap() {
+            TickOutcome::Advanced {
+                status: next,
+                run_id,
+            } => {
+                status = next;
+                if status == "paused" || status == "succeeded" {
+                    break;
+                }
+                if status == "waiting_approval" {
+                    let detail = runtime
+                        .director
+                        .get_run_detail(&novel.id, &run_id)
+                        .await
+                        .unwrap();
+                    let chapter_gate = detail.gate.as_ref().is_some_and(|gate| {
+                        gate.artifact_types
+                            .iter()
+                            .any(|item| item == "chapter_approval")
+                    });
+                    assert!(
+                        !chapter_gate,
+                        "quality ceiling must pause before the chapter approval gate"
+                    );
+                    runtime
+                        .director
+                        .approve(&format!("p157-book-gate-{approvals}"), &run_id)
+                        .await
+                        .unwrap();
+                    approvals += 1;
+                }
+            }
+            TickOutcome::Idle => break,
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+    assert_eq!(
+        status, "paused",
+        "review issues must stop at the quality ceiling"
+    );
+    assert!(
+        approvals >= 3,
+        "book-level gates must be approved before the chapter review"
+    );
+    let run = runtime
+        .director
+        .list_runs(&novel.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    (kernel, runtime, novel.id, chapter.id, run.id, llm)
+}
+
+async fn tick_until_settled(runtime: &Runtime) -> String {
+    let mut status = String::new();
+    for _ in 0..40 {
+        match runtime.worker.tick().await.unwrap() {
+            TickOutcome::Advanced { status: next, .. } => {
+                status = next;
+                if status == "waiting_approval" || status == "succeeded" || status == "paused" {
+                    break;
+                }
+            }
+            TickOutcome::Idle => break,
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+    status
+}
+
+#[tokio::test]
+async fn quality_stop_requires_debt_decisions_and_then_reaches_the_approval_gate() {
+    let (kernel, runtime, novel_id, chapter_id, run_id, llm) = run_to_quality_stop(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            (
+                "STEP:chapter_repair",
+                "修复后的候选正文：林动按时间线在夜战后才进入祖祠。".into(),
+            ),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        Some(1),
+    )
+    .await;
+
+    let detail = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.pause_kind.as_deref(), Some("safety"));
+    assert_eq!(detail.pause_signal.as_deref(), Some("safety"));
+    assert!(detail.legal_actions.contains(&"cancel".to_string()));
+    assert!(!detail.legal_actions.contains(&"resume".to_string()));
+    assert!(
+        !detail
+            .legal_actions
+            .contains(&"resume_quality_debt".to_string())
+    );
+
+    let plain = runtime
+        .director
+        .resume("p157-resume-plain", &run_id, true)
+        .await;
+    assert!(
+        plain.is_err(),
+        "safety pauses must not accept a plain resume"
+    );
+
+    let blocked = runtime
+        .director
+        .resume_accepting_quality_debt("p157-resume-debt-blocked", &run_id, "作者逐条确认")
+        .await;
+    assert!(
+        blocked.is_err(),
+        "open quality reminders must block the author from continuing"
+    );
+
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    let open: Vec<_> = debts.iter().filter(|item| item.run_id == run_id).collect();
+    assert!(!open.is_empty(), "residual review issues must stay as debt");
+    for debt in &open {
+        runtime
+            .director
+            .accept_quality_debt(&run_id, &debt.id, debt.decision_version, "作者确认保留")
+            .await
+            .unwrap();
+    }
+
+    let detail = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert!(
+        detail
+            .legal_actions
+            .contains(&"resume_quality_debt".to_string())
+    );
+
+    runtime
+        .director
+        .resume_accepting_quality_debt("p157-resume-debt", &run_id, "作者逐条确认这些问题")
+        .await
+        .unwrap();
+    let status = tick_until_settled(&runtime).await;
+    assert_eq!(status, "waiting_approval");
+
+    let detail = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert!(detail.legal_actions.contains(&"confirm".to_string()));
+    runtime
+        .director
+        .approve("p157-approve-after-debt", &run_id)
+        .await
+        .unwrap();
+    let status = tick_until_settled(&runtime).await;
+    assert_eq!(status, "succeeded");
+
+    let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    assert_eq!(saved.official_version, 1);
+    assert!(saved.content.contains("修复后的候选正文"));
+    assert_eq!(
+        llm.prompts()
+            .iter()
+            .filter(|prompt| prompt.contains("STEP:chapter_repair"))
+            .count(),
+        1,
+        "bounded repair must call the model once"
+    );
+}
+
+#[tokio::test]
+async fn zero_repair_budget_records_a_skip_decision_instead_of_a_dead_end() {
+    let (kernel, runtime, novel_id, chapter_id, run_id, llm) = run_to_quality_stop(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "不应被调用的修复候选".into()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        None,
+    )
+    .await;
+
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    for debt in debts.iter().filter(|item| item.run_id == run_id) {
+        runtime
+            .director
+            .accept_quality_debt(&run_id, &debt.id, debt.decision_version, "作者确认保留")
+            .await
+            .unwrap();
+    }
+    runtime
+        .director
+        .resume_accepting_quality_debt("p157-resume-debt-budget-zero", &run_id, "作者接受现状")
+        .await
+        .unwrap();
+    let status = tick_until_settled(&runtime).await;
+    assert_eq!(status, "waiting_approval");
+
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel_id)
+        .await
+        .unwrap();
+    let notes: Vec<_> = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "repair_notes")
+        .collect();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].payload_json.contains("skipped_by_author"));
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_repair")),
+        "zero repair budget must never call the repair model"
+    );
+
+    runtime
+        .director
+        .approve("p157-approve-budget-zero", &run_id)
+        .await
+        .unwrap();
+    let status = tick_until_settled(&runtime).await;
+    assert_eq!(status, "succeeded");
+    let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    assert_eq!(saved.official_version, 1);
+    assert!(saved.content.contains("原始候选正文"));
+}

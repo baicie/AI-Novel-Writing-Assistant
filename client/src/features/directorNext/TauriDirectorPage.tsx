@@ -53,6 +53,7 @@ import {
   openRun,
   replayRunEvents,
   resumeRun,
+  resumeRunWithQualityDebt,
   subscribeRunWithCleanup,
   type CandidateEditDraftView,
   type GenerationEvent,
@@ -574,9 +575,18 @@ export default function TauriDirectorPage() {
     onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "恢复失败。"),
   });
 
+  const resumeWithDebt = useMutation({
+    mutationFn: () => resumeRunWithQualityDebt({ runId, commandId: commandId("director-resume-debt"), reason: "作者逐条确认了质量问题，保留记录并继续这一章。" }),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["tauri-director", novelId] }),
+    onError: (cause: unknown) => setError(cause instanceof Error ? cause.message : "继续失败，请刷新后重试。"),
+  });
+
   const gate = detail?.gate;
   const draftArtifacts = useMemo(() => (detail?.artifacts ?? []).filter(artifact => artifact.status === "draft"), [detail?.artifacts]);
   const completed = detail?.status === "succeeded";
+  const openDebtCount = (detail?.qualityDebt ?? [])
+    .filter(item => String(item.runId ?? "") === runId)
+    .filter(item => !["accepted", "resolved"].includes(String(item.status))).length;
 
   return (
     <div data-tauri-director-page className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col gap-4 p-4">
@@ -642,6 +652,8 @@ export default function TauriDirectorPage() {
                 {detail?.legalActions?.includes("regenerate") ? <Button data-testid="director-regenerate-button" variant="outline" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>{regenerate.isPending ? "重新生成中…" : "重新生成候选"}</Button> : null}
                 {chapterApprovalGate && latestCandidate ? <Button data-testid="director-edit-candidate-button" variant="outline" onClick={() => setEditingCandidate(true)}>{editingCandidate ? "正在编辑候选" : "编辑候选正文"}</Button> : null}
                 {detail?.legalActions?.includes("resume") && detail.latestCandidate ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
+                {detail?.legalActions?.includes("resume_quality_debt") ? <Button data-testid="director-resume-quality-debt" disabled={resumeWithDebt.isPending} onClick={() => resumeWithDebt.mutate()}>{resumeWithDebt.isPending ? "继续中…" : "保留这些问题并继续"}</Button> : null}
+                {detail?.pauseSignal === "safety" && openDebtCount > 0 ? <p data-testid="director-quality-debt-hint" className="basis-full text-xs text-muted-foreground">正文有 {openDebtCount} 条质量问题待确认：在下面的质量问题里逐条处理后，就能继续这一章。</p> : null}
                 {detail?.legalActions?.includes("cancel") ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
                 {completed ? <Button variant="ghost" onClick={() => { setSelectedRunId(""); setChapterId(""); }}>再创建一次</Button> : null}

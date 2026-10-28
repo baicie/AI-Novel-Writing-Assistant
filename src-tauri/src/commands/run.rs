@@ -148,6 +148,20 @@ pub async fn resume_run(
 }
 
 #[tauri::command]
+pub async fn resume_run_with_quality_debt(
+    state: State<'_, AppState>,
+    command_id: String,
+    run_id: String,
+    reason: String,
+) -> Result<CommandOutcome, AppError> {
+    state
+        .runtime
+        .director
+        .resume_accepting_quality_debt(&command_id, &run_id, &reason)
+        .await
+}
+
+#[tauri::command]
 pub async fn replay_run(
     state: State<'_, AppState>,
     run_id: String,

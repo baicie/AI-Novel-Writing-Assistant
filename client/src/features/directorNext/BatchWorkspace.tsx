@@ -28,6 +28,7 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
   const [batches, setBatches] = useState<BatchRunView[]>([]);
   const [batchId, setBatchId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [repairBudget, setRepairBudget] = useState(1);
   const createCommandId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,7 +92,7 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
       promptVersions: { chapter_draft: "chapter-draft-v2" },
       tokenBudget: null,
       maxAutomaticRetries: 0,
-      repairBudget: 0,
+      repairBudget,
       endpoint: model.endpoint,
       allowLocalhostHttp: model.allowLocalhostHttp,
     });
@@ -126,7 +127,19 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          发现问题时
+          <select
+            data-testid="batch-repair-budget"
+            className="rounded-md bg-background px-2 py-1 text-xs"
+            value={repairBudget}
+            onChange={(event) => setRepairBudget(Number(event.target.value))}
+          >
+            <option value={1}>自动修复一次再给我确认</option>
+            <option value={0}>只审校，由我决定</option>
+          </select>
+        </label>
         <Button data-testid="batch-create" disabled={!canStart} onClick={() => void create()}>
           {busy ? "处理中…" : `开始连续创作（${selected.length} 章）`}
         </Button>

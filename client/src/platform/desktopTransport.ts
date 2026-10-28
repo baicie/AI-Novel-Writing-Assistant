@@ -274,6 +274,7 @@ export interface RunDetailView {
   controlVersion: number;
   cursorStepId?: string | null;
   pauseKind?: string | null;
+  pauseSignal?: string | null;
   pauseReason?: string | null;
   failureReason?: string | null;
   gate?: RunGateView | null;
@@ -774,6 +775,14 @@ export function resumeRun(input: {
   acceptCandidate: boolean;
 }): Promise<CommandOutcome> {
   return invoke("resume_run", input);
+}
+
+export function resumeRunWithQualityDebt(input: {
+  runId: string;
+  commandId: string;
+  reason: string;
+}): Promise<CommandOutcome> {
+  return invoke("resume_run_with_quality_debt", input);
 }
 
 export function replayRunEvents(input: {

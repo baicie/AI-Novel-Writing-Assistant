@@ -75,6 +75,7 @@
     "allow-cancel-generation",
     "allow-smoke-channel-message",
     "allow-resume-run",
+    "allow-resume-run-with-quality-debt",
     "allow-replay-run",
     "allow-subscribe-run",
     "allow-get-model-setup",
