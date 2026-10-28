@@ -3,8 +3,9 @@ import path from "node:path";
 
 const dataDir = process.env.BIZ_NOVEL_E2E_DATA_DIR;
 const reportPath = process.env.BIZ_NOVEL_E2E_PERF_REPORT ?? path.join(dataDir, "perf-report.json");
-const CHAPTERS = 1000;
-const KNOWLEDGE_DOCS = 200;
+const CHAPTERS = Number(process.env.BIZ_NOVEL_E2E_PERF_CHAPTERS ?? 1000);
+const KNOWLEDGE_DOCS = Number(process.env.BIZ_NOVEL_E2E_PERF_DOCS ?? 200);
+const NOVEL_TITLE = `性能基准${CHAPTERS}章`;
 
 async function invoke(command, args = {}) {
   return browser.execute((name, payload) => window.__TAURI__.core.invoke(name, payload), command, args);
@@ -49,9 +50,9 @@ function paragraph(seed) {
 describe("Native 1000 chapter desktop benchmark", () => {
   it("seeds a long-form library and records desktop latencies", async () => {
     const novels = await invoke("list_novels");
-    let novel = novels.find((item) => item.title === "性能基准一千章");
+    let novel = novels.find((item) => item.title === NOVEL_TITLE);
     if (!novel) {
-      novel = await invoke("create_novel", { title: "性能基准一千章", description: "P15.8 桌面性能基准" });
+      novel = await invoke("create_novel", { title: NOVEL_TITLE, description: "P15.8 桌面性能基准" });
     }
     let chapters = await invoke("list_chapters", { novelId: novel.id });
     const seedStarted = Date.now();
@@ -95,6 +96,7 @@ describe("Native 1000 chapter desktop benchmark", () => {
 
     const sampleChapter = chapters[Math.floor(chapters.length / 2)];
     const report = {
+      targetChapters: CHAPTERS,
       chapters: chapters.length,
       knowledgeDocs: indexed,
       characters: chapters.reduce((sum, item) => sum + String(item.content ?? "").length, 0),
