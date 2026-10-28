@@ -45,3 +45,16 @@ novel-prompt = { path = "crates/novel-prompt" }
 novel-platform = { path = "crates/novel-platform" }
 novel-testkit = { path = "crates/novel-testkit" }
 novel-http = { path = "crates/novel-http" }
+
+# ---- 构建产物瘦身（2026-10-28）----
+# 背景：target/debug/deps 反复膨胀，两天内从 23 GiB 涨到 31 GiB 以上，
+#       增长几乎全部来自第三方依赖携带的完整 DWARF 调试信息。
+# 做法：只对第三方依赖关闭调试信息；本 workspace 自己的 crate 仍保留完整调试信息，
+#       所以调试自家代码、看自家断点不受影响，仅依赖内部栈回溯不再带行号。
+[profile.dev.package."*"]
+debug = false
+
+# cargo test 的 test profile 继承自 dev；显式再声明一次，确保 CI/本地测试同样生效。
+[profile.test.package."*"]
+debug = false
+
