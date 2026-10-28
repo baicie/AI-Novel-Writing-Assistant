@@ -492,11 +492,13 @@ mod tests {
         let db = dir.path().join("novel.sqlite");
         let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
         seed(&live, "n-live", "原书").await;
-        live.pool().close().await;
         let older = dir.path().join("restore-staged-old.sqlite");
         let newer = dir.path().join("restore-staged-new.sqlite");
-        std::fs::copy(&db, &older).unwrap();
-        std::fs::copy(&db, &newer).unwrap();
+        // 用 SQLite 备份接口而不是文件拷贝：拷贝主库文件会漏掉还没 checkpoint 的 -wal，
+        // 得到的 staged 库可能连 schema 都没有，用例就会随机失败。
+        live.backup_to(&older).await.unwrap();
+        live.backup_to(&newer).await.unwrap();
+        live.pool().close().await;
         let original = dir.path().join("pre-restore-live.sqlite");
         intent_paths(dir.path(), &older, &original);
         intent_paths(dir.path(), &newer, &original);
@@ -543,9 +545,9 @@ mod tests {
         let db = dir.path().join("novel.sqlite");
         let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
         seed(&live, "n-live", "原书").await;
-        live.pool().close().await;
         let staged = dir.path().join("restore-staged.sqlite");
-        std::fs::copy(&db, &staged).unwrap();
+        live.backup_to(&staged).await.unwrap();
+        live.pool().close().await;
         let original = dir.path().join("pre-restore-live.sqlite");
         let marker = intent_paths(dir.path(), &staged, &original);
 
