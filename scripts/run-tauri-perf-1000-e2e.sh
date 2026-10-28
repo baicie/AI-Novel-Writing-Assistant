@@ -100,7 +100,7 @@ for SIZE in $SIZES; do
 
   COLD="$DIR/cold-start.jsonl"
   : >"$COLD"
-  for run in 1 2 3; do
+  for run in $(seq 1 "${BIZ_NOVEL_PERF_COLD_RUNS:-3}"); do
     MARKER="$DIR/startup-$run.json"
     rm -f "$MARKER"
     START_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
