@@ -138,7 +138,7 @@ bash scripts/audit-tauri-release.sh                             PASS
 备份写入中 SIGKILL、VACUUM 中途失败、磁盘空间不足、只读目录、备份与恢复竞争、两个 App 实例、
 "备份来自更新版本"在启动期的拒绝路径（`request_restore` 侧已拒绝）。
 
-## G3 补充 — 100 / 500 / 1000 三档采样（$（date +%H:%M））
+## G3 补充 — 100 / 500 / 1000 三档采样
 
 - 三档都完成了真实采样：章节列表 P95 56 / 242 / 140 ms，打开章节 P95 46 / 13 / 21 ms，
   FTS P95 1343 / 220 / 207 ms，导出 P50 97 / 42 / 48 ms，备份 P50 501 / 253 / 294 ms，
@@ -146,3 +146,34 @@ bash scripts/audit-tauri-release.sh                             PASS
 - 冷启动 228–913 ms，其中数据库迁移与运行时就绪只有 4–14 ms；RSS 54–92 MB，空闲 CPU ≈0。
 - 100 章档的导出 / 备份 / FTS P95 尖峰与规模不成比例，判定为首次调用冷态；冷热分离统计留到下一轮。
 - 详细表格与未覆盖项见 `docs/tauri-migration/P15_8_PERFORMANCE.md`。
+## G4 — 共享 Fixture 作者旅程（进行中：准备与连续创作已通过）
+
+### 已交付
+
+- `scripts/run-tauri-author-journey-e2e.sh`：同一数据目录、同一 Novel ID 的多阶段旅程，
+  阶段名可用 `BIZ_NOVEL_JOURNEY_PHASES` 选择，`BIZ_NOVEL_JOURNEY_KEEP=1` 保留 fixture 供后续阶段。
+- 阶段 1 `journey-prepare`：通过产品命令创建一部小说、一个世界观、三名人物、两卷、10 章。
+- 阶段 2 `journey-batch`（审校必报问题的场景）：连续创作 10 章，逐章经历"审校发现问题 → 有界修复 →
+  质量上限停点 → 逐条确认质量提醒 → 保留问题继续 → 章节确认 → 正式提交"，最后断言：
+  批次 `completed`、10 项全部 `succeeded`、每章 `officialVersion >= 1` 且正文非空、每个 run 恰好 1 份
+  `chapter_commit` 产物（共 10 份，无重复提交）。
+
+### 实测
+
+```text
+[journey] phase: prepare
+[journey] phase: batch   → 1 passing（批次完成，10 章全部正式提交）
+```
+
+同一 fixture 上重复执行阶段 2 是幂等的（脚本复用已完成批次并只做校验，1.5s 通过）。
+
+### 过程中确认的一件事
+
+工作流命令按 `command_id` 去重：阶段脚本最初用固定 id 反复批准，第二次起被当成重放而静默不生效。
+产品界面每��操作都会生成新的 `command_id`（`prefix:时间戳:uuid`），所以这不是产品缺陷；
+旅程脚本已改为按控制版本生成唯一 id。
+
+### 未完成
+
+结构化记忆（别名/地点/生死/关系/冲突/As-Of）、编辑与历史（草稿、正式保存、Diff、恢复、双窗口）、
+知识与导出、备份恢复重启这几段尚未接入同一 fixture。
