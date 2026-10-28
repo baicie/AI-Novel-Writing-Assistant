@@ -26,6 +26,7 @@
     "test:batch-restart": "wdio run wdio.conf.mjs --spec specs/batch-restart.spec.mjs",
     "test:task-center": "wdio run wdio.conf.mjs --spec specs/task-center.spec.mjs",
     "test:index-retry": "wdio run wdio.conf.mjs --spec specs/index-retry.spec.mjs",
+    "test:perf-1000": "wdio run wdio.conf.mjs --spec specs/perf-1000.spec.mjs",
     "test:index-crash-prepare": "wdio run wdio.conf.mjs --spec specs/index-crash-prepare.spec.mjs",
     "test:index-crash-claim": "wdio run wdio.conf.mjs --spec specs/index-crash-claim.spec.mjs",
     "test:index-crash-restart": "wdio run wdio.conf.mjs --spec specs/index-crash-restart.spec.mjs",

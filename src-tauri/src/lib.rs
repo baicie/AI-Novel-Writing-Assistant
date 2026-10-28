@@ -71,6 +71,8 @@ pub fn run() {
                 }
             };
             let llm: Arc<dyn novel_llm::LlmProvider> = llm_provider();
+            #[cfg(feature = "e2e")]
+            let boot_started_ms = novel_platform::now_ms();
             let (kernel, runtime) = tauri::async_runtime::block_on(async {
                 crate::commands::backup::recover_pending_restore(&data_dir, &db_path)
                     .await
@@ -120,6 +122,20 @@ pub fn run() {
                 llm,
                 cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
             });
+
+            // 性能采样用：数据库迁移与运行时就绪后写出时间戳，供外部进程测量冷启动。
+            #[cfg(feature = "e2e")]
+            if let Some(path) = std::env::var_os("BIZ_NOVEL_E2E_STARTUP_MARKER") {
+                let ready_ms = novel_platform::now_ms();
+                let payload = serde_json::json!({
+                    "bootStartedAtMs": boot_started_ms,
+                    "readyAtMs": ready_ms,
+                    "initMs": ready_ms - boot_started_ms,
+                    "dbPath": db_path.display().to_string(),
+                    "pid": std::process::id(),
+                });
+                let _ = std::fs::write(std::path::PathBuf::from(path), payload.to_string());
+            }
 
             // E2E 构建可以缩短过期租约的回收间隔，生产构建恒为 30 秒。
             let recover_secs = {

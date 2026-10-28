@@ -62,3 +62,10 @@ Job ID 不变、claim epoch 单调增长（两次递增）、旧租约被回收�
 ```text
 cargo test -p novel-application --test p9_repair_flow   9 passed / 0 failed
 ```
+## G3 — 1000 章桌面性能（本轮已交付，单档）
+
+- 真实数据：1000 章 / 478,984 字 / 1,436,952 字节正文 / SQLite 22.9 MiB / 200 篇知识文档。
+- 关键数字（P50 / P95）：章节列表 11 / 56 ms，打开章节 1 / 2 ms，FTS 11 / 61 ms，全书导出 14 / 15 ms，
+  备份 89 ms；冷启动 736 / 1436 / 353 ms（初始化 8–29 ms），RSS 54.8–58.4 MB。
+- 详细方法与未覆盖项见 `docs/tauri-migration/P15_8_PERFORMANCE.md`。
+- 复现：`bash scripts/run-tauri-perf-1000-e2e.sh`（`BIZ_NOVEL_PERF_KEEP=1` 保留报告）。
