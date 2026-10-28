@@ -26,6 +26,7 @@
     "test:batch-restart": "wdio run wdio.conf.mjs --spec specs/batch-restart.spec.mjs",
     "test:task-center": "wdio run wdio.conf.mjs --spec specs/task-center.spec.mjs",
     "test:index-retry": "wdio run wdio.conf.mjs --spec specs/index-retry.spec.mjs",
+    "test:dual-instance": "wdio run wdio.conf.mjs --spec specs/dual-instance.spec.mjs",
     "test:backup-crash": "BIZ_NOVEL_E2E_BACKUP_HOLD=1 wdio run wdio.conf.mjs --spec specs/backup-crash.spec.mjs",
     "test:backup-crash-verify": "wdio run wdio.conf.mjs --spec specs/backup-crash-verify.spec.mjs",
     "test:journey-prepare": "wdio run wdio.conf.mjs --spec specs/journey-prepare.spec.mjs",

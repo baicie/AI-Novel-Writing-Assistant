@@ -303,3 +303,19 @@ test result: ok. 1 passed（9.48s）
 [disk-full] PASS
 ```EOF
 tail -3 docs/tauri-migration/P15_8_PROGRESS.md
+## G2 续 — 两个应用实例同时运行
+
+新增 `dual-instance` 原生用例：同一个数据目录下再拉起第二个应用实例（另一个驱动端口），
+第一个实例继续写知识来源与章节，然后强杀第二个实例。断言：
+
+- 第二个实例能正常起来（说明应用允许同机双实例运行）；
+- 第一实例补写的正文生效，知识检索仍命中；
+- 备份 + 校验仍然成功；
+- 数据库层：该知识来源只有 1 行、状态 `ready`、没有重复分块，`PRAGMA integrity_check = ok`。
+
+```text
+dual-instance → 1 passing（4.2s）
+```
+
+结论：双实例不会产生重复索引或损坏数据库；跨进程写入冲突由 SQLite 与工作流 CAS/租约兜住。EOF
+tail -3 docs/tauri-migration/P15_8_PROGRESS.md
