@@ -686,3 +686,187 @@ async fn zero_repair_budget_records_a_skip_decision_instead_of_a_dead_end() {
     assert_eq!(saved.official_version, 1);
     assert!(saved.content.contains("原始候选正文"));
 }
+
+#[tokio::test]
+async fn data_integrity_hold_is_never_resolved_through_quality_debt() {
+    let (kernel, runtime, novel_id, chapter_id, run_id, _llm) = run_to_quality_stop(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", String::new()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        Some(1),
+    )
+    .await;
+
+    let detail = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.pause_kind.as_deref(), Some("safety"));
+    assert_eq!(detail.pause_signal.as_deref(), Some("data_integrity"));
+    assert!(detail.legal_actions.contains(&"cancel".to_string()));
+    assert!(!detail.legal_actions.contains(&"resume".to_string()));
+    assert!(!detail.legal_actions.contains(&"resume_quality_debt".to_string()));
+
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    for debt in debts.iter().filter(|item| item.run_id == run_id) {
+        runtime
+            .director
+            .accept_quality_debt(&run_id, &debt.id, debt.decision_version, "作者确认保留")
+            .await
+            .unwrap();
+    }
+    let after = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert!(
+        !after.legal_actions.contains(&"resume_quality_debt".to_string()),
+        "even with every reminder confirmed, a data integrity hold must stay closed"
+    );
+    let refused = runtime
+        .director
+        .resume_accepting_quality_debt("p158-integrity-resume", &run_id, "作者想要继续")
+        .await;
+    assert!(refused.is_err(), "data integrity holds must never resume");
+    let plain = runtime
+        .director
+        .resume("p158-integrity-plain", &run_id, true)
+        .await;
+    assert!(plain.is_err());
+}
+
+#[tokio::test]
+async fn cancelled_quality_stop_cannot_be_resumed() {
+    let (kernel, runtime, novel_id, chapter_id, run_id, _llm) = run_to_quality_stop(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "仍有问题的修复候选".into()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        Some(1),
+    )
+    .await;
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    for debt in debts.iter().filter(|item| item.run_id == run_id) {
+        runtime
+            .director
+            .accept_quality_debt(&run_id, &debt.id, debt.decision_version, "作者确认保留")
+            .await
+            .unwrap();
+    }
+    runtime
+        .director
+        .cancel("p158-cancel-before-resume", &run_id)
+        .await
+        .unwrap();
+    let refused = runtime
+        .director
+        .resume_accepting_quality_debt("p158-resume-after-cancel", &run_id, "作者想要继续")
+        .await;
+    assert!(refused.is_err(), "a cancelled run must not resume");
+    let detail = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "cancelled");
+    assert!(!detail.legal_actions.contains(&"resume_quality_debt".to_string()));
+}
+
+#[tokio::test]
+async fn quality_debt_resume_is_idempotent_and_closed_afterwards() {
+    let (kernel, runtime, novel_id, chapter_id, run_id, _llm) = run_to_quality_stop(
+        vec![
+            ("STEP:story_macro", story()),
+            ("STEP:character_cast", cast()),
+            ("STEP:volume_strategy", volume()),
+            ("STEP:chapter_list", chapters()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_repair", "修复后的候选正文".into()),
+            ("STEP:consistency_review", issues()),
+            ("STEP:chapter_draft", "原始候选正文".into()),
+        ],
+        Some(1),
+    )
+    .await;
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel_id, &chapter_id)
+        .await
+        .unwrap();
+    let first_debt = debts
+        .iter()
+        .find(|item| item.run_id == run_id)
+        .expect("quality debt must exist")
+        .clone();
+    let accepted = runtime
+        .director
+        .accept_quality_debt(&run_id, &first_debt.id, first_debt.decision_version, "作者确认保留")
+        .await
+        .unwrap();
+    let stale = runtime
+        .director
+        .accept_quality_debt(&run_id, &first_debt.id, first_debt.decision_version, "重复确认")
+        .await;
+    assert!(stale.is_err(), "a stale decision version must be rejected");
+    assert_eq!(accepted.decision_version, first_debt.decision_version + 1);
+    for debt in debts
+        .iter()
+        .filter(|item| item.run_id == run_id && item.id != first_debt.id)
+    {
+        runtime
+            .director
+            .accept_quality_debt(&run_id, &debt.id, debt.decision_version, "作者确认保留")
+            .await
+            .unwrap();
+    }
+
+    let before = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    let first = runtime
+        .director
+        .resume_accepting_quality_debt("p158-resume-once", &run_id, "作者逐条确认")
+        .await
+        .unwrap();
+    let replay = runtime
+        .director
+        .resume_accepting_quality_debt("p158-resume-once", &run_id, "作者逐条确认")
+        .await
+        .unwrap();
+    assert_eq!(first.status, replay.status);
+    assert!(replay.replayed);
+    let after = runtime
+        .director
+        .get_run_detail(&novel_id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(after.control_version, before.control_version + 1);
+
+    let second = runtime
+        .director
+        .resume_accepting_quality_debt("p158-resume-twice", &run_id, "作者逐条确认")
+        .await;
+    assert!(
+        second.is_err(),
+        "a second resume with a fresh command id must be refused"
+    );
+}
+

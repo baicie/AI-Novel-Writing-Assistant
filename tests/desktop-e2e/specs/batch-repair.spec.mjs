@@ -64,6 +64,12 @@ describe("Native batch bounded repair", () => {
     const continueButton = await $("[data-testid=director-resume-quality-debt]");
     await continueButton.waitForDisplayed({ timeout: 30_000 });
     await continueButton.click();
+    const summary = await $("[data-testid=director-quality-debt-summary]");
+    await summary.waitForDisplayed({ timeout: 10_000 });
+    expect(await summary.getText()).toContain("质量问题");
+    const confirmContinue = await $("[data-testid=director-confirm-resume-quality-debt]");
+    await confirmContinue.waitForDisplayed({ timeout: 10_000 });
+    await confirmContinue.click();
 
     await browser.waitUntil(async () => {
       const current = await invoke("get_run_detail", { novelId: novel.id, runId });

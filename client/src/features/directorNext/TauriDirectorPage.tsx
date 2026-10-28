@@ -124,6 +124,7 @@ export default function TauriDirectorPage() {
   const [events, setEvents] = useState<GenerationEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingCandidate, setEditingCandidate] = useState(false);
+  const [confirmResumeDebt, setConfirmResumeDebt] = useState(false);
   const [candidateEdit, setCandidateEdit] = useState("");
   const [candidateDraftStatus, setCandidateDraftStatus] = useState<"idle" | "saving" | "saved" | "error" | "restored">("idle");
   const [candidateDraftChoices, setCandidateDraftChoices] = useState<CandidateEditDraftView[]>([]);
@@ -587,6 +588,9 @@ export default function TauriDirectorPage() {
   const openDebtCount = (detail?.qualityDebt ?? [])
     .filter(item => String(item.runId ?? "") === runId)
     .filter(item => !["accepted", "resolved"].includes(String(item.status))).length;
+  const decidedDebts = (detail?.qualityDebt ?? [])
+    .filter(item => String(item.runId ?? "") === runId)
+    .filter(item => ["accepted", "resolved"].includes(String(item.status)));
 
   return (
     <div data-tauri-director-page className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col gap-4 p-4">
@@ -652,7 +656,18 @@ export default function TauriDirectorPage() {
                 {detail?.legalActions?.includes("regenerate") ? <Button data-testid="director-regenerate-button" variant="outline" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>{regenerate.isPending ? "重新生成中…" : "重新生成候选"}</Button> : null}
                 {chapterApprovalGate && latestCandidate ? <Button data-testid="director-edit-candidate-button" variant="outline" onClick={() => setEditingCandidate(true)}>{editingCandidate ? "正在编辑候选" : "编辑候选正文"}</Button> : null}
                 {detail?.legalActions?.includes("resume") && detail.latestCandidate ? <Button data-testid="director-resume-button" variant="outline" disabled={resume.isPending} onClick={() => resume.mutate()}>{resume.isPending ? "恢复中…" : "接受候选并恢复"}</Button> : null}
-                {detail?.legalActions?.includes("resume_quality_debt") ? <Button data-testid="director-resume-quality-debt" disabled={resumeWithDebt.isPending} onClick={() => resumeWithDebt.mutate()}>{resumeWithDebt.isPending ? "继续中…" : "保留这些问题并继续"}</Button> : null}
+                {detail?.legalActions?.includes("resume_quality_debt") ? <Button data-testid="director-resume-quality-debt" variant="outline" disabled={resumeWithDebt.isPending} onClick={() => setConfirmResumeDebt(true)}>保留这些问题并继续</Button> : null}
+                {confirmResumeDebt ? <div data-testid="director-quality-debt-summary" className="basis-full rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <p>继续这一章时，下面 {decidedDebts.length} 条质量问题会记为已保留，不会自动修复：</p>
+                  <ul className="mt-1 list-disc pl-4">
+                    {decidedDebts.map(item => <li key={String(item.id)}>{String(item.issueType)} · {String(item.severity)} · {String(item.description)}</li>)}
+                  </ul>
+                  <p className="mt-1">正文会进入正式确认点，你确认之后才会成为正式章节。</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button data-testid="director-confirm-resume-quality-debt" disabled={resumeWithDebt.isPending} onClick={() => { setConfirmResumeDebt(false); resumeWithDebt.mutate(); }}>{resumeWithDebt.isPending ? "继续中…" : "确认保留并继续"}</Button>
+                    <Button data-testid="director-dismiss-resume-quality-debt" variant="ghost" onClick={() => setConfirmResumeDebt(false)}>先不继续</Button>
+                  </div>
+                </div> : null}
                 {detail?.pauseSignal === "safety" && openDebtCount > 0 ? <p data-testid="director-quality-debt-hint" className="basis-full text-xs text-muted-foreground">正文有 {openDebtCount} 条质量问题待确认：在下面的质量问题里逐条处理后，就能继续这一章。</p> : null}
                 {detail?.legalActions?.includes("cancel") ? <Button data-testid="director-cancel-button" variant="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate()}>{cancel.isPending ? "取消中…" : "取消创作"}</Button> : null}
                 {completed ? <Button asChild><Link to={`/novels/${encodeURIComponent(novelId)}/edit`}>查看正式正文</Link></Button> : null}
