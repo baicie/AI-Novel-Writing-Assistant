@@ -195,3 +195,18 @@ bash scripts/audit-tauri-release.sh                             PASS
 ```
 
 fixture：`/tmp/biz-novel-journey.OxXXEB`（`BIZ_NOVEL_JOURNEY_KEEP=1` 保留，供后续阶段复用）。
+## G4 续 — 知识与导出阶段（已通过，同一 fixture）
+
+阶段 4 `journey-knowledge`：把第 1–5 章归入第一卷、第 6–10 章归入第二卷（`update_chapter_meta`，带官方版本 CAS），
+然后新增一条知识来源并触发索引，最后：
+
+- `search_knowledge("剑谱")` 命中该知识来源；
+- 按卷导出只包含第 1–5 章，不含第 6 章；
+- 全书导出按顺序包含第 1–10 章，长度 > 200。
+
+```text
+[journey] phase: knowledge → 1 passing（1.4s）
+```
+
+注意：该阶段默认关闭"首次索引失败注入"（`BIZ_NOVEL_E2E_INDEX_FAIL_ONCE=0`），
+失败注入行为由 `index-retry` 专项用例覆盖。
