@@ -210,3 +210,19 @@ fixture：`/tmp/biz-novel-journey.OxXXEB`（`BIZ_NOVEL_JOURNEY_KEEP=1` 保留，
 
 注意：该阶段默认关闭"首次索引失败注入"（`BIZ_NOVEL_E2E_INDEX_FAIL_ONCE=0`），
 失败注入行为由 `index-retry` 专项用例覆盖。
+## G4 续 — 编辑、历史与恢复阶段（已通过，同一 fixture）
+
+阶段 5 `journey-editor`：第一位作者写完一章后，
+
+- 两位作者（`journey-writer-a` / `journey-writer-b`）各自保存本地草稿，互不覆盖；
+- 作者 A 用当前官方版本保存正式稿，官方版本 +1；
+- 作者 B 用过期官方版本再次保存 → 被拒绝，B 的草稿仍在；
+- 历史里至少有两条修订，选择最早一条恢复（`draftDecision=keep`）→ 官方版本再 +1，正文回到最早版本；
+- 恢复后两份草稿都还在。
+
+```text
+[journey] phase: editor → 1 passing（1.1s）
+```
+
+说明：本阶段用命令级入口验证两位写作者的草稿隔离与官方版本 CAS；
+真实双窗口交互由 `multiwindow-draft-*` 专项用例覆盖。
