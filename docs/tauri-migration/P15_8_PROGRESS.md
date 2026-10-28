@@ -288,3 +288,18 @@ tail -3 docs/tauri-migration/P15_8_PROGRESS.md
 
 挂起点位于 `#[cfg(feature = "e2e")]`，生产构建里不存在。EOF
 tail -3 docs/tauri-migration/P15_8_PROGRESS.md
+## G2 续 — 磁盘写满（ENOSPC）与截断备份
+
+新增 `scripts/run-tauri-disk-full-e2e.sh`：挂一个 16MB 磁盘映像、写满到只剩 256KB，再让源库（800 本小说）备份到该卷上。
+断言：备份必须失败；写了一半的文件里读不到本程序的数据库结构；源库 800 本小说完好；测试结束不残留挂载点。
+
+过程中发现一个真实缺口：`verify_backup` 原来只跑 `PRAGMA integrity_check`，而"只剩文件头/被截断"的库
+仍可能返回 ok。现在校验会再确认备份里确有本程序的 `schema_migration`，并对更新的 schema 版本明确拒绝。
+同时补了单元用例 `truncated_backup_has_no_readable_schema`（完整备份能读出 schema，截断到 4KB 后读不出）。
+
+```text
+[disk-full] 挂载 16MB 映像 → 写满 → 备份失败 → 半成品无 schema → 源库 800 本完好
+test result: ok. 1 passed（9.48s）
+[disk-full] PASS
+```EOF
+tail -3 docs/tauri-migration/P15_8_PROGRESS.md

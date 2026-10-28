@@ -109,6 +109,16 @@ pub async fn verify_backup(
     if integrity != "ok" {
         return Err(AppError::integrity("备份完整性检查未通过。"));
     }
+    // integrity_check 对"只剩文件头/被截断"的库可能仍返回 ok，
+    // 因此再确认备份真的带着本程序的数据库结构。
+    let schema = novel_storage_sqlite::SqliteKernel::schema_version(std::path::Path::new(&path))
+        .await
+        .map_err(|error| AppError::integrity(format!("备份缺少数据库结构：{error}")))?;
+    if schema.as_str() > novel_storage_sqlite::SqliteKernel::latest_schema_version() {
+        return Err(AppError::integrity(
+            "备份来自更新版本的程序，请先升级后再校验。",
+        ));
+    }
     Ok(integrity)
 }
 
@@ -572,5 +582,127 @@ mod tests {
         assert!(marker.exists(), "intent 保留以便修复后重试");
         assert!(staged.exists());
         assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "需要一个很小的磁盘映像，用 scripts/run-tauri-disk-full-e2e.sh 触发"]
+    async fn backup_fails_when_the_target_volume_runs_out_of_space() {
+        use std::process::Command;
+
+        if std::env::var("BIZ_NOVEL_ENOSPC_TEST").as_deref() != Ok("1") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("tiny.dmg");
+        let mount = dir.path().join("mnt");
+        std::fs::create_dir_all(&mount).unwrap();
+        let created = Command::new("hdiutil")
+            .args([
+                "create", "-size", "16m", "-fs", "HFS+", "-volname", "TinyDisk", "-quiet",
+            ])
+            .arg(&image)
+            .status()
+            .unwrap();
+        assert!(created.success(), "无法创建磁盘映像");
+        let attached = Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-quiet", "-mountpoint"])
+            .arg(&mount)
+            .arg(&image)
+            .status()
+            .unwrap();
+        assert!(attached.success(), "无法挂载磁盘映像");
+
+        let outcome = run_enospc_case(&mount).await;
+        let _ = Command::new("hdiutil")
+            .arg("detach")
+            .arg(&mount)
+            .args(["-force", "-quiet"])
+            .status();
+        outcome;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn free_kb(mount: &Path) -> u64 {
+        use std::process::Command;
+
+        let output = Command::new("df").arg("-k").arg(mount).output().unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        let line = text.lines().nth(1).expect("df 输出缺少数据行");
+        line.split_whitespace().nth(3).unwrap().parse().unwrap()
+    }
+
+    #[cfg(target_os = "macos")]
+    async fn run_enospc_case(mount: &Path) {
+        use std::process::Command;
+
+        // 源库先长到接近 1MB，保证备份需要的空间大于卷上剩余空间。
+        let work = tempfile::tempdir().unwrap();
+        let db = work.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        for index in 0..800 {
+            seed(&live, &format!("n-{index}"), &format!("原书{index}")).await;
+        }
+
+        // 写满卷：dd 写到卷满会因 ENOSPC 非零退出，这里属于预期。
+        for round in 0..4 {
+            let remaining = free_kb(mount);
+            if remaining < 320 {
+                break;
+            }
+            let filler = mount.join(format!("filler-{round}.bin"));
+            let _ = Command::new("dd")
+                .arg("if=/dev/zero")
+                .arg(format!("of={}", filler.display()))
+                .args([
+                    "bs=1024",
+                    &format!("count={}", remaining.saturating_sub(256)),
+                ])
+                .status();
+        }
+        let remaining = free_kb(mount);
+        assert!(remaining < 640, "磁盘映像没有被写满，剩余 {remaining} KiB");
+
+        let target = mount.join("novel-1.sqlite");
+        let failed = live.backup_to(&target).await;
+        assert!(failed.is_err(), "磁盘写满时备份必须失败");
+
+        if target.exists() {
+            // 写了一半的文件里没有本程序的数据库结构：这正是 verify_backup 拒绝它的依据，
+            // 只跑 integrity_check 对"只剩文件头"的库可能仍然返回 ok。
+            let schema = novel_storage_sqlite::SqliteKernel::schema_version(&target).await;
+            assert!(schema.is_err(), "写了一半的文件不能被当成可用备份");
+            let _ = std::fs::remove_file(&target);
+        }
+        live.pool().close().await;
+        assert_eq!(titles(&db).await.len(), 800, "源库在备份失败后必须完好");
+    }
+
+    #[tokio::test]
+    async fn truncated_backup_has_no_readable_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("novel.sqlite");
+        let live = novel_storage_sqlite::SqliteKernel::open(&db).await.unwrap();
+        seed(&live, "n-live", "原书").await;
+        let backup = dir.path().join("novel-1.sqlite");
+        live.backup_to(&backup).await.unwrap();
+        live.pool().close().await;
+
+        assert_eq!(
+            novel_storage_sqlite::SqliteKernel::schema_version(&backup)
+                .await
+                .unwrap(),
+            novel_storage_sqlite::SqliteKernel::latest_schema_version()
+        );
+
+        // 截断成只剩首页：模拟写到一半就被中断的备份文件。
+        let bytes = std::fs::read(&backup).unwrap();
+        std::fs::write(&backup, &bytes[..4096.min(bytes.len())]).unwrap();
+        assert!(
+            novel_storage_sqlite::SqliteKernel::schema_version(&backup)
+                .await
+                .is_err(),
+            "被截断的备份不能通过结构校验"
+        );
     }
 }
