@@ -155,6 +155,7 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
       {batch ? (
         <div data-testid="batch-current" className="space-y-2 rounded-md bg-muted/20 p-3 text-xs">
           <p className="font-medium">批量状态：{statusLabel[batch.status] ?? batch.status} · 已完成 {batch.items.filter((item) => item.status === "succeeded").length}/{batch.items.length}</p>
+          {batch.status === "paused" ? <p className="text-muted-foreground">连续创作已暂停：处理完当前章节后点上方「继续」，就会开始下一章。</p> : null}
           {batch.failureReason ? <p className="text-destructive">最近错误：{batch.failureReason}</p> : null}
           <ul className="space-y-1">
             {batch.items.map((item) => (

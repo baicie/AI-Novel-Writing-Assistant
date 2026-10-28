@@ -39,16 +39,34 @@ pnpm --filter @ai-novel/client typecheck                 → PASS
 pnpm --filter @ai-novel/client test                      → 186 passed
 ```
 
+## 切片 2：原生有界修复链路验收（本轮已交付）
+
+### 新增测试
+
+- `tests/desktop-e2e/specs/batch-repair.spec.mjs`（场景 `BIZ_NOVEL_E2E_SCENARIO=issues`）：
+  连续创作三章 → 审校发现问题 → 有界修复执行一次并生成修复候选 → 修复后复审仍报告问题 → 停在质量上限 →
+  逐条点击“接受并保留” → “保留这些问题并继续” → 进入章节确认点（此时正文仍未提交）→ 确认 → 正式章节提交 →
+  批次推进到第 2 章。
+- `scripts/run-tauri-batch-repair-e2e.sh`：构建专用 E2E 应用并执行上述原生测试。
+- 断言覆盖：`repair_notes` 仅 1 份且记录 `repair_candidate_created`、审校产物 ≥ 2 份、未确认前无 `chapter_commit`、
+  质量提醒未处理时不下发 `resume_quality_debt`、`cancel` 始终可用、确认前正文章节为空且 `officialVersion = 0`。
+
+### 测试
+
+```text
+bash scripts/run-tauri-batch-repair-e2e.sh      → 1 passing (12.5s)
+pnpm --filter @ai-novel/desktop-e2e test:safety → 1 passing (31s，安全停点回归)
+```
+
 ### 未完成
 
-- 原生 E2E：质量停点逐条确认 → 继续 → 确认正文章节 → 批次推进（需要重新构建应用后运行）。
-- 修复预算为 1 时的原生“自动修复一次”往返仍未在真机验收。
+- 质量提醒逐条确认与继续操作在原生界面上的可读性只做了代码级检查，界面观感留给人工验收。
+- 批次在章节确认后仍需作者点“继续”才开始下一章；界面已给出提示，自动化覆盖该点击。
 
 ## 后续优先级
 
-1. 原生 E2E：`batch-repair`（审校发现问题 → 有界修复 → 逐条确认 → 继续 → 提交 → 下一章）。
-2. Native Index 两进程重启恢复重跑。
-3. 备份恢复 WAL 崩溃矩阵。
-4. 单一 Fixture 作者旅程。
-5. 1000 章桌面性能（冷启动 / RSS / CPU / 导出）。
-6. 历史 Schema 异常升级矩阵；Native Save 人工 Gate（`MANUAL_NOT_RUN`）。
+1. Native Index 两进程重启恢复重跑。
+2. 备份恢复 WAL 崩溃矩阵。
+3. 单一 Fixture 作者旅程。
+4. 1000 章桌面性能（冷启动 / RSS / CPU / 导出）。
+5. 历史 Schema 异常升级矩阵；Native Save 人工 Gate（`MANUAL_NOT_RUN`）。
