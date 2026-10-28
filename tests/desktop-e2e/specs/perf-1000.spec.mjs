@@ -18,16 +18,25 @@ function pct(samples, p) {
 }
 
 async function measure(command, args, samples) {
-  const timings = await browser.execute(async (name, payload, count) => {
+  const result = await browser.execute(async (name, payload, count) => {
+    const warmupStarted = performance.now();
+    await window.__TAURI__.core.invoke(name, payload);
+    const warmup = performance.now() - warmupStarted;
     const out = [];
     for (let index = 0; index < count; index += 1) {
       const started = performance.now();
       await window.__TAURI__.core.invoke(name, payload);
       out.push(performance.now() - started);
     }
-    return out;
+    return { warmup, samples: out };
   }, command, args, samples);
-  return { samples: timings.length, p50: pct(timings, 50), p95: pct(timings, 95) };
+  const timings = result.samples;
+  return {
+    warmupMs: Math.round(result.warmup * 10) / 10,
+    samples: timings.length,
+    p50: pct(timings, 50),
+    p95: pct(timings, 95),
+  };
 }
 
 function paragraph(seed) {

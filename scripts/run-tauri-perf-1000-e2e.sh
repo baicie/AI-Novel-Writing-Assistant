@@ -31,19 +31,44 @@ echo "[]" > "$SUMMARY"
 sample_rss() { ps -o rss= -p "$1" 2>/dev/null | tr -d ' ' || echo 0; }
 sample_cpu() { ps -o %cpu= -p "$1" 2>/dev/null | tr -d ' ' || echo 0; }
 
+measure_size() {
+  local size="$1"
+  local dir="$2"
+  local report="$dir/perf-report.json"
+  env BIZ_NOVEL_E2E_DATA_DIR="$dir" BIZ_NOVEL_E2E_KEEP=1 \
+      BIZ_NOVEL_E2E_PERF_CHAPTERS="$size" \
+      BIZ_NOVEL_E2E_PERF_REPORT="$report" BIZ_NOVEL_E2E_MACHINE="$MACHINE" \
+      $PKG test:perf-1000 >"$dir/measure.log" 2>&1
+}
+
+settle() {
+  pkill -f "$BIN" 2>/dev/null || true
+  for _ in $(seq 1 60); do
+    if ! pgrep -f "$BIN" >/dev/null; then break; fi
+    sleep 0.25
+  done
+  sleep 2
+}
+
 for SIZE in $SIZES; do
+  settle
   DIR="$(mktemp -d "/tmp/biz-novel-perf-$SIZE.XXXXXX")"
   DIRS+=("$DIR")
   REPORT="$DIR/perf-report.json"
   echo "[perf] size=$SIZE data=$DIR"
 
-  env BIZ_NOVEL_E2E_DATA_DIR="$DIR" BIZ_NOVEL_E2E_KEEP=1 \
-      BIZ_NOVEL_E2E_PERF_CHAPTERS="$SIZE" \
-      BIZ_NOVEL_E2E_PERF_REPORT="$REPORT" BIZ_NOVEL_E2E_MACHINE="$MACHINE" \
-      $PKG test:perf-1000 >"$DIR/measure.log" 2>&1 || {
-    tail -60 "$DIR/measure.log" >&2
-    exit 1
-  }
+  if ! measure_size "$SIZE" "$DIR" || [[ ! -s "$REPORT" ]]; then
+    echo "[perf] size=$SIZE failed once, retrying with a fresh directory" >&2
+    tail -30 "$DIR/measure.log" >&2
+    DIR="$(mktemp -d "/tmp/biz-novel-perf-$SIZE-retry.XXXXXX")"
+    DIRS+=("$DIR")
+    REPORT="$DIR/perf-report.json"
+    settle
+    measure_size "$SIZE" "$DIR" || {
+      tail -60 "$DIR/measure.log" >&2
+      exit 1
+    }
+  fi
   if [[ ! -s "$REPORT" ]]; then
     echo "[perf] size=$SIZE produced no report" >&2
     tail -60 "$DIR/measure.log" >&2
