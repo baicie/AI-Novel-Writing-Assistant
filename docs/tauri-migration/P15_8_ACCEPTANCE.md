@@ -1,6 +1,6 @@
 # P15.8 Beta RC 验收记录
 
-起始 HEAD：`1c5bfb17`　最终 HEAD：`974e9145`
+起始 HEAD：`1c5bfb17`　最终 HEAD：以 Review Bundle 的 `baseline.txt` 为准（本文件随每次提交前移）
 
 ## 门禁
 
