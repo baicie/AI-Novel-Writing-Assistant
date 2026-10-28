@@ -69,3 +69,46 @@ cargo test -p novel-application --test p9_repair_flow   9 passed / 0 failed
   备份 89 ms；冷启动 736 / 1436 / 353 ms（初始化 8–29 ms），RSS 54.8–58.4 MB。
 - 详细方法与未覆盖项见 `docs/tauri-migration/P15_8_PERFORMANCE.md`。
 - 复现：`bash scripts/run-tauri-perf-1000-e2e.sh`（`BIZ_NOVEL_PERF_KEEP=1` 保留报告）。
+## G7/G8 — 回归、生产审计与门禁状态
+
+### 回归（最终 HEAD 上执行）
+
+```text
+cargo test -p novel-application -p novel-storage-sqlite     43 个测试二进制全 ok / 0 failed
+cargo check -p novel-desktop                                 PASS
+pnpm --filter @ai-novel/client typecheck                     PASS
+pnpm --filter @ai-novel/client test                          186 passed / 0 failed
+pnpm --filter @ai-novel/client build                         PASS
+pnpm --filter @ai-novel/desktop-e2e test:batch-repair        1 passing（两步确认新界面）
+pnpm --filter @ai-novel/desktop-e2e test:index-retry         1 passing
+bash scripts/run-tauri-index-crash-e2e.sh                    三阶段 PASS
+```
+
+未执行：`cargo test --workspace`、clean worktree `--all-targets`（受保护文件与既有 fmt 差异原因），
+以及其余 Native 用例（Batch 10 章、Backup Restore、Dual Writer、Task Center、Export、Structured Memory）。
+`cargo fmt --check` 全仓仍会因 `crates/novel-http` 的既有格式差异失败，与本轮改动无关。
+
+### 生产审计
+
+```text
+cargo tauri build --target aarch64-apple-darwin --bundles app   PASS，23.27 MiB
+bash scripts/audit-tauri-release.sh                             PASS
+命令数 / capability 允许项                                       111 / 111
+生产二进制中的 e2e 钩子字符串                                    全部 0
+（BIZ_NOVEL_E2E_INDEX_HOLD / _LEASE_MS / _RECOVER_SECS / _STARTUP_MARKER / _INDEX_FAIL_ONCE / tauri_plugin_wdio）
+```
+
+### 门禁状态
+
+| Gate | 状态 | 依据 |
+| --- | --- | --- |
+| Native Index Restart | VERIFIED | 三阶段真实两进程 + epoch 递增 + FTS 只返回最新修订 |
+| Quality Debt Security | VERIFIED | 三条负向用例 + 两步确认界面 |
+| Desktop Performance | PARTIAL | 1000 章单档真实采样；100/500、CPU 长时间、30 分钟内存漂移未做 |
+| WAL Crash Restore | NOT_STARTED | 本轮未执行 |
+| Shared Author Journey | NOT_STARTED | 本轮未执行 |
+| Native Save | PARTIAL | 导出链路已有自动化；系统保存对话框 MANUAL_NOT_RUN |
+| Full Regression | PARTIAL | 见上：作用域内全绿，workspace/all-targets 未跑 |
+| Production Audit | VERIFIED | 构建、审计、钩子隔离、111/111 |
+
+结论：`BETA_RC_BLOCKED`（缺 WAL 崩溃矩阵、共享 Fixture 旅程、Native Save 人工验收、完整回归与 100/500 档性能）。
