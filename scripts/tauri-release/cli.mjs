@@ -9,8 +9,10 @@ import { buildLatestJson, sha256SumsText, verifyArtifacts } from "./manifest.mjs
 const TARGET_RULES = [
   { target: "darwin-aarch64", match: /aarch64\.app\.tar\.gz$/ },
   { target: "darwin-x86_64", match: /(x64|x86_64)\.app\.tar\.gz$/ },
+  // Tauri v2 的更新包就是安装包本身（v1 的 .nsis.zip / .AppImage.tar.gz 仍兼容）
   { target: "windows-x86_64", match: /(x64|x86_64)[-_].*(nsis\.zip|msi\.zip)$/ },
-  { target: "linux-x86_64", match: /(amd64|x86_64)\.AppImage\.tar\.gz$/ },
+  { target: "windows-x86_64", match: /(x64|x86_64)[-_].*(setup\.exe|msi)$/ },
+  { target: "linux-x86_64", match: /(amd64|x86_64)\.AppImage(\.tar\.gz)?$/ },
 ];
 
 export function detectTarget(fileName) {
@@ -104,7 +106,15 @@ const TRIPLE_TO_ARCH = {
   'x86_64-unknown-linux-gnu': 'amd64',
 };
 
-const UPDATER_ARCHIVE_SUFFIXES = ['.app.tar.gz', '.AppImage.tar.gz', '.nsis.zip', '.msi.zip'];
+const UPDATER_ARCHIVE_SUFFIXES = [
+  '.app.tar.gz',
+  '.AppImage',
+  '.AppImage.tar.gz',
+  '.nsis.zip',
+  '.msi.zip',
+  '.msi',
+  '-setup.exe',
+];
 
 export function updaterArchiveSuffix(name) {
   return UPDATER_ARCHIVE_SUFFIXES.find((suffix) => name.endsWith(suffix)) ?? null;

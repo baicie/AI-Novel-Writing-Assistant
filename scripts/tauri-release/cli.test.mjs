@@ -11,6 +11,7 @@ import {
   collectUpdaterPlatforms,
   normalizeUpdaterName,
   targetFromPath,
+  updaterArchiveSuffix,
 } from "./cli.mjs";
 
 const run = promisify(execFile);
@@ -54,6 +55,16 @@ test("更新包文件名映射到平台", () => {
 
 
 
+
+test("Tauri v2 更新包格式：安装包本身即可作为更新包", async () => {
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_x64-setup.exe"), "windows-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage"), "linux-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip"), "windows-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage.tar.gz"), "linux-x86_64");
+  assert.equal(updaterArchiveSuffix("x_x64-setup.exe"), "-setup.exe");
+  assert.equal(updaterArchiveSuffix("x_amd64.AppImage"), ".AppImage");
+  assert.equal(updaterArchiveSuffix("x_0.1.1_amd64.deb"), null);
+});
 test("更新包命名规范化：同名不同架构不再冲突", async () => {
   const arm = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "aarch64-apple-darwin");
   const x64 = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "x86_64-apple-darwin");
