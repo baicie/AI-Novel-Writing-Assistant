@@ -74,13 +74,22 @@ async function cmdCheckVersions(argv) {
   process.stdout.write(`[release] 版本一致：${JSON.stringify(result.versions)}\n`);
 }
 
+export const RELEASE_ASSET_EXTENSIONS = [".dmg", ".exe", ".msi", ".deb", ".AppImage", ".tar.gz", ".zip", ".sig"];
+
+export function isReleaseAsset(name, extensions = RELEASE_ASSET_EXTENSIONS) {
+  return extensions.some((extension) => name.endsWith(extension));
+}
+
 async function cmdWriteSums(argv) {
   const dir = argValue(argv, "dir", ".");
   const out = argValue(argv, "out", path.join(dir, "SHA256SUMS.txt"));
+  const only = argValue(argv, "extensions", "");
+  const extensions = only ? only.split(",").map((item) => item.trim()).filter(Boolean) : null;
   const outName = path.basename(out);
   // bundle 目录是按平台/格式分层的（macos/*.app、deb/*.deb …），必须递归收集文件。
   const entries = (await collectFiles(dir))
     .filter((entry) => !entry.isDirectory && entry.name !== outName)
+    .filter((entry) => (extensions ? isReleaseAsset(entry.name, extensions) : true))
     .map((entry) => ({ path: entry.path, name: entry.name }));
   if (entries.length === 0) {
     process.stderr.write("[release] 没有可计算校验和的产物\n");

@@ -114,6 +114,27 @@ test("CLI write-sums 产出可校验的清单", async () => {
 });
 
 
+test("发布产物过滤：AppImage 内部文件不当作发布资产", async () => {
+  const { isReleaseAsset } = await import("./cli.mjs");
+  assert.equal(isReleaseAsset("Biz_0.1.1_aarch64.dmg"), true);
+  assert.equal(isReleaseAsset("Biz_0.1.1_x64-setup.exe"), true);
+  assert.equal(isReleaseAsset("biz_0.1.1_amd64.deb"), true);
+  assert.equal(isReleaseAsset("biz_0.1.1_amd64.AppImage"), true);
+  assert.equal(isReleaseAsset("Biz.app.tar.gz.sig"), true);
+  assert.equal(isReleaseAsset("im-am-et.so"), false);
+  assert.equal(isReleaseAsset("AppRun"), false);
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sums-filter-"));
+  await mkdir(path.join(dir, "appimage", "AppDir", "usr", "lib"), { recursive: true });
+  await writeFile(path.join(dir, "appimage", "AppDir", "AppRun"), "binary");
+  await writeFile(path.join(dir, "appimage", "AppDir", "usr", "lib", "im-am-et.so"), "so");
+  await writeFile(path.join(dir, "appimage", "biz_0.1.1_amd64.AppImage"), "appimage");
+  await run("node", [CLI, "write-sums", "--dir", dir, "--out", path.join(dir, "SHA256SUMS.txt"), "--extensions", ".AppImage,.dmg"]);
+  const text = await readFile(path.join(dir, "SHA256SUMS.txt"), "utf8");
+  assert.equal(text.trim().split("\n").length, 1);
+  assert.match(text, /AppImage/);
+});
+
 test("CLI write-sums 递归收集分层目录里的产物", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "sums-nested-"));
   await mkdir(path.join(dir, "deb"), { recursive: true });

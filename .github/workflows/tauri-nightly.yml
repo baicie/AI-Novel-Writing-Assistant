@@ -197,7 +197,8 @@ jobs:
           pattern: tauri-nightly-*
           merge-multiple: true
       - name: 生成 SHA256 清单
-        run: node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt
+        run: |
+          node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt             --extensions ".dmg,.exe,.msi,.deb,.AppImage,.tar.gz,.zip,.sig"
       - name: 生成 nightly 更新索引（独立文件名，不覆盖 stable）
         if: ${{ env.UPDATER == 'true' }}
         run: |
@@ -216,7 +217,7 @@ jobs:
           fi
       - name: 上传产物
         run: |
-          mapfile -t files < <(find artifacts -type f | sort)
+          mapfile -t files < <(find artifacts -type f             \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb'                -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.sig'                -o -name 'SHA256SUMS.txt' -o -name 'latest.json' -o -name 'nightly-latest.json' \) | sort)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "没有可上传的 nightly 产物" >&2
             exit 1
