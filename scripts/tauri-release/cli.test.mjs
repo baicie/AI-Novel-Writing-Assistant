@@ -47,6 +47,24 @@ test("更新包文件名映射到平台", () => {
   assert.equal(detectTarget("Biz Novel Studio_0.2.0_aarch64.dmg"), null);
 });
 
+
+test("latest.json 支持 download-artifact 的嵌套目录结构", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-nested-"));
+  const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  const win = path.join(dir, "target", "x86_64-pc-windows-msvc", "release", "bundle", "nsis");
+  await mkdir(mac, { recursive: true });
+  await mkdir(win, { recursive: true });
+  await writeFile(path.join(mac, "Biz Novel Studio_0.1.1-beta.2_aarch64.app.tar.gz"), "mac");
+  await writeFile(path.join(mac, "Biz Novel Studio_0.1.1-beta.2_aarch64.app.tar.gz.sig"), "sig-mac\n");
+  await writeFile(path.join(win, "Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip"), "win");
+  await writeFile(path.join(win, "Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip.sig"), "sig-win\n");
+
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/download" });
+  assert.deepEqual(errors, []);
+  assert.equal(platforms["darwin-aarch64"].signature, "sig-mac");
+  assert.equal(platforms["windows-x86_64"].signature, "sig-win");
+});
+
 test("latest.json 生成：三个平台各自签名，内容取自 .sig 文件", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "latest-"));
   await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz"), "mac-arm");

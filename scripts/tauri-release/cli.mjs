@@ -115,12 +115,15 @@ async function cmdWriteSums(argv) {
 }
 
 export async function collectUpdaterPlatforms({ dir, baseUrl }) {
-  const names = await readdir(dir);
+  // 下载下来的产物保留了工作区相对路径（target/<triple>/release/bundle/...），必须递归查找。
+  const files = (await collectFiles(dir)).filter((entry) => !entry.isDirectory);
+  const byName = new Map(files.map((entry) => [entry.name, entry.path]));
   const platforms = {};
   const errors = [];
-  for (const name of names.filter((item) => item.endsWith(".sig"))) {
+  for (const [name, fullPath] of byName) {
+    if (!name.endsWith(".sig")) continue;
     const archive = name.slice(0, -4);
-    if (!names.includes(archive)) {
+    if (!byName.has(archive)) {
       errors.push(`${name} 缺少对应的更新包 ${archive}`);
       continue;
     }
@@ -133,7 +136,7 @@ export async function collectUpdaterPlatforms({ dir, baseUrl }) {
       errors.push(`平台 ${target} 出现多个更新包：${platforms[target].file} 与 ${archive}`);
       continue;
     }
-    const signature = (await readFile(path.join(dir, name), "utf8")).trim();
+    const signature = (await readFile(fullPath, "utf8")).trim();
     platforms[target] = {
       signature,
       url: `${baseUrl.replace(/\/$/, "")}/${encodeURIComponent(archive)}`,
