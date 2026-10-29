@@ -30,8 +30,11 @@ on:
     paths: *tauri_paths
 
 concurrency:
-  group: tauri-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # 只用仓库 + ref 做分组：可复用 workflow 被发布流水线调用时，github.workflow 是调用方的名字，
+  # 之前用 workflow 名做 key 会让同一 ref 的两次运行互相取消（tag 与分支几乎同时推送时必然触发）。
+  # 只有在 PR 上才取消旧运行，push/tag 一律排队，避免把正在跑的发布门禁取消掉。
+  group: tauri-ci-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
