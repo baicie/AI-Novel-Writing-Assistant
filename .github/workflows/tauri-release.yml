@@ -154,8 +154,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      - name: 安装本平台编译目标
+        # rust-toolchain.toml 固定了 1.96.0，交叉目标必须装到这个工具链上
+        run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
