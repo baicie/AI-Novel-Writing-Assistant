@@ -1,0 +1,229 @@
+name: Tauri Nightly
+
+# 独立的 nightly 通道：不建正式 Tag、只发 Prerelease、绝不触碰 stable 索引。
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "即使当前提交已经发过 nightly 也重新构建"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: tauri-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22.12.0"
+  PNPM_VERSION: "10.6.0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  prepare:
+    name: 计算 nightly 版本与是否需要发布
+    runs-on: ubuntu-24.04
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+      updater: ${{ steps.plan.outputs.updater }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 计算版本、Tag 与是否需要发布
+        id: plan
+        run: |
+          sha="$(git rev-parse HEAD)"
+          short="$(git rev-parse --short=7 HEAD)"
+          date="$(date -u +%Y%m%d)"
+          base="$(node scripts/tauri-release/cli.mjs read-base-version)"
+          tag="tauri-nightly-${date}-${short}"
+          version="${base}-nightly.${date}"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "已存在同名 nightly：${tag}"
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          else
+            last="$(gh release list --limit 20 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease and (.tagName | startswith("tauri-nightly-")))] | .[0].tagName // ""')"
+            if [ -n "${last}" ]; then
+              last_sha="$(echo "${last}" | awk -F- '{print $NF}')"
+              head_sha="$(git rev-parse --short=7 HEAD)"
+              if [ "${last_sha}" = "${head_sha}" ] && [ "${FORCE}" != "true" ]; then
+                echo "最新 nightly ${last} 已经是当前提交，跳过"
+                echo "skip=true" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+            fi
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "updater=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "updater=false" >> "${GITHUB_OUTPUT}"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+  quality:
+    name: 质量门禁
+    needs: prepare
+    if: ${{ needs.prepare.outputs.skip != 'true' }}
+    uses: ./.github/workflows/tauri-ci.yml
+    with:
+      bundle_check: false
+    permissions:
+      contents: read
+
+  build:
+    name: nightly 构建 ${{ matrix.label }}
+    needs: [prepare, quality]
+    if: ${{ needs.prepare.outputs.skip != 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macOS arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            kinds: app,dmg
+          - os: windows-2022
+            label: Windows x64
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            kinds: nsis
+          - os: ubuntu-22.04
+            label: Linux x64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            kinds: deb,appimage
+    steps:
+      - uses: actions/checkout@v6
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libdbus-1-dev libssl-dev build-essential curl file
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: nightly-${{ matrix.target }}
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 写入 nightly 版本覆盖（只作用于本次构建）
+        run: |
+          node -e "const fs=require('fs');fs.writeFileSync('src-tauri/tauri.nightly.conf.json', JSON.stringify({version: process.argv[1]}, null, 2));" "${{ needs.prepare.outputs.version }}"
+      - name: 构建 nightly 安装包
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.prepare.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.prepare.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          extra="--config src-tauri/tauri.nightly.conf.json"
+          if [ "${{ needs.prepare.outputs.updater }}" = "true" ]; then
+            extra="${extra} --config src-tauri/tauri.updater.conf.json"
+          fi
+          pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${extra}
+      - name: 校验产物真实存在
+        shell: bash
+        run: |
+          node scripts/tauri-release/cli.mjs assert-bundles \
+            --dir "target/${{ matrix.target }}/release/bundle" --kinds "${{ matrix.kinds }}"
+      - name: 生成 SHA256 清单
+        shell: bash
+        run: |
+          node scripts/tauri-release/cli.mjs write-sums \
+            --dir "target/${{ matrix.target }}/release/bundle" \
+            --out "target/${{ matrix.target }}/SHA256SUMS.txt"
+      - name: 上传 nightly 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-nightly-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle
+            target/${{ matrix.target }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: 发布 Prerelease（独立通道）
+    needs: [prepare, build]
+    if: ${{ needs.prepare.outputs.skip != 'true' }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      UPDATER: ${{ needs.prepare.outputs.updater }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 下载 nightly 产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: tauri-nightly-*
+          merge-multiple: true
+      - name: 生成 SHA256 清单
+        run: node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt
+      - name: 生成 nightly 更新索引（独立文件名，不覆盖 stable）
+        if: ${{ env.UPDATER == 'true' }}
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          node scripts/tauri-release/cli.mjs write-latest \
+            --dir artifacts --version "${VERSION}" --base-url "${base}" \
+            --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out artifacts/nightly-latest.json
+      - name: 创建 Prerelease
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "已存在 ${TAG}"
+          else
+            gh release create "${TAG}" --prerelease --title "Nightly ${VERSION}" \
+              --notes "自动构建的夜间版本：${GITHUB_SHA}。不用于正式分发，不进入 stable 更新通道。"
+          fi
+      - name: 上传产物
+        run: |
+          mapfile -t files < <(find artifacts -type f | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "没有可上传的 nightly 产物" >&2
+            exit 1
+          fi
+          gh release upload "${TAG}" "${files[@]}" --clobber
+      - name: 断言没有触碰 stable 索引
+        run: |
+          assets="$(gh release view "${TAG}" --json assets --jq '.assets[].name')"
+          echo "${assets}"
+          if echo "${assets}" | grep -qx "latest.json"; then
+            echo "nightly 不允许发布 latest.json（stable 索引）" >&2
+            exit 1
+          fi

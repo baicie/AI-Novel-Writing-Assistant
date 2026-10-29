@@ -2,7 +2,7 @@ import { readdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { parseReleaseTag, assertVersionConsistency } from "./versions.mjs";
+import { parseReleaseTag, assertVersionConsistency, readVersions } from "./versions.mjs";
 import { resolveMode } from "./modes.mjs";
 import { buildLatestJson, sha256SumsText, verifyArtifacts } from "./manifest.mjs";
 
@@ -160,6 +160,80 @@ async function cmdVerifyArtifacts(argv) {
   process.stdout.write(`[release] 产物齐全：${result.present.map((item) => `${item.name}(${item.bytes}B)`).join(", ")}\n`);
 }
 
+const KIND_RULES = {
+  app: /\.app$/,
+  dmg: /\.dmg$/,
+  nsis: /-setup\.exe$/,
+  msi: /\.msi$/,
+  deb: /\.deb$/,
+  appimage: /\.AppImage$/,
+  "updater-sig": /\.sig$/,
+};
+
+export async function assertBundles({ dir, kinds }) {
+  const found = await collectFiles(dir);
+  const missing = [];
+  const matched = {};
+  for (const kind of kinds) {
+    const rule = KIND_RULES[kind];
+    const hits = rule ? found.filter((file) => rule.test(file.name)) : [];
+    matched[kind] = hits.map((file) => file.name);
+    if (hits.length === 0) missing.push(kind);
+  }
+  return { ok: missing.length === 0, matched, missing };
+}
+
+async function collectFiles(dir) {
+  const out = [];
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        // macOS 的 .app 是目录，产物检查必须能匹配目录名。
+        out.push({ name: entry.name, path: full, isDirectory: true });
+        stack.push(full);
+      } else {
+        out.push({ name: entry.name, path: full, isDirectory: false });
+      }
+    }
+  }
+  return out;
+}
+
+async function cmdAssertBundles(argv) {
+  const dir = argValue(argv, "dir", "");
+  const kinds = String(argValue(argv, "kinds", "")).split(",").map((item) => item.trim()).filter(Boolean);
+  const known = kinds.filter((kind) => !KIND_RULES[kind]);
+  if (known.length > 0) {
+    process.stderr.write(`[release] 未知产物类型：${known.join(", ")}（可用：${Object.keys(KIND_RULES).join(", ")}）\n`);
+    process.exit(1);
+  }
+  const result = await assertBundles({ dir, kinds });
+  if (!result.ok) {
+    process.stderr.write(`[release] 缺少产物：${result.missing.join(", ")}（目录 ${dir}）\n`);
+    process.exit(1);
+  }
+  process.stdout.write(`[release] 产物齐全：${JSON.stringify(result.matched)}\n`);
+}
+
+async function cmdCheckWorkflows() {
+  const { checkWorkflows } = await import("./check-workflows.mjs");
+  const result = await checkWorkflows(process.cwd());
+  if (!result.ok) {
+    process.stderr.write(`[release] workflow 自检失败：\n- ${result.errors.join("\n- ")}\n`);
+    process.exit(1);
+  }
+  process.stdout.write("[release] workflow 自检通过\n");
+}
+
+async function cmdReadBaseVersion() {
+  const versions = await readVersions(process.cwd());
+  process.stdout.write(versions.cargo);
+}
+
 async function cmdParseTag(argv) {
   const tag = argValue(argv, "tag", process.env.GITHUB_REF_NAME ?? "");
   const parsed = parseReleaseTag(tag);
@@ -176,6 +250,9 @@ const COMMANDS = {
   "write-sums": cmdWriteSums,
   "write-latest": cmdWriteLatest,
   "verify-artifacts": cmdVerifyArtifacts,
+  "assert-bundles": cmdAssertBundles,
+  "read-base-version": cmdReadBaseVersion,
+  "check-workflows": cmdCheckWorkflows,
   "parse-tag": cmdParseTag,
 };
 

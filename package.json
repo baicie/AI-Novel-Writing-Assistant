@@ -74,7 +74,8 @@
     "build:tauri:e2e": "cargo tauri build --features e2e --config src-tauri/tauri.e2e.conf.json --target aarch64-apple-darwin --bundles app",
     "test:tauri:e2e": "bash scripts/run-tauri-e2e.sh",
     "test:release-scripts": "node --test scripts/tauri-release/release.test.mjs scripts/tauri-release/cli.test.mjs",
-    "tauri:release:check-versions": "node scripts/tauri-release/cli.mjs check-versions"
+    "tauri:release:check-versions": "node scripts/tauri-release/cli.mjs check-versions",
+    "tauri:ci:check-workflows": "node scripts/tauri-release/cli.mjs check-workflows"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

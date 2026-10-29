@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
@@ -10,6 +10,34 @@ import { detectTarget, collectUpdaterPlatforms } from "./cli.mjs";
 
 const run = promisify(execFile);
 const CLI = path.join(import.meta.dirname, "cli.mjs");
+
+
+import { checkWorkflowText, checkWorkflows } from "./check-workflows.mjs";
+
+test("workflow 自检：仓库里的三个 workflow 全部通过", async () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const result = await checkWorkflows(root);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+});
+
+test("workflow 自检：\\|\\| true 与 continue-on-error 会被抓住", () => {
+  const bad = "name: x\npermissions:\n  contents: read\nconcurrency:\n  group: x\nsteps:\n  - run: cargo test || true\n";
+  const result = checkWorkflowText("tauri-ci.yml", bad);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(), /\|\| true/);
+
+  const masked = "name: x\npermissions:\n  contents: read\nconcurrency:\n  group: x\nsteps:\n  - continue-on-error: true\n    run: echo hi\n";
+  assert.match(checkWorkflowText("tauri-ci.yml", masked).errors.join(), /continue-on-error/);
+});
+
+test("workflow 自检：release 必须只接受 tauri-v* 且先建 Draft", () => {
+  const bad = "name: x\npermissions:\n  contents: write\nconcurrency:\n  group: x\non:\n  push:\n    tags:\n      - \"v*\"\n";
+  const result = checkWorkflowText("tauri-release.yml", bad);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(), /tauri-v\*/);
+  assert.match(result.errors.join(), /Draft/);
+});
 
 test("更新包文件名映射到平台", () => {
   assert.equal(detectTarget("Biz Novel Studio_0.2.0_aarch64.app.tar.gz"), "darwin-aarch64");
@@ -52,6 +80,26 @@ test("latest.json 生成：没有签名文件必须失败（不能产出空索�
   await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz"), "mac");
   const { errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com" });
   assert.match(errors.join(), /没有找到任何 .sig/);
+});
+
+
+test("assert-bundles：按类型检查产物，缺一即失败", async () => {
+  const { assertBundles } = await import("./cli.mjs");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "bundles-"));
+  await mkdir(path.join(dir, "macos", "Biz.app"), { recursive: true });
+  await writeFile(path.join(dir, "macos", "Biz.app", "Info.plist"), "plist");
+  await mkdir(path.join(dir, "deb"), { recursive: true });
+  await writeFile(path.join(dir, "deb", "biz_0.1.0_amd64.deb"), "deb");
+  await mkdir(path.join(dir, "linux"), { recursive: true });
+  await writeFile(path.join(dir, "linux", "biz_0.1.0_amd64.AppImage"), "appimage");
+
+  const ok = await assertBundles({ dir, kinds: ["app", "deb", "appimage"] });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.missing, []);
+
+  const missing = await assertBundles({ dir, kinds: ["app", "msi"] });
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.missing, ["msi"]);
 });
 
 test("CLI write-sums 产出可校验的清单", async () => {
