@@ -6,6 +6,7 @@ import { flattenGenreTreeOptions, getGenreTree } from "@/api/genre";
 import { bootstrapNovelWorkflow } from "@/api/novelWorkflow";
 import { createNovel } from "@/api/novel";
 import {getDirectorWorkspaceHref} from "@/lib/novelRoutes";
+import { APP_RUNTIME } from "@/lib/constants";
 import { queryKeys } from "@/api/queryKeys";
 import { flattenStoryModeTreeOptions, getStoryModeTree } from "@/api/storyMode";
 import { getWorldList } from "@/api/world";
@@ -123,6 +124,12 @@ export default function NovelCreate() {
 
   const createNovelMutation = useMutation({
     mutationFn: async () => {
+      if (APP_RUNTIME === "desktop") {
+        // Desktop local kernel writes the book directly. The editor's cloud workflow
+        // bootstrap is not a prerequisite for a usable native manuscript.
+        const created = await createNovel(buildNovelCreatePayload(basicForm));
+        return { response: created, workflowTaskId: "" };
+      }
       const task = await bootstrapNovelWorkflow({
         lane: "manual_create",
         title: basicForm.title,

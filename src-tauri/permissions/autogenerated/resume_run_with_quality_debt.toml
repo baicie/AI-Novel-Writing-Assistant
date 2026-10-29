@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-run-with-quality-debt"
+description = "Enables the resume_run_with_quality_debt command without any pre-configured scope."
+commands.allow = ["resume_run_with_quality_debt"]
+
+[[permission]]
+identifier = "deny-resume-run-with-quality-debt"
+description = "Denies the resume_run_with_quality_debt command without any pre-configured scope."
+commands.deny = ["resume_run_with_quality_debt"]

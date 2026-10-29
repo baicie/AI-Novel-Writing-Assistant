@@ -1,12 +1,16 @@
-import { useEffect, useMemo } from "react";
-import { FlaskConical } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Download, FlaskConical } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getChapterEditorWorkspace, getNovelDetail } from "@/api/novel";
 import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
+import { exportChapters } from "@/platform/desktopTransport";
 import { stripLegacyTaskUrlParams } from "@/lib/legacyTaskUrlParams";
 import ChapterEditorShell from "./components/chapterEditor/ChapterEditorShell";
+import NativeChapterHistoryDialog from "./components/NativeChapterHistoryDialog";
+import NovelExportDialog from "./components/NovelExportDialog";
 
 function PageStateCard(props: { message: string }) {
   return (
@@ -19,6 +23,9 @@ function PageStateCard(props: { message: string }) {
 export default function NovelChapterEdit() {
   const { id = "", chapterId = "" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -69,6 +76,22 @@ export default function NovelChapterEdit() {
     );
   }
 
+  const handleExportChapter = async () => {
+    try {
+      const text = await exportChapters({ novelId: id, chapterIds: [chapterId], format: "markdown" });
+      const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${(chapter?.title ?? "chapter").replace(/[\\/:*?"<>|]/g, "_") || "chapter"}.md`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      toast.success("本章正文已导出。");
+    } catch (cause: unknown) {
+      toast.error(cause instanceof Error ? cause.message : "导出失败，请稍后重试。");
+    }
+  };
+
   if (!chapter) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4">
@@ -79,7 +102,14 @@ export default function NovelChapterEdit() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex shrink-0 justify-end">
+      <div className="flex shrink-0 justify-end gap-2">
+        <Button type="button" variant="outline" data-testid="novel-export-button" onClick={() => setExportOpen(true)}>
+          导出小说
+        </Button>
+        <Button type="button" variant="outline" data-testid="chapter-export-button" onClick={() => { void handleExportChapter(); }}>
+          <Download className="mr-2 h-4 w-4" />
+          导出本章
+        </Button>
         <Button asChild variant="outline">
           <Link to={`/prompt-workbench?experience=writing&novelId=${encodeURIComponent(id)}&chapterId=${encodeURIComponent(chapterId)}`}>
             <FlaskConical className="mr-2 h-4 w-4" />
@@ -98,9 +128,23 @@ export default function NovelChapterEdit() {
             ? "error"
             : "ready"}
         onBack={() => navigate(`/novels/${id}/edit`)}
-        onOpenVersionHistory={() => navigate(`/novels/${id}/edit`)}
+        onOpenVersionHistory={() => setHistoryOpen(true)}
         onRefreshWorkspace={() => { void chapterEditorWorkspaceQuery.refetch(); }}
         isRefreshingWorkspace={chapterEditorWorkspaceQuery.isFetching}
+      />
+      <NovelExportDialog novelId={id} chapterCount={detail?.chapters.length ?? 0} open={exportOpen} onOpenChange={setExportOpen} />
+      <NativeChapterHistoryDialog
+        novelId={id}
+        chapterId={chapterId}
+        chapterTitle={chapter.title}
+        currentVersion={chapter.officialVersion ?? 0}
+        currentContent={chapter.content ?? ""}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onRestored={() => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.novels.detail(id) });
+          void chapterEditorWorkspaceQuery.refetch();
+        }}
       />
     </div>
   );

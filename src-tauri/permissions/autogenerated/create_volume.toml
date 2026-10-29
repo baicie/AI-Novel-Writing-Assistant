@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-volume"
+description = "Enables the create_volume command without any pre-configured scope."
+commands.allow = ["create_volume"]
+
+[[permission]]
+identifier = "deny-create-volume"
+description = "Denies the create_volume command without any pre-configured scope."
+commands.deny = ["create_volume"]

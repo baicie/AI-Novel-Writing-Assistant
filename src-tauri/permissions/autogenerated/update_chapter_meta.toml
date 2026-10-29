@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-chapter-meta"
+description = "Enables the update_chapter_meta command without any pre-configured scope."
+commands.allow = ["update_chapter_meta"]
+
+[[permission]]
+identifier = "deny-update-chapter-meta"
+description = "Denies the update_chapter_meta command without any pre-configured scope."
+commands.deny = ["update_chapter_meta"]

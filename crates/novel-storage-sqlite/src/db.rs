@@ -4,13 +4,16 @@ use std::time::Duration;
 
 use novel_application::PortError;
 use novel_prompt::builtin_prompts;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteSynchronous,
+};
 use sqlx::{Row, Sqlite};
 
 pub type Tx<'a> = sqlx::Transaction<'a, Sqlite>;
 
 pub struct SqliteKernel {
     pub(crate) pool: SqlitePool,
+    pub(crate) index_write_lock: tokio::sync::Mutex<()>,
 }
 
 impl SqliteKernel {
@@ -19,6 +22,9 @@ impl SqliteKernel {
             .filename(path)
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
+            // WAL + NORMAL is the durable-across-process-crash mode used by the
+            // local draft journal. It is not a promise against sudden power loss.
+            .synchronous(SqliteSynchronous::Normal)
             .foreign_keys(true)
             .busy_timeout(Duration::from_millis(5000));
         let pool = SqlitePoolOptions::new()
@@ -27,9 +33,107 @@ impl SqliteKernel {
             .await
             .map_err(map_sql)?;
         migrate(&pool).await?;
-        let kernel = Self { pool };
+        let kernel = Self {
+            pool,
+            index_write_lock: tokio::sync::Mutex::new(()),
+        };
         kernel.seed_prompts().await?;
         Ok(kernel)
+    }
+
+    /// Test-only: open a database with only the first `through` migrations applied.
+    /// Used to build historical-schema fixtures for upgrade tests.
+    #[cfg(feature = "test-harness")]
+    pub async fn open_at_migration(path: &Path, through: usize) -> Result<Self, PortError> {
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true)
+            .busy_timeout(Duration::from_millis(5000));
+        let pool = SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(options)
+            .await
+            .map_err(map_sql)?;
+        ensure_schema_migration_table(&pool).await?;
+        for (version, script) in MIGRATION_SCRIPTS.iter().take(through) {
+            if migration_applied(&pool, version).await? {
+                continue;
+            }
+            let now_ms: i64 =
+                sqlx::query_scalar("SELECT CAST(strftime('%s','now')*1000 AS INTEGER)")
+                    .fetch_one(&pool)
+                    .await
+                    .map_err(map_sql)?;
+            let mut tx = pool.begin().await.map_err(map_sql)?;
+            for statement in split_sql(script) {
+                sqlx::query(&statement)
+                    .execute(tx.deref_mut())
+                    .await
+                    .map_err(map_sql)?;
+            }
+            sqlx::query("INSERT INTO schema_migration(version, applied_at) VALUES (?, ?)")
+                .bind(version)
+                .bind(now_ms)
+                .execute(tx.deref_mut())
+                .await
+                .map_err(map_sql)?;
+            tx.commit().await.map_err(map_sql)?;
+        }
+        Ok(Self {
+            pool,
+            index_write_lock: tokio::sync::Mutex::new(()),
+        })
+    }
+
+    /// Create a consistent backup using SQLite's VACUUM INTO.
+    pub async fn backup_to(&self, path: &Path) -> Result<(), PortError> {
+        sqlx::query("VACUUM INTO ?")
+            .bind(path.to_string_lossy().to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        Ok(())
+    }
+
+    pub fn latest_schema_version() -> &'static str {
+        MIGRATION_SCRIPTS
+            .last()
+            .map(|(version, _)| *version)
+            .unwrap_or("0000")
+    }
+
+    pub async fn schema_version(path: &Path) -> Result<String, PortError> {
+        let options = SqliteConnectOptions::new().filename(path).read_only(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(map_sql)?;
+        let version: Option<String> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_migration")
+                .fetch_one(&pool)
+                .await
+                .map_err(map_sql)?;
+        pool.close().await;
+        Ok(version.unwrap_or_else(|| "0000".into()))
+    }
+
+    pub async fn verify_database_file(path: &Path) -> Result<String, PortError> {
+        let options = SqliteConnectOptions::new().filename(path).read_only(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(map_sql)?;
+        let result: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&pool)
+            .await
+            .map_err(map_sql)?;
+        pool.close().await;
+        Ok(result)
     }
 
     pub fn pool(&self) -> &SqlitePool {
@@ -99,6 +203,20 @@ impl SqliteKernel {
 
 pub fn map_sql(error: sqlx::Error) -> PortError {
     let text = error.to_string();
+    if let Some(database) = error.as_database_error() {
+        match database.code().as_deref() {
+            // SQLITE_BUSY / SQLITE_LOCKED are normal contention, not corruption.
+            Some("5") | Some("6") => {
+                return PortError::Conflict("本地数据库正在写入，请稍后重试。".into());
+            }
+            // Keep corrupt/integrity failures distinguishable and non-retryable
+            // by callers that inspect the storage error.
+            Some("11") => {
+                return PortError::Storage(format!("SQLite 完整性错误：{text}"));
+            }
+            _ => {}
+        }
+    }
     if text.contains("UNIQUE constraint failed") {
         if text.contains("workflow_control") || text.contains("one_active_run") {
             PortError::Conflict("这本书已经有一个进行中的创作任务。".into())
@@ -110,15 +228,101 @@ pub fn map_sql(error: sqlx::Error) -> PortError {
     }
 }
 
+pub(crate) const MIGRATION_SCRIPTS: &[(&str, &str)] = &[
+    ("0001", include_str!("../../../migrations/0001_init.sql")),
+    (
+        "0002",
+        include_str!("../../../migrations/0002_model_setup.sql"),
+    ),
+    (
+        "0003",
+        include_str!("../../../migrations/0003_setup_fields.sql"),
+    ),
+    (
+        "0004",
+        include_str!("../../../migrations/0004_post_generation_style_review.sql"),
+    ),
+    (
+        "0005",
+        include_str!("../../../migrations/0005_chapter_local_draft.sql"),
+    ),
+    (
+        "0006",
+        include_str!("../../../migrations/0006_quality_debt.sql"),
+    ),
+    (
+        "0007",
+        include_str!("../../../migrations/0007_candidate_edit_draft.sql"),
+    ),
+    (
+        "0008",
+        include_str!("../../../migrations/0008_quality_debt_occurrence.sql"),
+    ),
+    (
+        "0009",
+        include_str!("../../../migrations/0009_knowledge_source_version.sql"),
+    ),
+    (
+        "0010",
+        include_str!("../../../migrations/0010_story_memory.sql"),
+    ),
+    (
+        "0011",
+        include_str!("../../../migrations/0011_story_fact_source.sql"),
+    ),
+    (
+        "0012",
+        include_str!("../../../migrations/0012_memory_extraction.sql"),
+    ),
+    (
+        "0013",
+        include_str!("../../../migrations/0013_memory_conflict.sql"),
+    ),
+    (
+        "0014",
+        include_str!("../../../migrations/0014_knowledge_index_job.sql"),
+    ),
+    (
+        "0015",
+        include_str!("../../../migrations/0015_conflict_request_hash.sql"),
+    ),
+    (
+        "0016",
+        include_str!("../../../migrations/0016_index_job_epoch.sql"),
+    ),
+    (
+        "0017",
+        include_str!("../../../migrations/0017_knowledge_revision_rank.sql"),
+    ),
+    (
+        "0018",
+        include_str!("../../../migrations/0018_chapter_revision_provenance.sql"),
+    ),
+    (
+        "0019",
+        include_str!("../../../migrations/0019_batch_run.sql"),
+    ),
+    (
+        "0020",
+        include_str!("../../../migrations/0020_structured_story_fact.sql"),
+    ),
+    (
+        "0021",
+        include_str!("../../../migrations/0021_structured_fact_version.sql"),
+    ),
+];
+
 async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
-    const SCRIPTS: &[(&str, &str)] = &[
-        ("0001", include_str!("../../../migrations/0001_init.sql")),
-        ("0002", include_str!("../../../migrations/0002_model_setup.sql")),
-    ];
-    for (version, script) in SCRIPTS {
+    ensure_schema_migration_table(pool).await?;
+    for (version, script) in MIGRATION_SCRIPTS {
         if migration_applied(pool, version).await? {
             continue;
         }
+        let now_ms =
+            sqlx::query_scalar::<_, i64>("SELECT CAST(strftime('%s','now')*1000 AS INTEGER)")
+                .fetch_one(pool)
+                .await
+                .map_err(map_sql)?;
         let mut tx = pool.begin().await.map_err(map_sql)?;
         for statement in split_sql(script) {
             sqlx::query(&statement)
@@ -126,8 +330,36 @@ async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {
                 .await
                 .map_err(map_sql)?;
         }
+        sqlx::query("INSERT INTO schema_migration(version, applied_at) VALUES (?, ?)")
+            .bind(version)
+            .bind(now_ms)
+            .execute(tx.deref_mut())
+            .await
+            .map_err(map_sql)?;
         tx.commit().await.map_err(map_sql)?;
     }
+    Ok(())
+}
+
+async fn ensure_schema_migration_table(pool: &SqlitePool) -> Result<(), PortError> {
+    let ready: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migration'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(map_sql)?;
+    if ready > 0 {
+        return Ok(());
+    }
+    sqlx::query(
+        "CREATE TABLE schema_migration (
+            version TEXT PRIMARY KEY,
+            applied_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await
+    .map_err(map_sql)?;
     Ok(())
 }
 

@@ -110,6 +110,56 @@ mod tests {
     }
 
     #[test]
+    fn chinese_context_policy_benchmark_excludes_future_and_candidate() {
+        let chunks = vec![
+            ChunkRef {
+                id: "c1".into(),
+                owner_type: "confirmed_chapter".into(),
+                body: "第一章 林动进入山门".into(),
+            },
+            ChunkRef {
+                id: "c2".into(),
+                owner_type: "confirmed_chapter".into(),
+                body: "第二章 苏晚在山门等候".into(),
+            },
+            ChunkRef {
+                id: "c3".into(),
+                owner_type: "confirmed_chapter".into(),
+                body: "第三章 陆沉夜袭".into(),
+            },
+            ChunkRef {
+                id: "future".into(),
+                owner_type: "future_chapter".into(),
+                body: "未来章节不能进入上下文".into(),
+            },
+            ChunkRef {
+                id: "candidate".into(),
+                owner_type: "candidate".into(),
+                body: "未确认候选正文".into(),
+            },
+        ];
+        let text = assemble(
+            &["c1".into(), "c2".into(), "c3".into()],
+            &["confirmed_chapter".into()],
+            &["future".into(), "candidate".into(), "c3".into()],
+            &chunks,
+            false,
+            120,
+        );
+        assert!(text.contains("第一章"));
+        assert!(text.contains("第二章"));
+        assert!(text.contains("第三章"));
+        assert!(!text.contains("未来章节"));
+        assert!(!text.contains("未确认候选"));
+        assert!(text.chars().count() <= 120);
+        let included = ["第一章", "第二章", "第三章"]
+            .iter()
+            .filter(|needle| text.contains(**needle))
+            .count();
+        assert_eq!(included, 3, "continuity recall regression");
+    }
+
+    #[test]
     fn rrf_prefers_items_that_appear_in_both_lists() {
         let fused = rrf(
             &[vec!["a".into(), "b".into()], vec!["b".into(), "c".into()]],

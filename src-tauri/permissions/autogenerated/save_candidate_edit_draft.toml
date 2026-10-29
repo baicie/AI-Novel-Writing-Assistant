@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-candidate-edit-draft"
+description = "Enables the save_candidate_edit_draft command without any pre-configured scope."
+commands.allow = ["save_candidate_edit_draft"]
+
+[[permission]]
+identifier = "deny-save-candidate-edit-draft"
+description = "Denies the save_candidate_edit_draft command without any pre-configured scope."
+commands.deny = ["save_candidate_edit_draft"]

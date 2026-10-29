@@ -1,0 +1,312 @@
+name: Tauri Release
+
+# 正式版只能由 Tag 触发；手动触发只允许 QA/预发布，并且必须固定源码 SHA。
+on:
+  push:
+    tags:
+      - "tauri-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布 Tag（tauri-vX.Y.Z 或 tauri-vX.Y.Z-beta.N）"
+        required: true
+        type: string
+      mode:
+        description: "签名模式：unsigned-qa 只出未签名包；updater-signed 需要已配置私钥"
+        required: true
+        type: choice
+        default: unsigned-qa
+        options: [unsigned-qa, updater-signed]
+      source_sha:
+        description: "要构建的提交（7-40 位十六进制）"
+        required: true
+        type: string
+      publish:
+        description: "所有门禁通过后是否把 Draft 正式发布到 stable 通道"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: tauri-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22.12.0"
+  PNPM_VERSION: "10.6.0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  prepare:
+    name: 校验 Tag、版本与签名模式
+    runs-on: ubuntu-24.04
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+      channel: ${{ steps.mode.outputs.channel }}
+      version: ${{ steps.mode.outputs.version }}
+      create_updater_artifacts: ${{ steps.mode.outputs.create_updater_artifacts }}
+      release_tag: ${{ steps.ref.outputs.release_tag }}
+      target_commit: ${{ steps.ref.outputs.target_commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 解析发布引用
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            commit="$(git rev-parse HEAD)"
+          else
+            tag="${GITHUB_REF_NAME}"
+            commit="${GITHUB_SHA}"
+          fi
+          echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "target_commit=${commit}" >> "${GITHUB_OUTPUT}"
+          echo "发布 Tag=${tag} 提交=${commit}"
+      - name: 解析签名模式（缺密钥即失败，不自动降级）
+        id: mode
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          node scripts/tauri-release/cli.mjs resolve-mode \
+            --tag "${{ steps.ref.outputs.release_tag }}" \
+            --event "${{ github.event_name }}" \
+            --mode "${{ github.event_name == 'workflow_dispatch' && inputs.mode || '' }}" \
+            --source-sha "${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || '' }}"
+      - name: 校验源码版本与 Tag 一致
+        run: |
+          node scripts/tauri-release/cli.mjs check-versions \
+            --expected "${{ steps.mode.outputs.version }}"
+      - name: 正式版拒绝从非 Tag 触发
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'updater-signed' && contains(github.ref, 'refs/heads/') }}
+        run: |
+          echo "updater-signed 只能由 tauri-v* Tag 触发，避免从任意分支产出正式更新索引" >&2
+          exit 1
+
+  quality:
+    name: 质量门禁
+    needs: prepare
+    uses: ./.github/workflows/tauri-ci.yml
+    with:
+      bundle_check: false
+    permissions:
+      contents: read
+
+  build:
+    name: 构建 ${{ matrix.label }}
+    needs: [prepare, quality]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macOS arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            kinds: app,dmg
+            updater_glob: "*.app.tar.gz"
+          - os: macos-13
+            label: macOS x64
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            kinds: app,dmg
+            updater_glob: "*.app.tar.gz"
+          - os: windows-2022
+            label: Windows x64
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            kinds: nsis
+            updater_glob: "*.nsis.zip"
+          - os: ubuntu-22.04
+            label: Linux x64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            kinds: deb,appimage
+            updater_glob: "*.AppImage.tar.gz"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.target_commit }}
+          fetch-depth: 0
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libdbus-1-dev libssl-dev build-essential curl file
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: release-${{ matrix.target }}
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 构建共享包（client 依赖其 dist）
+        run: pnpm --filter @ai-novel/shared build
+      - name: 校验版本三处一致
+        run: pnpm run tauri:release:check-versions
+      - name: 构建安装包
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+        run: |
+          extra=""
+          if [ "${{ needs.prepare.outputs.create_updater_artifacts }}" = "true" ]; then
+            extra="--config src-tauri/tauri.updater.conf.json"
+          fi
+          pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${extra}
+      - name: 统一更新包命名（版本 + 平台）
+        if: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' }}
+        shell: bash
+        run: |
+          dir="target/${{ matrix.target }}/release/bundle"
+          found=0
+          while IFS= read -r sig; do
+            archive="${sig%.sig}"
+            base="$(basename "${archive}")"
+            stem="${base%.tar.gz}"
+            stem="${stem%.zip}"
+            case "${{ matrix.target }}" in
+              aarch64-apple-darwin) arch="aarch64" ;;
+              x86_64-apple-darwin) arch="x64" ;;
+              x86_64-pc-windows-msvc) arch="x64" ;;
+              x86_64-unknown-linux-gnu) arch="amd64" ;;
+            esac
+            suffix="${base#${stem}}"
+            newbase="${stem}_${{ needs.prepare.outputs.version }}_${arch}${suffix}"
+            mv "${archive}" "$(dirname "${archive}")/${newbase}"
+            mv "${sig}" "$(dirname "${sig}")/${newbase}.sig"
+            found=$((found + 1))
+          done < <(find "${dir}" -name "*.sig")
+          if [ "${found}" -eq 0 ]; then
+            echo "updater-signed 模式没有生成任何 .sig 更新包" >&2
+            exit 1
+          fi
+      - name: 校验产物真实存在
+        shell: bash
+        run: |
+          node scripts/tauri-release/cli.mjs assert-bundles \
+            --dir "target/${{ matrix.target }}/release/bundle" --kinds "${{ matrix.kinds }}"
+      - name: 生成 SHA256 清单
+        shell: bash
+        run: |
+          node scripts/tauri-release/cli.mjs write-sums \
+            --dir "target/${{ matrix.target }}/release/bundle" \
+            --out "target/${{ matrix.target }}/SHA256SUMS.txt"
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-release-${{ needs.prepare.outputs.version }}-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle
+            target/${{ matrix.target }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: 汇总产物并创建 Draft Release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      UPDATER: ${{ needs.prepare.outputs.create_updater_artifacts }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 下载全部平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: tauri-release-${{ needs.prepare.outputs.version }}-*
+          merge-multiple: true
+      - name: 逐个平台校验产物
+        run: |
+          for kinds in "app,dmg" "nsis" "deb,appimage"; do
+            if node scripts/tauri-release/cli.mjs assert-bundles --dir artifacts --kinds "${kinds}" 2>/dev/null; then
+              echo "已确认产物类型：${kinds}"
+              ok=1
+            fi
+          done
+          if [ "${ok:-0}" != "1" ]; then
+            echo "没有找到任何平台安装包" >&2
+            exit 1
+          fi
+      - name: 生成总 SHA256 清单
+        run: node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt
+      - name: 生成 updater 索引（仅 updater-signed）
+        if: ${{ env.UPDATER == 'true' }}
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}"
+          node scripts/tauri-release/cli.mjs write-latest \
+            --dir artifacts --version "${VERSION}" --base-url "${base}" \
+            --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out artifacts/latest.json
+      - name: 生成更新日志
+        run: |
+          {
+            echo "## 变更"
+            prev="$(git tag --list 'tauri-v*' --sort=-v:refname | grep -v "^${RELEASE_TAG}$" | head -1)"
+            if [ -n "${prev}" ]; then
+              git log --pretty='- %s' "${prev}..HEAD"
+            else
+              git log --pretty='- %s' -20 HEAD
+            fi
+          } > notes.md
+      - name: 创建 Draft Release（不自动公开）
+        run: |
+          prerelease_flag=""
+          if [ "${CHANNEL}" != "stable" ]; then prerelease_flag="--prerelease"; fi
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} 已存在，继续向其追加产物"
+          else
+            gh release create "${RELEASE_TAG}" --draft --title "Biz Novel Studio ${VERSION}" --notes-file notes.md ${prerelease_flag}
+          fi
+          gh release view "${RELEASE_TAG}" --json isDraft --jq '"draft=\(.isDraft)"'
+      - name: 上传产物（只上传文件，跳过目录）
+        run: |
+          mapfile -t files < <(find artifacts -type f | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "没有可上传的产物文件" >&2
+            exit 1
+          fi
+          printf '%s\n' "${files[@]}"
+          gh release upload "${RELEASE_TAG}" "${files[@]}" --clobber
+      - name: 校验上传结果
+        run: |
+          count="$(gh release view "${RELEASE_TAG}" --json assets --jq '.assets | length')"
+          echo "已上传资产数：${count}"
+          if [ "${count}" -lt 2 ]; then
+            echo "Release 资产不足，保持 Draft" >&2
+            exit 1
+          fi
+      - name: 正式发布（仅 stable 且显式允许）
+        if: ${{ env.CHANNEL == 'stable' && inputs.publish == true }}
+        run: gh release edit "${RELEASE_TAG}" --draft=false

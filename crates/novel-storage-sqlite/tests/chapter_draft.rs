@@ -1,0 +1,497 @@
+use novel_application::{
+    NewChapter, NewNovel, NovelRepository, SaveChapterDraftRecord, SaveChapterRecord,
+};
+use novel_storage_sqlite::SqliteKernel;
+use sqlx::Row;
+
+#[tokio::test]
+async fn local_drafts_are_isolated_and_cleared_only_for_matching_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("draft.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "novel-draft".into(),
+            title: "草稿书".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        NewChapter {
+            id: "chapter-draft".into(),
+            novel_id: "novel-draft".into(),
+            title: "第一章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+
+    let first = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "novel-draft".into(),
+            chapter_id: "chapter-draft".into(),
+            client_id: "window-a".into(),
+            content: "窗口 A 的未保存正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: 0,
+            now_ms: 10,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.local_revision, 1);
+    assert_eq!(
+        NovelRepository::get_chapter_draft(&kernel, "novel-draft", "chapter-draft", "window-a")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "窗口 A 的未保存正文"
+    );
+
+    NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "novel-draft".into(),
+            chapter_id: "chapter-draft".into(),
+            client_id: "window-b".into(),
+            content: "窗口 B 的未保存正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: 0,
+            now_ms: 11,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        NovelRepository::get_chapter_draft(&kernel, "novel-draft", "chapter-draft", "window-a")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "窗口 A 的未保存正文"
+    );
+    assert_eq!(
+        NovelRepository::get_chapter_draft(&kernel, "novel-draft", "chapter-draft", "window-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "窗口 B 的未保存正文"
+    );
+
+    // A stale/mismatched official save must not delete a newer draft.
+    assert!(
+        !NovelRepository::clear_chapter_draft(
+            &kernel,
+            "novel-draft",
+            "chapter-draft",
+            "window-a",
+            "窗口 A 的未保存正文",
+            0
+        )
+        .await
+        .unwrap()
+    );
+    let second = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "novel-draft".into(),
+            chapter_id: "chapter-draft".into(),
+            client_id: "window-a".into(),
+            content: "窗口 A 更新后的正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: 1,
+            now_ms: 12,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.local_revision, 2);
+    assert!(
+        !NovelRepository::clear_chapter_draft(
+            &kernel,
+            "novel-draft",
+            "chapter-draft",
+            "window-a",
+            "窗口 A 更新后的正文",
+            1
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        NovelRepository::clear_chapter_draft(
+            &kernel,
+            "novel-draft",
+            "chapter-draft",
+            "window-a",
+            "窗口 A 更新后的正文",
+            2
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        NovelRepository::get_chapter_draft(&kernel, "novel-draft", "chapter-draft", "window-a")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // An official save (including an AI-promoted version) must not delete or overwrite
+    // a local draft from another writer.
+    let official = NovelRepository::save_user_chapter(
+        &kernel,
+        SaveChapterRecord {
+            novel_id: "novel-draft".into(),
+            chapter_id: "chapter-draft".into(),
+            expected_version: 0,
+            title: "第一章".into(),
+            content: "官方保存的正文".into(),
+            revision_id: "revision-official".into(),
+            artifact_id: "artifact-official".into(),
+            content_sha256: "official-hash".into(),
+            now_ms: 20,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(official.content, "官方保存的正文");
+    let preserved =
+        NovelRepository::get_chapter_draft(&kernel, "novel-draft", "chapter-draft", "window-b")
+            .await
+            .unwrap()
+            .expect("window B local draft must survive an official save from window A");
+    assert_eq!(preserved.content, "窗口 B 的未保存正文");
+
+    let revisions: i64 = sqlx::query("SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = ?")
+        .bind("chapter-draft")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap()
+        .try_get(0)
+        .unwrap();
+    assert_eq!(
+        revisions, 1,
+        "only the explicit official save creates an official revision"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_and_stale_draft_writes_cannot_overwrite_newer_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("race.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n".into(),
+            title: "书".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    NovelRepository::create_chapter(
+        &kernel,
+        NewChapter {
+            id: "c".into(),
+            novel_id: "n".into(),
+            title: "章".into(),
+            sort_order: 1,
+            volume_id: None,
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+
+    let make = |content: &str, now_ms: i64| SaveChapterDraftRecord {
+        novel_id: "n".into(),
+        chapter_id: "c".into(),
+        client_id: "same-window".into(),
+        content: content.into(),
+        base_official_version: 0,
+        base_updated_at: "t0".into(),
+        expected_revision: 0,
+        now_ms,
+    };
+    let (left, right) = tokio::join!(
+        NovelRepository::save_chapter_draft(&kernel, make("并发 A", 10)),
+        NovelRepository::save_chapter_draft(&kernel, make("并发 B", 11)),
+    );
+    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
+    let first = NovelRepository::get_chapter_draft(&kernel, "n", "c", "same-window")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.local_revision, 1);
+
+    let second = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            client_id: "same-window".into(),
+            content: "较新的正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: first.local_revision,
+            now_ms: 12,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.local_revision, 2);
+
+    let stale = NovelRepository::save_chapter_draft(
+        &kernel,
+        SaveChapterDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            client_id: "same-window".into(),
+            content: "迟到的旧正文".into(),
+            base_official_version: 0,
+            base_updated_at: "t0".into(),
+            expected_revision: first.local_revision,
+            now_ms: 13,
+        },
+    )
+    .await;
+    assert!(stale.is_err(), "stale local revision must be rejected");
+    assert_eq!(
+        NovelRepository::get_chapter_draft(&kernel, "n", "c", "same-window")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "较新的正文"
+    );
+}
+
+#[tokio::test]
+async fn sqlite_uses_wal_and_normal_synchronous() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("pragmas.sqlite"))
+        .await
+        .unwrap();
+    let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(journal.to_lowercase(), "wal");
+    assert_eq!(
+        synchronous, 1,
+        "NORMAL synchronous is required for the tested durability level"
+    );
+}
+
+#[tokio::test]
+async fn candidate_edit_journal_is_isolated_and_revision_cas() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("candidate.sqlite"))
+        .await
+        .unwrap();
+    let make =
+        |content: &str, expected_revision: i64| novel_application::SaveCandidateEditDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            run_id: "r".into(),
+            gate_id: "g".into(),
+            client_id: "w1".into(),
+            base_candidate_id: "cand".into(),
+            base_content_sha256: "base".into(),
+            content: content.into(),
+            control_version: 7,
+            expected_revision,
+            now_ms: 10,
+        };
+    let first = NovelRepository::save_candidate_edit_draft(&kernel, make("作者编辑 A", 0))
+        .await
+        .unwrap();
+    assert_eq!(first.local_revision, 1);
+    assert_eq!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w1")
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
+        "作者编辑 A"
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w2")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let stale = NovelRepository::save_candidate_edit_draft(&kernel, make("迟到旧编辑", 0)).await;
+    assert!(stale.is_err());
+    let second = NovelRepository::save_candidate_edit_draft(&kernel, make("作者编辑 B", 1))
+        .await
+        .unwrap();
+    assert_eq!(second.local_revision, 2);
+    assert!(
+        !NovelRepository::clear_candidate_edit_draft(&kernel, "r", "g", "w1", "作者编辑 A", 2)
+            .await
+            .unwrap()
+    );
+    assert!(
+        NovelRepository::clear_candidate_edit_draft(&kernel, "r", "g", "w1", "作者编辑 B", 2)
+            .await
+            .unwrap()
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "g", "w1")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn candidate_edit_journal_isolates_windows_and_discovers_old_drafts() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("candidate-windows.sqlite"))
+        .await
+        .unwrap();
+    let record = |client: &str, gate: &str, content: &str, expected_revision: i64| {
+        novel_application::SaveCandidateEditDraftRecord {
+            novel_id: "n".into(),
+            chapter_id: "c".into(),
+            run_id: "r".into(),
+            gate_id: gate.into(),
+            client_id: client.into(),
+            base_candidate_id: "cand".into(),
+            base_content_sha256: "base".into(),
+            content: content.into(),
+            control_version: 7,
+            expected_revision,
+            now_ms: 10,
+        }
+    };
+    let a = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-a", "gate-1", "A 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    let b = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-b", "gate-1", "B 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    assert_eq!((a.local_revision, b.local_revision), (1, 1));
+    let a2 = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-a", "gate-1", "A 的新编辑", 1),
+    )
+    .await
+    .unwrap();
+    assert_eq!(a2.local_revision, 2);
+    let b_after = NovelRepository::get_candidate_edit_draft(&kernel, "r", "gate-1", "window-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(b_after.local_revision, 1, "A must not advance B revision");
+    assert_eq!(b_after.content, "B 的编辑");
+    assert!(
+        NovelRepository::save_candidate_edit_draft(
+            &kernel,
+            record("window-a", "gate-1", "迟到的旧 A", 1)
+        )
+        .await
+        .is_err()
+    );
+    let listed = NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|draft| draft.client_id == "window-a")
+            .count(),
+        1
+    );
+    assert_eq!(
+        listed
+            .iter()
+            .filter(|draft| draft.client_id == "window-b")
+            .count(),
+        1
+    );
+    assert!(
+        NovelRepository::clear_candidate_edit_draft(
+            &kernel,
+            "r",
+            "gate-1",
+            "window-a",
+            "A 的新编辑",
+            2
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        NovelRepository::get_candidate_edit_draft(&kernel, "r", "gate-1", "window-b")
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // A Gate change must not make an old draft disappear.
+    let old_gate = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("window-c", "gate-0", "旧 Gate 的编辑", 0),
+    )
+    .await
+    .unwrap();
+    assert_eq!(old_gate.gate_id, "gate-0");
+    let all = NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+        .await
+        .unwrap();
+    assert!(
+        all.iter()
+            .any(|draft| draft.gate_id == "gate-1" && draft.client_id == "window-b")
+    );
+    assert!(
+        all.iter()
+            .any(|draft| draft.gate_id == "gate-0" && draft.client_id == "window-c")
+    );
+
+    // Legacy drafts written under the previous shared localStorage identity remain visible.
+    let legacy = NovelRepository::save_candidate_edit_draft(
+        &kernel,
+        record("localStorage-shared-id", "gate-1", "旧版共享身份草稿", 0),
+    )
+    .await
+    .unwrap();
+    assert!(
+        NovelRepository::list_candidate_edit_drafts(&kernel, "n", "r")
+            .await
+            .unwrap()
+            .iter()
+            .any(|draft| draft.client_id == legacy.client_id)
+    );
+}

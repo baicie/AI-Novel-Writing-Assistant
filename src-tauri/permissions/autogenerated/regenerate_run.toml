@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regenerate-run"
+description = "Enables the regenerate_run command without any pre-configured scope."
+commands.allow = ["regenerate_run"]
+
+[[permission]]
+identifier = "deny-regenerate-run"
+description = "Denies the regenerate_run command without any pre-configured scope."
+commands.deny = ["regenerate_run"]

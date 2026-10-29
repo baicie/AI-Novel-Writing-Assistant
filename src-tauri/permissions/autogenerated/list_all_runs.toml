@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-all-runs"
+description = "Enables the list_all_runs command without any pre-configured scope."
+commands.allow = ["list_all_runs"]
+
+[[permission]]
+identifier = "deny-list-all-runs"
+description = "Denies the list_all_runs command without any pre-configured scope."
+commands.deny = ["list_all_runs"]

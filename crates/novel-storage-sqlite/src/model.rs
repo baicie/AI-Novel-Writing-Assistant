@@ -2,7 +2,7 @@ use novel_application::PortError;
 use serde::Serialize;
 use sqlx::Row;
 
-use crate::db::{map_sql, SqliteKernel};
+use crate::db::{SqliteKernel, map_sql};
 
 pub const MODEL_SECRET_REF: &str = "openai-compatible";
 

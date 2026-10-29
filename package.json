@@ -28,6 +28,7 @@
     "db:seed": "pnpm --filter @ai-novel/server db:seed",
     "db:studio": "pnpm --filter @ai-novel/server db:studio",
     "build": "pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/server build && pnpm --filter @ai-novel/client build",
+    "build:desktop:backend": "pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/server prisma:generate && pnpm --filter @ai-novel/server build",
     "build:site": "pnpm --filter @ai-novel/site build",
     "check:docs-manifest": "node scripts/check-docs-manifest.cjs",
     "build:desktop": "pnpm --filter @ai-novel/desktop build",
@@ -59,11 +60,22 @@
     "verify:desktop-package:mac": "pnpm run stage:desktop && node desktop/scripts/run-electron-builder.cjs --dir --mac --arm64 --x64 && node desktop/scripts/verify-desktop-package.cjs --platform mac",
     "verify:desktop-package:mac:reuse-stage": "node desktop/scripts/run-electron-builder.cjs --dir --mac --arm64 --x64 && node desktop/scripts/verify-desktop-package.cjs --platform mac",
     "verify:desktop:installer": "pnpm run dist:desktop:nsis && node desktop/scripts/verify-desktop-installer.cjs",
-    "typecheck": "pnpm --filter @ai-novel/shared build && pnpm --filter @ai-novel/server typecheck && pnpm --filter @ai-novel/client typecheck && pnpm --filter @ai-novel/desktop typecheck",
+    "typecheck": "NODE_OPTIONS=\"${NODE_OPTIONS:---max-old-space-size=8192}\" pnpm --filter @ai-novel/shared build && NODE_OPTIONS=\"${NODE_OPTIONS:---max-old-space-size=8192}\" pnpm --filter @ai-novel/server typecheck && pnpm --filter @ai-novel/client typecheck && pnpm --filter @ai-novel/desktop typecheck",
     "test": "pnpm --filter @ai-novel/server test",
     "test:client": "pnpm --filter @ai-novel/client test",
     "test:all": "pnpm --filter @ai-novel/server test:all && pnpm --filter @ai-novel/client test",
-    "lint": "pnpm --filter @ai-novel/shared lint && pnpm --filter @ai-novel/server lint && pnpm --filter @ai-novel/client lint"
+    "lint": "pnpm --filter @ai-novel/shared lint && pnpm --filter @ai-novel/server lint && pnpm --filter @ai-novel/client lint",
+    "dev:tauri": "cargo tauri dev",
+    "build:tauri": "cargo tauri build --target aarch64-apple-darwin --bundles app",
+    "build:tauri:debug": "cargo tauri build --debug --no-bundle --target aarch64-apple-darwin",
+    "check:tauri": "cargo check -p novel-desktop && pnpm --filter @ai-novel/client typecheck",
+    "test:rust": "cargo test -p novel-domain -p novel-workflow -p novel-llm -p novel-storage-sqlite -p novel-application",
+    "build:tauri:dmg": "cargo tauri build --target aarch64-apple-darwin --bundles app,dmg",
+    "build:tauri:e2e": "cargo tauri build --features e2e --config src-tauri/tauri.e2e.conf.json --target aarch64-apple-darwin --bundles app",
+    "test:tauri:e2e": "bash scripts/run-tauri-e2e.sh",
+    "test:release-scripts": "node --test scripts/tauri-release/release.test.mjs scripts/tauri-release/cli.test.mjs",
+    "tauri:release:check-versions": "node scripts/tauri-release/cli.mjs check-versions",
+    "tauri:ci:check-workflows": "node scripts/tauri-release/cli.mjs check-workflows"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -78,7 +90,14 @@
     ]
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.2",
+    "@wdio/cli": "9.31.2",
+    "@wdio/local-runner": "9.31.2",
+    "@wdio/mocha-framework": "9.31.2",
+    "@wdio/tauri-plugin": "1.5.0",
+    "@wdio/tauri-service": "1.5.0",
     "concurrently": "^9.2.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "webdriverio": "9.31.9"
   }
 }

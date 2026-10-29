@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-candidate-edit-draft"
+description = "Enables the clear_candidate_edit_draft command without any pre-configured scope."
+commands.allow = ["clear_candidate_edit_draft"]
+
+[[permission]]
+identifier = "deny-clear-candidate-edit-draft"
+description = "Denies the clear_candidate_edit_draft command without any pre-configured scope."
+commands.deny = ["clear_candidate_edit_draft"]

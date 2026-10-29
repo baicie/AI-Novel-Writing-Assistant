@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-novel-selection"
+description = "Enables the export_novel_selection command without any pre-configured scope."
+commands.allow = ["export_novel_selection"]
+
+[[permission]]
+identifier = "deny-export-novel-selection"
+description = "Denies the export_novel_selection command without any pre-configured scope."
+commands.deny = ["export_novel_selection"]

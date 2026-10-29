@@ -1,0 +1,14 @@
+{
+  "dataset": "p13-large-v1",
+  "questions": 50,
+  "positives": 40,
+  "noAnswer": 10,
+  "embedding": "deterministic-mock-64",
+  "strategies": {
+    "fts": {"recallAt10": 0.8, "mrr": 0.8, "ndcgAt10": 0.8, "noAnswerCorrect": 10},
+    "vector": {"recallAt10": 0.70, "mrr": 0.48, "ndcgAt10": 0.50, "noAnswerCorrect": null},
+    "hybridRrf": {"recallAt10": 0.82, "mrr": 0.79, "ndcgAt10": 0.79, "noAnswerCorrect": null},
+    "hybridPolicy": {"recallAt10": 0.82, "mrr": 0.79, "ndcgAt10": 0.79, "noAnswerCorrect": null}
+  },
+  "recommendation": "keep-fts-default; re-evaluate hybrid only with real embeddings"
+}

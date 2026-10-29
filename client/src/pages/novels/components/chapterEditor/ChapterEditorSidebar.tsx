@@ -102,6 +102,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
             <div className="grid grid-cols-1 gap-2">
               <Button
                 size="sm"
+                data-testid="chapter-save-button"
                 onClick={onSave}
                 disabled={!isDirty || isSaving}
                 className="w-full"
@@ -115,8 +116,8 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
                   查看本章版本
                 </Button>
               ) : onOpenVersionHistory ? (
-                <Button size="sm" variant="outline" onClick={onOpenVersionHistory} className="w-full">
-                  版本入口
+                <Button size="sm" variant="outline" onClick={onOpenVersionHistory} className="w-full" data-testid="chapter-version-history-button">
+                  查看本章历史
                 </Button>
               ) : null}
               {onRefreshWorkspace ? (

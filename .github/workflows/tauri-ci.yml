@@ -1,0 +1,203 @@
+name: Tauri CI
+
+# 质量门禁：只在 Tauri 相关路径变化时运行，release/nightly 通过 workflow_call 复用同一套门禁。
+on:
+  workflow_call:
+    inputs:
+      bundle_check:
+        description: 是否额外跑一次真实 bundle 构建
+        type: boolean
+        default: true
+  workflow_dispatch:
+  pull_request:
+    paths: &tauri_paths
+      - "crates/**"
+      - "src-tauri/**"
+      - "client/**"
+      - "scripts/tauri-release/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/tauri-ci.yml"
+  push:
+    branches:
+      - "migration/tauri-2-rust"
+      - "beta"
+      - "main"
+    paths: *tauri_paths
+
+concurrency:
+  group: tauri-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22.12.0"
+  PNPM_VERSION: "10.6.0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  release-tools:
+    name: 发布脚本单测
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: 版本 / 模式 / 清单脚本单测
+        run: node --test scripts/tauri-release/release.test.mjs scripts/tauri-release/cli.test.mjs
+
+  frontend:
+    name: 前端类型检查与单测
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 构建共享包（client 依赖其 dist）
+        run: pnpm --filter @ai-novel/shared build
+      - name: 类型检查
+        run: pnpm --filter @ai-novel/client typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: 前端单测
+        run: pnpm --filter @ai-novel/client test
+
+  rust:
+    name: Rust 格式 / Clippy / 单测
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+      - name: 校验工具链与 rust-toolchain.toml 一致
+        run: |
+          pinned="$(grep -E '^channel' rust-toolchain.toml | cut -d'"' -f2)"
+          installed="$(rustc --version | cut -d' ' -f2)"
+          echo "rust-toolchain.toml=$pinned rustc=$installed"
+          test "$pinned" = "$installed"
+      - name: 格式检查（迁移 crate 子集，novel-http 仍有历史格式债务）
+        run: |
+          cargo fmt --check -p novel-domain -p novel-workflow -p novel-llm -p novel-storage-sqlite \
+            -p novel-application -p novel-context -p novel-prompt -p novel-platform -p novel-desktop
+      - name: Clippy（库目标，警告即失败）
+        run: cargo clippy --workspace --exclude novel-http --lib -- -D warnings
+      - name: SQLite 迁移校验
+        run: cargo test -p novel-storage-sqlite
+      - name: Rust 单测
+        run: cargo test --workspace --exclude novel-http
+
+  bundle:
+    name: Bundle 构建检查（${{ matrix.label }}）
+    if: ${{ github.event_name != 'workflow_call' || inputs.bundle_check == true }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macOS arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            kinds: app,dmg
+          - os: ubuntu-22.04
+            label: Linux x64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            kinds: deb,appimage
+    steps:
+      - uses: actions/checkout@v6
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libdbus-1-dev libssl-dev build-essential curl file
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: bundle-${{ matrix.target }}
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 构建共享包（client 依赖其 dist）
+        run: pnpm --filter @ai-novel/shared build
+      - name: 校验版本三处一致
+        run: pnpm run tauri:release:check-versions
+      - name: 构建未签名 bundle
+        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: 校验产物真实存在
+        run: |
+          node scripts/tauri-release/cli.mjs assert-bundles \
+            --dir "target/${{ matrix.target }}/release/bundle" --kinds "${{ matrix.kinds }}"
+      - name: 生成 SHA256 清单
+        run: |
+          node scripts/tauri-release/cli.mjs write-sums \
+            --dir "target/${{ matrix.target }}/release/bundle" \
+            --out "target/${{ matrix.target }}/bundle-SHA256SUMS.txt"
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-ci-bundle-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle
+            target/${{ matrix.target }}/bundle-SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  native-e2e:
+    name: 原生端到端（可选）
+    # 原生 E2E 需要真实 GUI 与 WebDriver，只在打标签或手动触发时运行，避免常规 PR 被 GUI 抖动阻塞。
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-native-e2e') }}
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: native-e2e
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 索引崩溃接管三阶段
+        run: bash scripts/run-tauri-index-crash-e2e.sh
+      - name: 备份写到一半被强杀
+        run: bash scripts/run-tauri-backup-crash-e2e.sh

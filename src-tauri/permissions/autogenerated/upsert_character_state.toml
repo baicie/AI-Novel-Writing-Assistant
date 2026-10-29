@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-character-state"
+description = "Enables the upsert_character_state command without any pre-configured scope."
+commands.allow = ["upsert_character_state"]
+
+[[permission]]
+identifier = "deny-upsert-character-state"
+description = "Denies the upsert_character_state command without any pre-configured scope."
+commands.deny = ["upsert_character_state"]

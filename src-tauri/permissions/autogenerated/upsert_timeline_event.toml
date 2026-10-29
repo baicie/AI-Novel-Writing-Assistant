@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-timeline-event"
+description = "Enables the upsert_timeline_event command without any pre-configured scope."
+commands.allow = ["upsert_timeline_event"]
+
+[[permission]]
+identifier = "deny-upsert-timeline-event"
+description = "Denies the upsert_timeline_event command without any pre-configured scope."
+commands.deny = ["upsert_timeline_event"]

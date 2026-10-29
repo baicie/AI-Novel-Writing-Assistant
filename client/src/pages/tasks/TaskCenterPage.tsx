@@ -15,6 +15,8 @@ import { Activity, ListChecks, RefreshCw, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WorkspaceHeader, WorkspaceNextAction } from "@/components/workspace";
 import { useLLMStore } from "@/store/llmStore";
+import { hasDesktopShell } from "@/platform/desktopTransport";
+import NativeTaskCenterPage from "./NativeTaskCenterPage";
 import TaskCenterFilterPanel from "./components/TaskCenterFilterPanel";
 import TaskCenterDetailPanel from "./components/TaskCenterDetailPanel";
 import TaskCenterListPanel from "./components/TaskCenterListPanel";
@@ -46,6 +48,7 @@ function normalizeTaskSteps(steps: unknown): UnifiedTaskStep[] {
 }
 
 export default function TaskCenterPage() {
+  if (hasDesktopShell()) return <NativeTaskCenterPage />;
   const llm = useLLMStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const [kind, setKind] = useState<TaskKind | "">("");

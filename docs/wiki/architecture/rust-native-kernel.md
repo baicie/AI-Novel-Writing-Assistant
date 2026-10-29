@@ -28,6 +28,8 @@
 - 模型地址默认只接受 HTTPS。本机 HTTP 必须单独允许。私网、链路本地和云元数据地址不能使用，地址里也不能带账号信息。
 - 桌面命令标识是 `com.ai-novel.studio`，和现有 Electron 应用标识分开。默认不配置模型，离线也能打开本地资料。打包体积、签名和公证还不是这一阶段的完成条件。
 - 前端类型目前手写在传输层，并与 Rust 事件 JSON 测试对齐。形状一旦继续分叉，应改为生成绑定，而不是在页面里各写一份。
+- 内核不是 Tauri 安装包的产品主链路。自动导演、章节生产等全部产品能力由安装包内置的 Node 服务提供，见 [Tauri 桌面壳与 Node 本地服务 sidecar](./tauri-node-sidecar.md)。迁移要按模块替换对应的 HTTP 接口；迁移完成前，不能把 Rust 命令当作产品主入口，也不能把内核的阶段性完成写成后端已经迁移到 Rust。
+- 桌面壳目前给内核接的是 `UnconfiguredProvider`，本地生成还没有接入真实模型。
 
 ## 示例
 
@@ -62,3 +64,4 @@
 
 - 本地内核设计：`../../design/2026-10-12-rust-native-kernel.md`
 - 现有事实层边界：`./director-next-fact-layer.md`
+- 桌面壳与 Node 服务的运行合同：`./tauri-node-sidecar.md`

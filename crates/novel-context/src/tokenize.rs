@@ -39,6 +39,8 @@ pub fn tokenize(text: &str, lexicon: &Lexicon) -> Vec<String> {
                 index += 1;
                 continue;
             }
+            // Preserve a lone CJK term (single-character names and rare terms).
+            tokens.push(ch.to_string());
         }
         index += 1;
     }
@@ -83,6 +85,13 @@ fn is_punct(ch: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_single_cjk_terms_for_chinese_queries() {
+        let tokens = tokenize("龙，祠。", &Lexicon::default());
+        assert!(tokens.iter().any(|token| token == "龙"));
+        assert!(tokens.iter().any(|token| token == "祠"));
+    }
 
     #[test]
     fn recalls_bigrams_and_proper_names() {
