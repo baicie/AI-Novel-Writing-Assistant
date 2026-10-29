@@ -113,25 +113,28 @@ jobs:
       - name: Rust 单测
         run: cargo test --workspace --exclude novel-http
 
+
   bundle:
     name: Bundle 构建检查（${{ matrix.label }}）
-    if: ${{ github.event_name != 'workflow_call' || inputs.bundle_check == true }}
+    # macOS runner 并发少、排队久，排队中的作业会被取消，所以 push 只跑 Linux；
+    # PR、手动触发与发布质量门禁仍然完整验证 macOS bundle。
+    if: ${{ (github.event_name != 'workflow_call' || inputs.bundle_check == true) && github.event_name != 'push' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            label: macOS arm64
-            target: aarch64-apple-darwin
-            bundles: app,dmg
-            kinds: app,dmg
           - os: ubuntu-22.04
             label: Linux x64
             target: x86_64-unknown-linux-gnu
             bundles: deb,appimage
             kinds: deb,appimage
-    steps:
+          - os: macos-14
+            label: macOS arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            kinds: app,dmg
+    steps: &bundle-steps
       - uses: actions/checkout@v6
       - name: 安装 Linux 构建依赖
         if: runner.os == 'Linux'
@@ -210,3 +213,19 @@ jobs:
         run: bash scripts/run-tauri-index-crash-e2e.sh
       - name: 备份写到一半被强杀
         run: bash scripts/run-tauri-backup-crash-e2e.sh
+
+  bundle-on-push:
+    name: Bundle 构建检查（${{ matrix.label }}）
+    # push 上只保留 Linux：它快且稳定，能在每次推送时挡住构建层回归。
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux x64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            kinds: deb,appimage
+    steps: *bundle-steps
