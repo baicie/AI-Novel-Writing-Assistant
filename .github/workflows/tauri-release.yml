@@ -162,6 +162,8 @@ jobs:
           key: release-${{ matrix.target }}
       - name: 安装依赖（锁定锁文件）
         run: pnpm install --frozen-lockfile
+      - name: 构建共享包（client 依赖其 dist）
+        run: pnpm --filter @ai-novel/shared build
       - name: 校验版本三处一致
         run: pnpm run tauri:release:check-versions
       - name: 构建安装包

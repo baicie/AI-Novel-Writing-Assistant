@@ -51,6 +51,9 @@ jobs:
       - name: Rust kernel tests
         run: cargo test --workspace --exclude novel-http
 
+      - name: Build shared package
+        run: pnpm --filter @ai-novel/shared build
+
       - name: Frontend typecheck
         run: pnpm --filter @ai-novel/client typecheck
         env:
