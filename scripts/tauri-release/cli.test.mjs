@@ -113,6 +113,20 @@ test("CLI write-sums 产出可校验的清单", async () => {
   assert.match(text, /b\.msi/);
 });
 
+
+test("CLI write-sums 递归收集分层目录里的产物", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sums-nested-"));
+  await mkdir(path.join(dir, "deb"), { recursive: true });
+  await mkdir(path.join(dir, "appimage"), { recursive: true });
+  await writeFile(path.join(dir, "deb", "app_0.1.0_amd64.deb"), "deb");
+  await writeFile(path.join(dir, "appimage", "app_0.1.0_amd64.AppImage"), "appimage");
+  await run("node", [CLI, "write-sums", "--dir", dir]);
+  const text = await readFile(path.join(dir, "SHA256SUMS.txt"), "utf8");
+  assert.equal(text.trim().split("\n").length, 2);
+  assert.match(text, /app_0\.1\.0_amd64\.deb/);
+  assert.match(text, /AppImage/);
+});
+
 test("CLI verify-artifacts 缺文件时退出码非零", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "verify-cli-"));
   await writeFile(path.join(dir, "present.dmg"), "x");

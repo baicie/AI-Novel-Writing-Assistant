@@ -77,9 +77,11 @@ async function cmdCheckVersions(argv) {
 async function cmdWriteSums(argv) {
   const dir = argValue(argv, "dir", ".");
   const out = argValue(argv, "out", path.join(dir, "SHA256SUMS.txt"));
-  const entries = (await readdir(dir, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && entry.name !== path.basename(out))
-    .map((entry) => ({ path: path.join(dir, entry.name), name: entry.name }));
+  const outName = path.basename(out);
+  // bundle 目录是按平台/格式分层的（macos/*.app、deb/*.deb …），必须递归收集文件。
+  const entries = (await collectFiles(dir))
+    .filter((entry) => !entry.isDirectory && entry.name !== outName)
+    .map((entry) => ({ path: entry.path, name: entry.name }));
   if (entries.length === 0) {
     process.stderr.write("[release] 没有可计算校验和的产物\n");
     process.exit(1);
@@ -192,9 +194,10 @@ async function collectFiles(dir) {
     for (const entry of entries) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        // macOS 的 .app 是目录，产物检查必须能匹配目录名。
+        // macOS 的 .app 是目录，产物检查必须能匹配目录名；但不展开它的内部文件，
+        // 否则校验和清单会把整个 app 包里上百个文件都列出来。
         out.push({ name: entry.name, path: full, isDirectory: true });
-        stack.push(full);
+        if (!entry.name.endsWith(".app")) stack.push(full);
       } else {
         out.push({ name: entry.name, path: full, isDirectory: false });
       }
