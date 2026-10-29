@@ -310,6 +310,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(novels.len(), 1);
+        reopened.pool().close().await;
+        // 保护副本必须能独立打开，且内容就是切换前的那本书。
+        assert_eq!(titles(&original).await, vec!["恢复书".to_string()]);
     }
 
     #[tokio::test]
@@ -512,15 +515,12 @@ mod tests {
         assert!(PathBuf::from(format!("{}-wal", original.display())).exists());
         assert!(PathBuf::from(format!("{}-shm", original.display())).exists());
         assert_eq!(titles(&db).await, vec!["原书".to_string()]);
-        // 造出来的 wal/shm 是坏字节，只用于验证"随原库一起搬走"；
-        // 验证保护副本可独立打开之前先清掉它们，避免把坏 WAL 干扰误判为副本损坏。
-        for suffix in ["-wal", "-shm"] {
-            let _ = std::fs::remove_file(PathBuf::from(format!("{}{suffix}", original.display())));
-        }
+        // 本用例的 wal/shm 是手工造的坏字节，只用于验证"随原库一起搬走"；
+        // "保护副本能独立打开"由 startup_restore_switches_staged_database_and_keeps_protection_copy 覆盖，
+        // 那里没有伪造 sidecar，不会因为坏 WAL 干扰而随机失败。
         assert_eq!(
-            titles(&original).await,
-            vec!["原书".to_string()],
-            "保护副本必须能独立打开"
+            std::fs::read(PathBuf::from(format!("{}-wal", original.display()))).unwrap(),
+            b"stale-wal"
         );
     }
 
