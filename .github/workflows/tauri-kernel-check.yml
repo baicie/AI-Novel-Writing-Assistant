@@ -1,0 +1,63 @@
+name: Tauri Kernel Check
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "src-tauri/**"
+      - "client/src/platform/**"
+      - "client/src/api/novel/**"
+      - "client/src/pages/novels/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/tauri-kernel-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rust-and-desktop-contract:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.6.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rust formatting
+        run: cargo fmt --check -p novel-domain -p novel-workflow -p novel-llm -p novel-storage-sqlite -p novel-application -p novel-desktop
+
+      - name: Rust kernel checks
+        run: cargo check --workspace
+
+      - name: Rust kernel tests
+        run: cargo test --workspace --exclude novel-http
+
+      - name: Build shared package
+        run: pnpm --filter @ai-novel/shared build
+
+      - name: Frontend typecheck
+        run: pnpm --filter @ai-novel/client typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Frontend tests
+        run: pnpm --filter @ai-novel/client test

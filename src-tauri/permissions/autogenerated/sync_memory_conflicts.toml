@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sync-memory-conflicts"
+description = "Enables the sync_memory_conflicts command without any pre-configured scope."
+commands.allow = ["sync_memory_conflicts"]
+
+[[permission]]
+identifier = "deny-sync-memory-conflicts"
+description = "Denies the sync_memory_conflicts command without any pre-configured scope."
+commands.deny = ["sync_memory_conflicts"]

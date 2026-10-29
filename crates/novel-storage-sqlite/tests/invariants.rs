@@ -42,6 +42,7 @@ async fn chapter_round_trip_keeps_one_hundred_thousand_characters() {
             novel_id: novel.id.clone(),
             title: "第一章".into(),
             sort_order: 1,
+            volume_id: None,
             now_ms: 1,
         },
     )
@@ -90,13 +91,37 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     let source = dir.path().join("legacy.sqlite");
     let target = dir.path().join("next.sqlite");
     let pool = connect(&source, true).await;
-    sqlx::query("CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, secretNote TEXT)")
+    sqlx::query("CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT, worldId TEXT, secretNote TEXT)")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO Novel (id, title, description, status, secretNote) VALUES ('n1','旧书','简介','draft','不要丢')")
+    sqlx::query("INSERT INTO Novel (id, title, description, status, worldId, secretNote) VALUES ('n1','旧书','简介','draft','w1','不要丢')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE Character (id TEXT PRIMARY KEY, novelId TEXT, name TEXT, role TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO Character (id, novelId, name, role) VALUES ('ch1','n1','林动','protagonist')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE World (id TEXT PRIMARY KEY, name TEXT, description TEXT, overviewSummary TEXT, status TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO World (id, name, description, overviewSummary, status) VALUES ('w1','旧世界','旧描述','旧概览','active')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE VolumePlan (id TEXT PRIMARY KEY, novelId TEXT, sortOrder INTEGER, title TEXT, summary TEXT)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO VolumePlan (id, novelId, sortOrder, title, summary) VALUES ('v1','n1',1,'第一卷','旧卷摘要')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("CREATE TABLE VolumeChapterPlan (id TEXT PRIMARY KEY, volumeId TEXT, chapterId TEXT, chapterOrder INTEGER)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO VolumeChapterPlan (id, volumeId, chapterId, chapterOrder) VALUES ('vp1','v1','c1',1)")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE Chapter (id TEXT PRIMARY KEY, novelId TEXT, title TEXT, content TEXT, \"order\" INTEGER)")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','n1','第一章','旧正文',1)")
+    let legacy_content = "旧正文长段落。".repeat(80_000);
+    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','n1','第一章',?1,1)")
+        .bind(&legacy_content)
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE DirectorNextRun (id TEXT PRIMARY KEY, novelId TEXT, planVersion TEXT, contractJson TEXT)")
         .execute(&pool).await.unwrap();
@@ -110,11 +135,42 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::query("PRAGMA journal_mode = WAL")
+        .execute(&pool)
+        .await
+        .unwrap();
     pool.close().await;
     let before = fs::read(&source).unwrap();
     let report = import_legacy(&source, &target, 10).await.unwrap();
     let after = fs::read(&source).unwrap();
     assert_eq!(before, after);
+
+    let read_only_source = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&source)
+                .read_only(true),
+        )
+        .await
+        .unwrap();
+    let rejected_write =
+        sqlx::query("INSERT INTO Novel (id, title) VALUES ('write-through', 'must fail')")
+            .execute(&read_only_source)
+            .await;
+    assert!(
+        rejected_write.is_err(),
+        "source database must reject writes"
+    );
+    read_only_source.close().await;
+
+    let backup_pool = connect(Path::new(&report.source_backup), false).await;
+    let backup_novel_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM Novel")
+        .fetch_one(&backup_pool)
+        .await
+        .unwrap();
+    assert_eq!(backup_novel_count, 1);
+    backup_pool.close().await;
     assert!(
         report
             .unsupported
@@ -127,13 +183,55 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
             .iter()
             .any(|item| item.table == "ImageJob")
     );
+    assert!(
+        !report
+            .unsupported
+            .iter()
+            .any(|item| item.table == "World" || item.table == "Character"),
+        "World/Character are supported tables and must not be reported as whole unsupported tables"
+    );
     assert_eq!(report.runs_paused_for_review, 1);
+    assert_eq!(report.worlds, 1);
+    assert_eq!(report.characters, 1);
+    assert_eq!(report.volumes, 1);
+    assert!(report.content_verified);
+    assert!(report.relationships_verified);
+    assert!(Path::new(&report.source_backup).is_file());
+    assert!(fs::metadata(&report.source_backup).unwrap().len() > 0);
     let kernel = SqliteKernel::open(&target).await.unwrap();
+    let novel_world_id: Option<String> =
+        sqlx::query_scalar("SELECT world_id FROM novel WHERE id = 'n1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(novel_world_id.as_deref(), Some("w1"));
     let chapter = NovelRepository::get_chapter(&kernel, "n1", "c1")
         .await
         .unwrap();
-    assert_eq!(chapter.content, "旧正文");
+    assert_eq!(chapter.content.len(), legacy_content.len());
+    assert_eq!(chapter.content, legacy_content);
     assert_eq!(chapter.protection, "user_edited");
+    let volume_id: Option<String> =
+        sqlx::query_scalar("SELECT volume_id FROM chapter WHERE id = 'c1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(volume_id.as_deref(), Some("v1"));
+    let character_novel_id: String =
+        sqlx::query_scalar("SELECT novel_id FROM character WHERE id = 'ch1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(character_novel_id, "n1");
+    let revision_hash: String =
+        sqlx::query_scalar("SELECT content_sha256 FROM chapter_revision WHERE chapter_id = 'c1'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        revision_hash,
+        novel_application::sha256_hex(legacy_content.as_bytes())
+    );
     let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = 'r1'")
         .fetch_one(kernel.pool())
         .await
@@ -144,9 +242,33 @@ async fn legacy_import_pauses_running_work_and_leaves_the_source_untouched() {
     let again = import_legacy(&source, &target, 11).await.unwrap();
     assert_eq!(again.novels, 1);
     assert_eq!(again.chapters, 1);
-    let _ = WorkflowRepository::remote_call_count(&kernel, "r1", "draft")
+    assert!(
+        again
+            .target_backup
+            .as_ref()
+            .is_some_and(|path| Path::new(path).is_file())
+    );
+    assert!(again.content_verified);
+    for (table, expected) in [
+        ("novel", 1_i64),
+        ("world", 1),
+        ("character", 1),
+        ("volume", 1),
+        ("chapter", 1),
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, expected, "duplicate import changed {table} count");
+    }
+    let remote_calls = WorkflowRepository::remote_call_count(&kernel, "r1", "draft")
         .await
         .unwrap();
+    assert_eq!(
+        remote_calls, 0,
+        "migrated old run must not replay the model"
+    );
 }
 
 #[tokio::test]
@@ -173,6 +295,7 @@ async fn list_chapters_returns_them_in_sort_order_with_the_official_content() {
             novel_id: novel.id.clone(),
             title: "第二章".into(),
             sort_order: 2,
+            volume_id: None,
             now_ms: 2,
         },
     )
@@ -185,6 +308,7 @@ async fn list_chapters_returns_them_in_sort_order_with_the_official_content() {
             novel_id: novel.id.clone(),
             title: "第一章".into(),
             sort_order: 1,
+            volume_id: None,
             now_ms: 3,
         },
     )
@@ -226,7 +350,12 @@ async fn model_setup_round_trip_keeps_endpoint_model_and_local_flag() {
         .await
         .unwrap();
     kernel
-        .save_model_setup("https://example.com/v1/chat/completions", "gpt-test", false, 1)
+        .save_model_setup(
+            "https://example.com/v1/chat/completions",
+            "gpt-test",
+            false,
+            1,
+        )
         .await
         .unwrap();
     let loaded = kernel.load_model_setup().await.unwrap().unwrap();
@@ -235,10 +364,71 @@ async fn model_setup_round_trip_keeps_endpoint_model_and_local_flag() {
     assert!(!loaded.allow_localhost_http);
     assert_eq!(loaded.secret_ref, novel_storage_sqlite::MODEL_SECRET_REF);
     kernel
-        .save_model_setup("http://127.0.0.1:8080/v1/chat/completions", "gpt-test", true, 2)
+        .save_model_setup(
+            "http://127.0.0.1:8080/v1/chat/completions",
+            "gpt-test",
+            true,
+            2,
+        )
         .await
         .unwrap();
     let updated = kernel.load_model_setup().await.unwrap().unwrap();
-    assert_eq!(updated.endpoint, "http://127.0.0.1:8080/v1/chat/completions");
+    assert_eq!(
+        updated.endpoint,
+        "http://127.0.0.1:8080/v1/chat/completions"
+    );
     assert!(updated.allow_localhost_http);
+}
+
+#[tokio::test]
+async fn failed_legacy_import_rolls_back_target_and_preserves_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("legacy-bad.sqlite");
+    let target = dir.path().join("next-bad.sqlite");
+    let pool = connect(&source, true).await;
+    sqlx::query(
+        "CREATE TABLE Novel (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO Novel (id, title, description, status) VALUES ('n1','坏引用','','draft')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE Chapter (id TEXT PRIMARY KEY, novelId TEXT, title TEXT, content TEXT, \"order\" INTEGER)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO Chapter (id, novelId, title, content, \"order\") VALUES ('c1','missing-novel','第一章','正文',1)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+    let before = fs::read(&source).unwrap();
+
+    let failure = import_legacy(&source, &target, 20).await;
+    assert!(failure.is_err(), "orphan chapter must fail the import");
+    assert_eq!(before, fs::read(&source).unwrap());
+
+    let kernel = SqliteKernel::open(&target).await.unwrap();
+    for table in ["novel", "chapter", "legacy_id_map", "migration_run"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "failed import left rows in {table}");
+    }
+}
+
+#[tokio::test]
+async fn import_rejects_source_used_as_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("same.sqlite");
+    let pool = connect(&source, true).await;
+    pool.close().await;
+    let result = import_legacy(&source, &source, 30).await;
+    assert!(result.is_err(), "same source/target path must be rejected");
 }

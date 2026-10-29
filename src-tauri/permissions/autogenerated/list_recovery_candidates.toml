@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-recovery-candidates"
+description = "Enables the list_recovery_candidates command without any pre-configured scope."
+commands.allow = ["list_recovery_candidates"]
+
+[[permission]]
+identifier = "deny-list-recovery-candidates"
+description = "Denies the list_recovery_candidates command without any pre-configured scope."
+commands.deny = ["list_recovery_candidates"]

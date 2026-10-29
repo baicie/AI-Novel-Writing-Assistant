@@ -20,6 +20,7 @@ import ProviderSettingsSection from "./components/ProviderSettingsSection";
 import SettingsActionResult from "./SettingsActionResult";
 import { AUTO_DIRECTOR_MOBILE_CLASSES } from "@/mobile/autoDirector";
 import { LocalCreationKeyManager } from "@/components/localCreation";
+import UpdateCheckCard from "./UpdateCheckCard";
 
 function formatConnectionTestResult(response: Awaited<ReturnType<typeof testLLMConnection>>): string {
   const latency = response.data?.latency ?? 0;
@@ -500,6 +501,10 @@ export default function SettingsPage() {
 
         <div className="max-w-md">
           <LocalCreationKeyManager />
+        </div>
+
+        <div className="max-w-md">
+          <UpdateCheckCard />
         </div>
 
         <div className="text-xs text-muted-foreground space-y-1 mt-4">

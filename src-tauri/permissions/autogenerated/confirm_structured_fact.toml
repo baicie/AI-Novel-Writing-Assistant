@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-structured-fact"
+description = "Enables the confirm_structured_fact command without any pre-configured scope."
+commands.allow = ["confirm_structured_fact"]
+
+[[permission]]
+identifier = "deny-confirm-structured-fact"
+description = "Denies the confirm_structured_fact command without any pre-configured scope."
+commands.deny = ["confirm_structured_fact"]

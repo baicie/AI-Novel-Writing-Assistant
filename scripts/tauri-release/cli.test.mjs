@@ -1,0 +1,245 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, writeFile, readFile, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  detectTarget,
+  collectUpdaterPlatforms,
+  normalizeUpdaterName,
+  targetFromPath,
+  updaterArchiveSuffix,
+} from "./cli.mjs";
+
+const run = promisify(execFile);
+const CLI = path.join(import.meta.dirname, "cli.mjs");
+
+
+import { checkWorkflowText, checkWorkflows } from "./check-workflows.mjs";
+
+test("workflow 自检：仓库里的三个 workflow 全部通过", async () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const result = await checkWorkflows(root);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+});
+
+test("workflow 自检：\\|\\| true 与 continue-on-error 会被抓住", () => {
+  const bad = "name: x\npermissions:\n  contents: read\nconcurrency:\n  group: x\nsteps:\n  - run: cargo test || true\n";
+  const result = checkWorkflowText("tauri-ci.yml", bad);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(), /\|\| true/);
+
+  const masked = "name: x\npermissions:\n  contents: read\nconcurrency:\n  group: x\nsteps:\n  - continue-on-error: true\n    run: echo hi\n";
+  assert.match(checkWorkflowText("tauri-ci.yml", masked).errors.join(), /continue-on-error/);
+});
+
+test("workflow 自检：release 必须只接受 tauri-v* 且先建 Draft", () => {
+  const bad = "name: x\npermissions:\n  contents: write\nconcurrency:\n  group: x\non:\n  push:\n    tags:\n      - \"v*\"\n";
+  const result = checkWorkflowText("tauri-release.yml", bad);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(), /tauri-v\*/);
+  assert.match(result.errors.join(), /Draft/);
+});
+
+test("更新包文件名映射到平台", () => {
+  assert.equal(detectTarget("Biz Novel Studio_0.2.0_aarch64.app.tar.gz"), "darwin-aarch64");
+  assert.equal(detectTarget("Biz Novel Studio_0.2.0_x64.app.tar.gz"), "darwin-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.2.0_x64-setup.nsis.zip"), "windows-x86_64");
+  assert.equal(detectTarget("biz-novel-studio_0.2.0_amd64.AppImage.tar.gz"), "linux-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.2.0_aarch64.dmg"), null);
+});
+
+
+
+
+test("Tauri v2 更新包格式：安装包本身即可作为更新包", async () => {
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_x64-setup.exe"), "windows-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage"), "linux-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip"), "windows-x86_64");
+  assert.equal(detectTarget("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage.tar.gz"), "linux-x86_64");
+  assert.equal(updaterArchiveSuffix("x_x64-setup.exe"), "-setup.exe");
+  assert.equal(updaterArchiveSuffix("x_amd64.AppImage"), ".AppImage");
+  assert.equal(updaterArchiveSuffix("x_0.1.1_amd64.deb"), null);
+});
+test("更新包命名规范化：同名不同架构不再冲突", async () => {
+  const arm = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "aarch64-apple-darwin");
+  const x64 = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "x86_64-apple-darwin");
+  assert.notEqual(arm, x64);
+  assert.equal(detectTarget(arm), "darwin-aarch64");
+  assert.equal(detectTarget(x64), "darwin-x86_64");
+  assert.equal(
+    normalizeUpdaterName("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage.tar.gz", "x86_64-unknown-linux-gnu"),
+    "Biz_Novel_Studio_0.1.1-beta.2_amd64.AppImage.tar.gz",
+  );
+  assert.equal(targetFromPath("artifacts/target/x86_64-pc-windows-msvc/release/bundle/nsis/x.zip"), "windows-x86_64");
+  assert.equal(targetFromPath("artifacts/a.dmg"), null);
+});
+
+
+test("normalize-updater 处理不同架构的同名更新包", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "normalize-cli-"));
+  const arm = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  const x64 = path.join(dir, "target", "x86_64-apple-darwin", "release", "bundle", "macos");
+  await mkdir(arm, { recursive: true });
+  await mkdir(x64, { recursive: true });
+  for (const [dirPath, sig] of [[arm, "sig-arm"], [x64, "sig-x64"]]) {
+    await writeFile(path.join(dirPath, "Biz Novel Studio.app.tar.gz"), "app");
+    await writeFile(path.join(dirPath, "Biz Novel Studio.app.tar.gz.sig"), sig);
+  }
+  await run('node', [CLI, 'normalize-updater', '--dir', dir]);
+  const a = await readFile(path.join(dir, "Biz_Novel_Studio_aarch64.app.tar.gz.sig"), "utf8");
+  const x = await readFile(path.join(dir, "Biz_Novel_Studio_x64.app.tar.gz.sig"), "utf8");
+  assert.equal(a, "sig-arm");
+  assert.equal(x, "sig-x64");
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/dl" });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(Object.keys(platforms).sort(), ["darwin-aarch64", "darwin-x86_64"]);
+});
+test("latest.json 只采纳更新包签名，忽略安装包签名", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-only-updater-"));
+  const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  await mkdir(mac, { recursive: true });
+  await writeFile(path.join(mac, "biz_0.1.1_aarch64.dmg"), "dmg");
+  await writeFile(path.join(mac, "biz_0.1.1_aarch64.dmg.sig"), "dmg-sig");
+  await writeFile(path.join(mac, "Biz Novel Studio.app.tar.gz"), "app");
+  await writeFile(path.join(mac, "Biz Novel Studio.app.tar.gz.sig"), "app-sig");
+
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/dl" });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(Object.keys(platforms), ["darwin-aarch64"]);
+  assert.equal(platforms["darwin-aarch64"].signature, "app-sig");
+});
+test("latest.json 支持 download-artifact 的嵌套目录结构", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-nested-"));
+  const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  const win = path.join(dir, "target", "x86_64-pc-windows-msvc", "release", "bundle", "nsis");
+  await mkdir(mac, { recursive: true });
+  await mkdir(win, { recursive: true });
+  await writeFile(path.join(mac, "Biz Novel Studio_0.1.1-beta.2_aarch64.app.tar.gz"), "mac");
+  await writeFile(path.join(mac, "Biz Novel Studio_0.1.1-beta.2_aarch64.app.tar.gz.sig"), "sig-mac\n");
+  await writeFile(path.join(win, "Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip"), "win");
+  await writeFile(path.join(win, "Biz Novel Studio_0.1.1-beta.2_x64-setup.nsis.zip.sig"), "sig-win\n");
+
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/download" });
+  assert.deepEqual(errors, []);
+  assert.equal(platforms["darwin-aarch64"].signature, "sig-mac");
+  assert.equal(platforms["windows-x86_64"].signature, "sig-win");
+});
+
+test("latest.json 生成：三个平台各自签名，内容取自 .sig 文件", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-"));
+  await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz"), "mac-arm");
+  await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz.sig"), "sig-mac-arm\n");
+  await writeFile(path.join(dir, "App_0.2.0_x64-setup.nsis.zip"), "win");
+  await writeFile(path.join(dir, "App_0.2.0_x64-setup.nsis.zip.sig"), "sig-win\n");
+
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/download/" });
+  assert.deepEqual(errors, []);
+  assert.equal(platforms["darwin-aarch64"].signature, "sig-mac-arm");
+  assert.equal(platforms["windows-x86_64"].url, "https://example.com/download/App_0.2.0_x64-setup.nsis.zip");
+
+  const out = path.join(dir, "latest.json");
+  await run("node", [CLI, "write-latest", "--dir", dir, "--version", "0.2.0", "--base-url", "https://example.com/download", "--pub-date", "2026-10-29T00:00:00Z", "--out", out]);
+  const manifest = JSON.parse(await readFile(out, "utf8"));
+  assert.equal(manifest.version, "0.2.0");
+  assert.equal(Object.keys(manifest.platforms).length, 2);
+  assert.equal(manifest.platforms["windows-x86_64"].signature, "sig-win");
+});
+
+test("latest.json 生成：有 .sig 但缺更新包必须失败", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-bad-"));
+  await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz.sig"), "sig\n");
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com" });
+  assert.deepEqual(platforms, {});
+  assert.match(errors.join("\n"), /缺少对应的更新包/);
+});
+
+test("latest.json 生成：没有签名文件必须失败（不能产出空索引）", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-empty-"));
+  await writeFile(path.join(dir, "App_0.2.0_aarch64.app.tar.gz"), "mac");
+  const { errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com" });
+  assert.match(errors.join(), /没有找到任何 .sig/);
+});
+
+
+test("assert-bundles：按类型检查产物，缺一即失败", async () => {
+  const { assertBundles } = await import("./cli.mjs");
+  const dir = await mkdtemp(path.join(os.tmpdir(), "bundles-"));
+  await mkdir(path.join(dir, "macos", "Biz.app"), { recursive: true });
+  await writeFile(path.join(dir, "macos", "Biz.app", "Info.plist"), "plist");
+  await mkdir(path.join(dir, "deb"), { recursive: true });
+  await writeFile(path.join(dir, "deb", "biz_0.1.0_amd64.deb"), "deb");
+  await mkdir(path.join(dir, "linux"), { recursive: true });
+  await writeFile(path.join(dir, "linux", "biz_0.1.0_amd64.AppImage"), "appimage");
+
+  const ok = await assertBundles({ dir, kinds: ["app", "deb", "appimage"] });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.missing, []);
+
+  const missing = await assertBundles({ dir, kinds: ["app", "msi"] });
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.missing, ["msi"]);
+});
+
+test("CLI write-sums 产出可校验的清单", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sums-cli-"));
+  await writeFile(path.join(dir, "a.dmg"), "aaa");
+  await writeFile(path.join(dir, "b.msi"), "bbb");
+  await run("node", [CLI, "write-sums", "--dir", dir]);
+  const text = await readFile(path.join(dir, "SHA256SUMS.txt"), "utf8");
+  assert.equal(text.trim().split("\n").length, 2);
+  assert.match(text, /a\.dmg/);
+  assert.match(text, /b\.msi/);
+});
+
+
+test("发布产物过滤：AppImage 内部文件不当作发布资产", async () => {
+  const { isReleaseAsset } = await import("./cli.mjs");
+  assert.equal(isReleaseAsset("Biz_0.1.1_aarch64.dmg"), true);
+  assert.equal(isReleaseAsset("Biz_0.1.1_x64-setup.exe"), true);
+  assert.equal(isReleaseAsset("biz_0.1.1_amd64.deb"), true);
+  assert.equal(isReleaseAsset("biz_0.1.1_amd64.AppImage"), true);
+  assert.equal(isReleaseAsset("Biz.app.tar.gz.sig"), true);
+  assert.equal(isReleaseAsset("im-am-et.so"), false);
+  assert.equal(isReleaseAsset("AppRun"), false);
+
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sums-filter-"));
+  await mkdir(path.join(dir, "appimage", "AppDir", "usr", "lib"), { recursive: true });
+  await writeFile(path.join(dir, "appimage", "AppDir", "AppRun"), "binary");
+  await writeFile(path.join(dir, "appimage", "AppDir", "usr", "lib", "im-am-et.so"), "so");
+  await writeFile(path.join(dir, "appimage", "biz_0.1.1_amd64.AppImage"), "appimage");
+  await run("node", [CLI, "write-sums", "--dir", dir, "--out", path.join(dir, "SHA256SUMS.txt"), "--extensions", ".AppImage,.dmg"]);
+  const text = await readFile(path.join(dir, "SHA256SUMS.txt"), "utf8");
+  assert.equal(text.trim().split("\n").length, 1);
+  assert.match(text, /AppImage/);
+});
+
+test("CLI write-sums 递归收集分层目录里的产物", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sums-nested-"));
+  await mkdir(path.join(dir, "deb"), { recursive: true });
+  await mkdir(path.join(dir, "appimage"), { recursive: true });
+  await writeFile(path.join(dir, "deb", "app_0.1.0_amd64.deb"), "deb");
+  await writeFile(path.join(dir, "appimage", "app_0.1.0_amd64.AppImage"), "appimage");
+  await run("node", [CLI, "write-sums", "--dir", dir]);
+  const text = await readFile(path.join(dir, "SHA256SUMS.txt"), "utf8");
+  assert.equal(text.trim().split("\n").length, 2);
+  assert.match(text, /app_0\.1\.0_amd64\.deb/);
+  assert.match(text, /AppImage/);
+});
+
+test("CLI verify-artifacts 缺文件时退出码非零", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "verify-cli-"));
+  await writeFile(path.join(dir, "present.dmg"), "x");
+  await assert.doesNotReject(() => run("node", [CLI, "verify-artifacts", "--dir", dir, "--names", "present.dmg"]));
+  await assert.rejects(
+    () => run("node", [CLI, "verify-artifacts", "--dir", dir, "--names", "present.dmg,absent.dmg"]),
+    (error) => {
+      assert.match(error.stderr, /absent\.dmg/);
+      return true;
+    },
+  );
+});

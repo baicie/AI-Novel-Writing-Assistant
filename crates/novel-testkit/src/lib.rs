@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -87,17 +88,92 @@ impl LlmProvider for MockLlm {
     async fn generate(
         &self,
         _request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, novel_llm::LlmError> {
         if cancel.is_cancelled() {
             return Err(novel_llm::LlmError::Cancelled);
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
-        let _ = tokens.send(self.text.clone());
+        let _ = tokens.send(self.text.clone()).await;
         Ok(LlmResponse {
             text: self.text.clone(),
             usage: self.usage.clone(),
+        })
+    }
+}
+
+/// Deterministic provider for structured-step E2E tests. Each prompt must contain
+/// one of the registered markers; the matching value is returned as the full text.
+pub struct ScriptedLlm {
+    calls: AtomicUsize,
+    outputs: Vec<(&'static str, String)>,
+    used: Mutex<Vec<bool>>,
+    prompts: Mutex<Vec<String>>,
+}
+
+impl ScriptedLlm {
+    pub fn new(outputs: Vec<(&'static str, String)>) -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+            used: Mutex::new(vec![false; outputs.len()]),
+            outputs,
+            prompts: Mutex::new(Vec::new()),
+        }
+    }
+    pub fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+    pub fn prompts(&self) -> Vec<String> {
+        self.prompts.lock().expect("prompt log").clone()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for ScriptedLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            streaming: true,
+            structured_output: true,
+            tool_call: false,
+            reasoning: false,
+            context_limit: 128_000,
+        }
+    }
+    async fn generate(
+        &self,
+        request: LlmRequest,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, novel_llm::LlmError> {
+        if cancel.is_cancelled() {
+            return Err(novel_llm::LlmError::Cancelled);
+        }
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.prompts
+            .lock()
+            .expect("prompt log")
+            .push(request.prompt.clone());
+        let index = {
+            let used = self.used.lock().expect("scripted outputs");
+            self.outputs
+                .iter()
+                .enumerate()
+                .find(|(index, (marker, _))| !used[*index] && request.prompt.contains(marker))
+                .map(|(index, _)| index)
+                .ok_or_else(|| {
+                    novel_llm::LlmError::InvalidResponse("ScriptedLlm 没有匹配的响应".into())
+                })?
+        };
+        let output = {
+            let mut used = self.used.lock().expect("scripted outputs");
+            used[index] = true;
+            self.outputs[index].1.clone()
+        };
+        let _ = tokens.send(output.clone()).await;
+        Ok(LlmResponse {
+            text: output,
+            usage: TokenUsage::unknown(),
         })
     }
 }
@@ -135,14 +211,14 @@ impl LlmProvider for BlockingMockLlm {
     async fn generate(
         &self,
         _request: LlmRequest,
-        tokens: tokio::sync::mpsc::UnboundedSender<String>,
+        tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, novel_llm::LlmError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         tokio::select! {
             _ = cancel.cancelled() => Err(novel_llm::LlmError::Cancelled),
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                let _ = tokens.send(self.text.clone());
+                let _ = tokens.send(self.text.clone()).await;
                 Ok(LlmResponse {
                     text: self.text.clone(),
                     usage: TokenUsage::unknown(),

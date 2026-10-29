@@ -2,7 +2,7 @@ mod export;
 mod logging;
 mod secrets;
 
-pub use export::{ExportChapter, ExportNovel, chapter_markdown, novel_json};
+pub use export::{ExportChapter, ExportNovel, chapter_markdown, novel_json, write_text_atomically};
 pub use logging::init_logging;
 pub use novel_llm::redact_secrets;
 pub use secrets::{MemorySecretStore, SecretStore};

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-chapter-drafts"
+description = "Enables the list_chapter_drafts command without any pre-configured scope."
+commands.allow = ["list_chapter_drafts"]
+
+[[permission]]
+identifier = "deny-list-chapter-drafts"
+description = "Denies the list_chapter_drafts command without any pre-configured scope."
+commands.deny = ["list_chapter_drafts"]

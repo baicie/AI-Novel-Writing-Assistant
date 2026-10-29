@@ -127,10 +127,11 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const [selectedDiagnosticId, setSelectedDiagnosticId] = useState<string | null>(null);
   const [isVersionDrawerOpen, setIsVersionDrawerOpen] = useState(false);
   const [loadedSnapshotId, setLoadedSnapshotId] = useState<string | null>(null);
+  const [savedOfficialVersion, setSavedOfficialVersion] = useState(chapter?.officialVersion ?? 0);
 
   const draft = useChapterDraft({
     novelId,
-    chapter: chapter ? { id: chapter.id, content: chapter.content, updatedAt: String(chapter.updatedAt) } : undefined,
+    chapter: chapter ? { id: chapter.id, content: chapter.content, updatedAt: String(chapter.updatedAt), officialVersion: chapter.officialVersion } : undefined,
     busy: session.status !== "idle",
   });
   const { contentDraft, savedContent, isDirty, hasExternalChange, restored, storageError } = draft;
@@ -146,6 +147,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     setRevisionScope("selection");
     setIsVersionDrawerOpen(false);
     setLoadedSnapshotId(null);
+    setSavedOfficialVersion(chapter?.officialVersion ?? 0);
     lastPreviewRequestRef.current = null;
     lastContinuationRequestRef.current = null;
   }, [chapter?.id]);
@@ -215,13 +217,20 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           label: `chapter-editor:before-version-load:${chapter.order}:${Date.now()}`,
         });
       }
-      return updateNovelChapter(novelId, chapter.id, { content: nextContent, expectedUpdatedAt: draft.savedUpdatedAt });
+      return updateNovelChapter(novelId, chapter.id, {
+        content: nextContent,
+        expectedUpdatedAt: draft.savedUpdatedAt,
+        expectedVersion: savedOfficialVersion,
+      });
     },
     onMutate: () => {
       setSaveStatus("saving");
     },
     onSuccess: async (response, nextContent) => {
       draft.acknowledgeSave(nextContent, { content: response.data?.content, updatedAt: String(response.data?.updatedAt ?? Date.now()) });
+      if (typeof response.data?.officialVersion === "number") {
+        setSavedOfficialVersion(response.data.officialVersion);
+      }
       setLoadedSnapshotId(null);
       setSaveStatus("saved");
       await invalidateChapterQueries();
@@ -613,7 +622,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const gridClassName = "xl:grid-cols-[320px_minmax(0,1fr)_400px]";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div data-local-draft-status={draft.localDraftStatus} data-local-draft-loaded={String(draft.localDraftLoaded)} data-local-draft-dirty={String(isDirty)} className="flex min-h-0 flex-1 flex-col gap-4">
       {qualityDebtDetails ? (
         <div className="flex shrink-0 flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -640,11 +649,15 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           </Button>
         </div>
       ) : null}
-      {(restored || hasExternalChange || storageError) ? (
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <span>{storageError ? "浏览器暂时无法保存本地草稿，请尽快保存到作品。" : hasExternalChange ? "本章已有新的保存版本，你的草稿仍保留。" : "已恢复未保存的正文草稿。"}</span>
+      {(restored || hasExternalChange || storageError || draft.localDraftConflict || draft.localDraftStatus === "error") ? (
+        <div data-testid="chapter-draft-banner" className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <span>{draft.localDraftStatus === "error" ? "本地草稿保存失败。请先保存正式正文，并检查磁盘空间。" : storageError ? "浏览器暂时无法保存本地草稿，请尽快保存到作品。" : draft.localDraftConflict ? "本地草稿基于较早的正式版本，已保留双方内容。请对比后继续。" : hasExternalChange ? "本章已有新的保存版本，你的草稿仍保留。" : "已恢复未保存的正文草稿。"}</span>
           {hasExternalChange ? <Button size="sm" variant="outline" onClick={draft.loadSavedVersion}>加载新保存版本</Button> : null}
+          {draft.localDraftStatus === "error" ? <Button size="sm" variant="outline" onClick={() => void draft.flushDraft()}>重试保存草稿</Button> : null}
         </div>
+      ) : null}
+      {isDirty && draft.localDraftStatus === "saved" ? (
+        <p data-testid="chapter-local-draft-saved" className="shrink-0 text-xs text-muted-foreground">本地草稿已安全保存；正式正文尚未保存。</p>
       ) : null}
       <div className={`grid min-h-0 flex-1 gap-4 overflow-hidden ${gridClassName}`}>
         <ChapterEditorSidebar
@@ -657,7 +670,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           isSaving={saveMutation.isPending}
           selectedDiagnosticId={selectedDiagnosticId}
           onBack={onBack ? () => leaveEditor(onBack) : undefined}
-          onOpenChapterVersions={() => setIsVersionDrawerOpen(true)}
+          onOpenChapterVersions={onOpenVersionHistory ? undefined : () => setIsVersionDrawerOpen(true)}
           onOpenVersionHistory={onOpenVersionHistory ? () => leaveEditor(onOpenVersionHistory) : undefined}
           onRefreshWorkspace={onRefreshWorkspace}
           isRefreshingWorkspace={isRefreshingWorkspace}
@@ -672,7 +685,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           isResolvingDiagnostic={resolveDiagnosticMutation.isPending}
         />
 
-        <div className="relative min-h-0 overflow-hidden">
+        <div data-testid="chapter-editor-surface" className="relative min-h-0 overflow-hidden">
           <ChapterTextEditor
             value={contentDraft}
             readOnly={session.status !== "idle"}

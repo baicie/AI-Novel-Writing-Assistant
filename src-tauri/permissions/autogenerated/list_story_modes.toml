@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-story-modes"
+description = "Enables the list_story_modes command without any pre-configured scope."
+commands.allow = ["list_story_modes"]
+
+[[permission]]
+identifier = "deny-list-story-modes"
+description = "Denies the list_story_modes command without any pre-configured scope."
+commands.deny = ["list_story_modes"]

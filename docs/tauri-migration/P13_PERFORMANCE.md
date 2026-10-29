@@ -1,0 +1,100 @@
+# P13.4 Long-Form Performance
+
+## 状态：BASELINE IMPLEMENTED
+
+`crates/novel-application/tests/p13_performance.rs`：
+
+```text
+P13 performance:
+chapters=1000
+chars_min=1412 chars_avg=1415 chars_max=1416
+content_bytes=1414382 revisions=1000 chunks=1199 fts_rows=1199 vectors=0
+build_ms=2581
+context_p50_us=19388
+context_p95_us=19786
+incremental_update_ms=6
+index_200_ms=118
+search_p50_us=226
+search_p95_us=435
+db_mb=48.62
+parallelism=8
+```
+
+条件：本机、单进程 SQLite、Mock/合成正文、无并发负载。
+
+已具备测试规模：
+
+- 100 章 Context Continuity
+- 100 章 Mock 连续生成
+
+尚未采集：
+
+- 500/1000 章索引构建时间
+- 增量更新耗时
+- 检索 P50/P95
+- Context Assembly P50/P95
+- 数据库/内存规模
+- 索引收敛时间
+
+本轮不新增缓存架构。
+
+
+Native 回归本轮执行：
+
+```text
+Director 4 passing
+Editor 2 passing
+Candidate Journal SIGKILL crash + restart 1 passing
+```
+
+仍未覆盖：
+
+- 500/1000 章增量索引收敛
+- 并发检索
+- 真实 Embedding 模型
+- Native UI 端到端性能
+
+最终构建：`.app` 20.54 MiB；DMG 9.2 MiB；Tauri release audit PASS。
+
+
+最终构建（第 4 轮）：`.app` 20.72 MiB；DMG 9.3 MiB；Tauri release audit PASS。
+
+
+1000 章 build_ms 已包含章节正式修订同步写入知识索引的耗时。
+
+
+## 增量索引收敛
+
+修改第 500 章正式正文后：
+
+- `incremental_update_ms=6`
+- 新正文立即进入 `chapter:ch500:0`
+- 旧正文 revision 不再命中
+- 与章节保存同一事务完成
+
+
+第 6 轮构建：`.app` 20.72 MiB；DMG 9.3 MiB；audit PASS。
+
+
+第 8 轮最终构建：`.app` 20.74 MiB；DMG 9.3 MiB；audit PASS。
+
+
+## 最终构建
+
+`.app` 21.04 MiB；DMG 9.4 MiB；Tauri release audit PASS。
+
+
+## P13.9 100/500/1000 章真实规模基线
+
+新增 `crates/novel-application/tests/p13_scale_baseline.rs`，每章约 1.4–1.5k 中文字符：
+
+| 章节 | build_ms | context p95 | search p95 | 并发 8×10 | 增量 | DB bytes | chunks |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 208 | 3.76ms | 425us | 17ms | 1ms | 5,304,320 | 99 |
+| 500 | 1170 | 11.39ms | 567us | 20ms | 3ms | 25,006,080 | 499 |
+| 1000 | 2223 | 20.03ms | 616us | 22ms | 7ms | 49,594,368 | 999 |
+
+条件：M1/8GB、jobs=4、SQLite WAL、合成正文、目标章节无正式正文。
+未采集：进程内存峰值、冷启动/预热差异、真实双窗口、真实 Embedding。
+
+详细报告：[P13_PERFORMANCE_SCALE.md](P13_PERFORMANCE_SCALE.md)。

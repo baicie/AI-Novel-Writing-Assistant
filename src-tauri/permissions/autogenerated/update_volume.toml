@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-volume"
+description = "Enables the update_volume command without any pre-configured scope."
+commands.allow = ["update_volume"]
+
+[[permission]]
+identifier = "deny-update-volume"
+description = "Denies the update_volume command without any pre-configured scope."
+commands.deny = ["update_volume"]

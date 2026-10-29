@@ -4,6 +4,7 @@ packages:
   - server
   - site
   - shared
+  - tests/desktop-e2e
 injectWorkspacePackages: true
 allowBuilds:
   '@prisma/engines': true

@@ -44,7 +44,8 @@ const WorldWorkspace = lazy(() => import("@/pages/worlds/WorldWorkspace"));
 const WritingFormulaPage = lazy(() => import("@/pages/writingFormula/WritingFormulaPage"));
 const CharacterLibrary = lazy(() => import("@/pages/characters/CharacterLibrary"));
 const DirectorRunHistoryPage = lazy(() => import("@/pages/directorNext/DirectorRunHistoryPage"));
-const DirectorNovelPage = lazy(() => import("@/pages/directorNext/DirectorNovelPage"));
+const DirectorNovelPage = lazy(() => import("@/features/directorNext/DirectorRoute"));
+  const DirectorHistoryPage = lazy(() => import("@/features/directorNext/DirectorHistoryRoute"));
 const NovelUsagePage = lazy(() => import("@/pages/novelUsage/NovelUsagePage"));
 
 const routes: RouteObject[] = [
@@ -54,7 +55,7 @@ const routes: RouteObject[] = [
     children: [
       { index: true, element: <Home /> },
       { path: "help", element: <HelpPage /> },
-      { path: "lab/director", element: <DirectorRunHistoryPage /> },
+      { path: "lab/director", element: <DirectorHistoryPage /> },
       { path: "lab/director/:novelId", element: <DirectorNovelPage /> },
       { path: "novels", element: <NovelList /> },
       { path: "create", element: <CreationStudioPage /> },

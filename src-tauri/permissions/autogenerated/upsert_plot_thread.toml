@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-plot-thread"
+description = "Enables the upsert_plot_thread command without any pre-configured scope."
+commands.allow = ["upsert_plot_thread"]
+
+[[permission]]
+identifier = "deny-upsert-plot-thread"
+description = "Denies the upsert_plot_thread command without any pre-configured scope."
+commands.deny = ["upsert_plot_thread"]

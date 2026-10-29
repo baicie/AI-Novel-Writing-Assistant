@@ -283,6 +283,9 @@ export interface Chapter {
   title: string;
   content?: string | null;
   order: number;
+  /** SQLite 章节修订号。用于用户保存时的 CAS 校验。 */
+  officialVersion?: number;
+  protection?: string;
   generationState?: ChapterGenerationState;
   chapterStatus?: ChapterStatus | null;
   targetWordCount?: number | null;

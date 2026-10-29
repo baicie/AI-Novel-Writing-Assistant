@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Biz Novel Studio E2E",
+  "version": "0.1.0",
+  "identifier": "com.ai-novel.studio.e2e",
+  "build": {
+    "frontendDist": "../client/dist-e2e",
+    "beforeDevCommand": "pnpm --filter @ai-novel/client dev",
+    "beforeBuildCommand": "pnpm --filter @ai-novel/client build:e2e",
+    "devUrl": "http://127.0.0.1:5173"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; img-src 'self' asset: http://asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+      "capabilities": [
+        "default",
+        "e2e"
+      ]
+    },
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Biz Novel Studio E2E",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "devtools": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ]
+  }
+}

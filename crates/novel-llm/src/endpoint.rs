@@ -4,6 +4,40 @@ use url::Url;
 
 use crate::error::LlmError;
 
+pub async fn authorize_resolved_endpoint(
+    endpoint: &str,
+    allow_localhost_http: bool,
+) -> Result<(), LlmError> {
+    authorize_endpoint(endpoint, allow_localhost_http)?;
+    let url =
+        Url::parse(endpoint).map_err(|_| LlmError::EndpointRejected("模型地址无法识别".into()))?;
+    let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
+    if host.parse::<IpAddr>().is_ok() || host.eq_ignore_ascii_case("localhost") {
+        return Ok(());
+    }
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| LlmError::EndpointRejected("模型地址缺少可解析端口".into()))?;
+    let resolved = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| LlmError::EndpointRejected("模型地址无法解析".into()))?;
+    let mut found = false;
+    for address in resolved {
+        found = true;
+        if is_blocked_host(&address.ip().to_string()) {
+            return Err(LlmError::EndpointRejected(
+                "模型域名解析到内网或元数据地址".into(),
+            ));
+        }
+    }
+    if !found {
+        return Err(LlmError::EndpointRejected(
+            "模型地址没有可用解析结果".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn authorize_endpoint(endpoint: &str, allow_localhost_http: bool) -> Result<(), LlmError> {
     let url =
         Url::parse(endpoint).map_err(|_| LlmError::EndpointRejected("模型地址无法识别".into()))?;
@@ -13,6 +47,10 @@ pub fn authorize_endpoint(endpoint: &str, allow_localhost_http: bool) -> Result<
     let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
     let local = is_loopback(host);
     match url.scheme() {
+        "https" if local && allow_localhost_http => Ok(()),
+        "https" if local => Err(LlmError::EndpointRejected(
+            "本地模型地址需要单独允许".into(),
+        )),
         "https" if !is_blocked_host(host) => Ok(()),
         "http" if local && allow_localhost_http => Ok(()),
         "http" if local => Err(LlmError::EndpointRejected(
@@ -58,6 +96,8 @@ mod tests {
     fn remote_defaults_to_https_and_localhost_is_explicit() {
         assert!(authorize_endpoint("https://api.example.com/v1/chat/completions", false).is_ok());
         assert!(authorize_endpoint("http://127.0.0.1:11434/v1/chat/completions", false).is_err());
+        assert!(authorize_endpoint("https://127.0.0.1:11434/v1/chat/completions", false).is_err());
+        assert!(authorize_endpoint("https://127.0.0.1:11434/v1/chat/completions", true).is_ok());
         assert!(authorize_endpoint("http://127.0.0.1:11434/v1/chat/completions", true).is_ok());
         assert!(authorize_endpoint("http://localhost:11434/api/chat", true).is_ok());
         assert!(authorize_endpoint("https://192.168.1.8/v1/chat/completions", true).is_err());

@@ -8,9 +8,7 @@ use novel_application::{
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_llm::UnconfiguredProvider;
 use novel_storage_sqlite::SqliteKernel;
-use novel_testkit::{
-    BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds,
-};
+use novel_testkit::{BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds};
 use novel_workflow::{book_scope, chapter_scope};
 use sqlx::Row;
 
@@ -27,7 +25,10 @@ async fn runtime(
 ) -> Runtime {
     Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
-        runs: kernel,
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
         llm,
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
@@ -46,6 +47,7 @@ async fn seed_ready_for_draft(kernel: &SqliteKernel, novel_id: &str, chapter_id:
         ("volume_strategy", book_scope().to_string()),
         ("chapter_list", book_scope().to_string()),
         ("context", chapter_scope(chapter_id)),
+        ("consistency_review", chapter_scope(chapter_id)),
     ] {
         WorkflowRepository::insert_external_artifact(
             kernel,
@@ -57,7 +59,11 @@ async fn seed_ready_for_draft(kernel: &SqliteKernel, novel_id: &str, chapter_id:
                 scope,
                 status: "confirmed".into(),
                 protected_user_content: false,
-                payload_json: "{}".into(),
+                payload_json: if kind == "consistency_review" {
+                    "{\"issues\":0}".into()
+                } else {
+                    "{}".into()
+                },
                 content_sha256: "seed".into(),
                 created_at: 1,
             },
@@ -103,7 +109,9 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
+            context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -120,7 +128,9 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
+            context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -189,6 +199,39 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
     );
 }
 
+async fn seed_character_gate(kernel: &SqliteKernel, novel_id: &str) {
+    for (kind, status, payload) in [
+        (
+            "story_macro",
+            "confirmed",
+            r#"{"expansion":{},"decomposition":{},"constraints":[],"issues":[]}"#,
+        ),
+        (
+            "character_cast",
+            "draft",
+            r#"{"members":[],"relations":[]}"#,
+        ),
+    ] {
+        WorkflowRepository::insert_external_artifact(
+            kernel,
+            NewArtifact {
+                id: format!("gate-{kind}"),
+                novel_id: novel_id.to_string(),
+                run_id: None,
+                artifact_type: kind.to_string(),
+                scope: book_scope().to_string(),
+                status: status.to_string(),
+                protected_user_content: false,
+                payload_json: payload.to_string(),
+                content_sha256: "gate".into(),
+                created_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
     let dir = tempfile::tempdir().unwrap();
@@ -211,6 +254,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
         .await
         .unwrap();
     let chapter_id = chapter.id.clone();
+    seed_character_gate(&kernel, &novel.id).await;
     let opened = runtime
         .director
         .open_run(OpenRunInput {
@@ -221,13 +265,14 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
+            context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
         .await
         .unwrap();
-    runtime.worker.tick().await.unwrap();
     let waiting = runtime.worker.tick().await.unwrap();
     assert!(
         matches!(waiting, TickOutcome::Advanced { ref status, .. } if status == "waiting_approval")
@@ -247,7 +292,9 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
+            context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -327,6 +374,8 @@ async fn knowledge_search_keeps_trace_to_ids() {
             body: body.into(),
             terms,
             created_at: 1,
+            source_revision: None,
+            source_content_hash: None,
             embedding: Some(NewEmbedding {
                 model: "m".into(),
                 normalized: true,
@@ -346,6 +395,8 @@ async fn knowledge_search_keeps_trace_to_ids() {
             body: "另一段".into(),
             terms: "另一 段".into(),
             created_at: 2,
+            source_revision: None,
+            source_content_hash: None,
             embedding: Some(NewEmbedding {
                 model: "m".into(),
                 normalized: true,
@@ -355,6 +406,9 @@ async fn knowledge_search_keeps_trace_to_ids() {
     )
     .await
     .unwrap();
+    let documents = KnowledgeRepository::list_documents(&kernel).await.unwrap();
+    assert_eq!(documents.len(), 2);
+    assert!(documents.iter().any(|document| document.title == "角色"));
     let hits = KnowledgeRepository::search_keyword(
         &kernel,
         "n",
@@ -404,6 +458,9 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
     let runtime = Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
         runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
         llm: llm.clone(),
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
@@ -434,7 +491,9 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
+            context_token_budget: None,
             max_automatic_retries: 0,
+            repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
         })
@@ -460,4 +519,86 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
         }
         other => panic!("expected Advanced(cancelled), got {other:?}"),
     }
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "chapter_commit")
+    );
+    let chapter = NovelRepository::get_chapter(kernel.as_ref(), &novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert!(
+        chapter.content.is_empty(),
+        "cancelled run must not promote a candidate"
+    );
+    assert!(matches!(
+        runtime.worker.tick().await.unwrap(),
+        TickOutcome::Idle
+    ));
+}
+
+#[tokio::test]
+async fn mock_draft_stream_reaches_event_subscribers_before_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let llm = Arc::new(MockLlm::new("流式候选正文"));
+    let runtime = runtime(kernel.clone(), llm, Arc::new(novel_application::NoFault)).await;
+    let novel = runtime
+        .director
+        .create_novel("流式验证", "验证 Tauri Channel 的上游事件")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    seed_ready_for_draft(&kernel, &novel.id, &chapter.id).await;
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "stream-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "mock".into(),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(256),
+            context_token_budget: None,
+            max_automatic_retries: 0,
+            repair_budget: None,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+        })
+        .await
+        .unwrap();
+    let mut events = runtime.hub.subscribe();
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { .. }),
+        "unexpected {outcome:?}"
+    );
+    let mut saw_token = false;
+    let mut saw_checkpoint = false;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            GenerationEvent::TokenDelta { run_id, text, .. } if run_id == opened.run_id => {
+                assert_eq!(text, "流式候选正文");
+                saw_token = true;
+            }
+            GenerationEvent::CheckpointSaved { run_id, .. } if run_id == opened.run_id => {
+                saw_checkpoint = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_token, "subscription must receive streamed tokens");
+    assert!(saw_checkpoint, "worker must persist a candidate checkpoint");
 }

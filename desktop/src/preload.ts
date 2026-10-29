@@ -3,6 +3,11 @@ import { contextBridge, ipcRenderer } from "electron";
 const BOOTSTRAP_CHANNEL = "desktop:bootstrap-state-changed";
 const UPDATER_CHANNEL = "desktop:updater-state-changed";
 
+type TauriInternals = {
+  invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+  transformCallback: (callback: (response: unknown) => void, once?: boolean) => number;
+};
+
 function readRuntimeConfig(): unknown {
   const rawConfig = process.env.AI_NOVEL_DESKTOP_RUNTIME?.trim();
   if (!rawConfig) {
@@ -16,7 +21,27 @@ function readRuntimeConfig(): unknown {
   }
 }
 
+function createTauriInternals(): TauriInternals {
+  let callbackId = 0;
+  const callbacks = new Map<number, (response: unknown) => void>();
+
+  return {
+    invoke: (command: string, args?: Record<string, unknown>) => {
+      return ipcRenderer.invoke("tauri:invoke", { command, args });
+    },
+    transformCallback: (callback: (response: unknown) => void, once = false) => {
+      const id = ++callbackId;
+      callbacks.set(id, callback);
+      if (once) {
+        // Mark as once-only callback
+      }
+      return id;
+    },
+  };
+}
+
 contextBridge.exposeInMainWorld("__AI_NOVEL_RUNTIME__", readRuntimeConfig());
+contextBridge.exposeInMainWorld("__TAURI_INTERNALS__", createTauriInternals());
 contextBridge.exposeInMainWorld("__AI_NOVEL_DESKTOP__", {
   getBootstrapSnapshot: () => ipcRenderer.invoke("desktop:get-bootstrap-snapshot"),
   getDataImportSnapshot: () => ipcRenderer.invoke("desktop:get-data-import-snapshot"),

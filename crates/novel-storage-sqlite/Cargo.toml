@@ -5,11 +5,24 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+test-harness = []
+
+[[bin]]
+name = "recovery_worker"
+path = "src/bin/recovery_worker.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "index_worker"
+path = "src/bin/index_worker.rs"
+
 [dependencies]
 async-trait.workspace = true
 novel-application.workspace = true
 novel-context.workspace = true
 novel-domain.workspace = true
+novel-llm.workspace = true
 novel-prompt.workspace = true
 novel-workflow.workspace = true
 serde_json.workspace = true
@@ -17,8 +30,18 @@ serde.workspace = true
 sha2.workspace = true
 hex.workspace = true
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "batch_crash_worker"
+path = "src/bin/batch_crash_worker.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "unknown_worker"
+path = "src/bin/unknown_worker.rs"
+required-features = ["test-harness"]

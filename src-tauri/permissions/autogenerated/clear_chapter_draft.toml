@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-chapter-draft"
+description = "Enables the clear_chapter_draft command without any pre-configured scope."
+commands.allow = ["clear_chapter_draft"]
+
+[[permission]]
+identifier = "deny-clear-chapter-draft"
+description = "Denies the clear_chapter_draft command without any pre-configured scope."
+commands.deny = ["clear_chapter_draft"]

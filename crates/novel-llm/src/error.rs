@@ -18,18 +18,24 @@ pub enum LlmError {
     EndpointRejected(String),
     #[error("{0}")]
     StructuredOutput(String),
+    #[error("{0}")]
+    BudgetExceeded(String),
 }
 
 impl LlmError {
     pub fn retryable_without_new_charge(&self) -> bool {
         match self {
-            Self::RateLimit | Self::Timeout => true,
+            Self::RateLimit => true,
+            // A timeout may have reached the provider and may already be billed.
+            // Retrying a non-idempotent generation would risk duplicate charges.
+            Self::Timeout => false,
             Self::Unavailable { billed, .. } => !billed,
             Self::Cancelled
             | Self::Unauthorized
             | Self::InvalidResponse(_)
             | Self::EndpointRejected(_)
-            | Self::StructuredOutput(_) => false,
+            | Self::StructuredOutput(_)
+            | Self::BudgetExceeded(_) => false,
         }
     }
 }

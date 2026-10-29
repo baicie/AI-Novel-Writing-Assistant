@@ -1,362 +1,106 @@
-use std::path::PathBuf;
+mod commands;
+mod state;
+
 use std::sync::Arc;
 
 use novel_application::{
-    AppError, ChapterSnapshot, CommandOutcome, GenerationEvent, ModelSecrets, NoFault, NovelSummary,
-    OpenRunInput, PortError, Runtime, RuntimeDeps, SystemClock, TickOutcome, UuidIds,
+    BatchService, IndexJobRepository, NativeTaskService, Runtime, RuntimeDeps,
+    StructuredMemoryService, SystemClock, TickOutcome, UuidIds,
 };
-use novel_llm::UnconfiguredProvider;
+use novel_llm::OpenAiCompatibleProvider;
+
+#[cfg(feature = "e2e")]
+struct E2eModelSecrets;
+
+#[cfg(feature = "e2e")]
+#[async_trait::async_trait]
+impl novel_application::ModelSecrets for E2eModelSecrets {
+    async fn api_key(
+        &self,
+        _provider: &str,
+    ) -> Result<Option<String>, novel_application::PortError> {
+        Ok(Some("e2e-local-key".into()))
+    }
+}
+
+/// The Release composition root uses the real OpenAI-compatible HTTP/SSE provider.
+pub fn llm_provider() -> Arc<dyn novel_llm::LlmProvider> {
+    Arc::new(OpenAiCompatibleProvider::new())
+}
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
-use serde::Deserialize;
-use tauri::ipc::Channel;
-use tauri::{Manager, State};
-
-struct AppState {
-    runtime: Arc<Runtime>,
-    kernel: Arc<SqliteKernel>,
-    secrets: Arc<OsSecretStore>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpenRunRequest {
-    command_id: String,
-    novel_id: String,
-    target_chapter_id: String,
-    provider: String,
-    model: String,
-    prompt_versions: std::collections::BTreeMap<String, String>,
-    token_budget: Option<u64>,
-    max_automatic_retries: u8,
-    endpoint: String,
-    allow_localhost_http: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveModelSetupRequest {
-    endpoint: String,
-    model: String,
-    allow_localhost_http: bool,
-    api_key: String,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModelSetupView {
-    endpoint: String,
-    model: String,
-    allow_localhost_http: bool,
-    has_api_key: bool,
-}
-
-struct OsModelSecrets {
-    store: Arc<OsSecretStore>,
-}
-
-#[async_trait::async_trait]
-impl ModelSecrets for OsModelSecrets {
-    async fn api_key(&self, provider: &str) -> Result<Option<String>, PortError> {
-        use novel_platform::SecretStore;
-        self.store
-            .get(provider)
-            .await
-            .map_err(|_| PortError::Storage("系统凭据暂时不可用".into()))
-    }
-}
-
-fn data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("BIZ_NOVEL_DATA_DIR") {
-        return PathBuf::from(dir);
-    }
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Biz Novel Studio")
-}
-
-#[tauri::command]
-async fn list_chapters(
-    state: State<'_, AppState>,
-    novel_id: String,
-) -> Result<Vec<ChapterSnapshot>, AppError> {
-    state.runtime.director.list_chapters(&novel_id).await
-}
-
-#[tauri::command]
-async fn get_model_setup(state: State<'_, AppState>) -> Result<Option<ModelSetupView>, AppError> {
-    let kernel: Arc<SqliteKernel> = state.kernel.clone();
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    let view =
-        read_model_setup(kernel.as_ref(), secrets.as_ref()).await?;
-    Ok(view)
-}
-
-#[tauri::command]
-async fn save_model_setup(
-    state: State<'_, AppState>,
-    request: SaveModelSetupRequest,
-) -> Result<ModelSetupView, AppError> {
-    let kernel: Arc<SqliteKernel> = state.kernel.clone();
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    write_model_setup(
-        kernel.as_ref(),
-        secrets.as_ref(),
-        &request.endpoint,
-        &request.model,
-        request.allow_localhost_http,
-        &request.api_key,
-    )
-    .await
-}
-
-#[tauri::command]
-async fn has_api_key(state: State<'_, AppState>) -> Result<bool, AppError> {
-    let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    Ok(check_has_api_key(secrets.as_ref()).await?)
-}
-
-async fn read_model_setup(
-    kernel: &SqliteKernel,
-    secrets: &OsSecretStore,
-) -> Result<Option<ModelSetupView>, AppError> {
-    use novel_platform::SecretStore;
-    let stored = kernel.load_model_setup().await.map_err(AppError::from)?;
-    Ok(match stored {
-        Some(stored) => {
-            let has_api_key = secrets
-                .get(&stored.secret_ref)
-                .await
-                .map(|value| value.is_some())
-                .unwrap_or(false);
-            Some(ModelSetupView {
-                endpoint: stored.endpoint,
-                model: stored.model,
-                allow_localhost_http: stored.allow_localhost_http,
-                has_api_key,
-            })
-        }
-        None => None,
-    })
-}
-
-async fn write_model_setup(
-    kernel: &SqliteKernel,
-    secrets: &OsSecretStore,
-    endpoint: &str,
-    model: &str,
-    allow_localhost_http: bool,
-    api_key: &str,
-) -> Result<ModelSetupView, AppError> {
-    use novel_platform::SecretStore;
-    let now = novel_platform::now_ms();
-    let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF.to_string();
-    secrets
-        .put(&secret_ref, api_key.trim())
-        .await
-        .map_err(|_| AppError::from(PortError::Storage("无法写入系统凭据。".into())))?;
-    kernel
-        .save_model_setup(endpoint, model, allow_localhost_http, now)
-        .await
-        .map_err(AppError::from)?;
-    Ok(ModelSetupView {
-        endpoint: endpoint.to_string(),
-        model: model.to_string(),
-        allow_localhost_http,
-        has_api_key: !api_key.trim().is_empty(),
-    })
-}
-
-async fn check_has_api_key(secrets: &OsSecretStore) -> Result<bool, AppError> {
-    use novel_platform::SecretStore;
-    let secret_ref = novel_storage_sqlite::MODEL_SECRET_REF;
-    let value = secrets
-        .get(secret_ref)
-        .await
-        .map_err(|_| AppError::from(PortError::Storage("无法读取系统凭据。".into())))?;
-    Ok(value.is_some())
-}
-
-#[tauri::command]
-async fn cancel_generation(state: State<'_, AppState>, run_id: String) -> Result<(), AppError> {
-    state.runtime.worker.cancel_generation(&run_id);
-    Ok(())
-}
-
-#[tauri::command]
-async fn list_novels(state: State<'_, AppState>) -> Result<Vec<NovelSummary>, AppError> {
-    state.runtime.director.list_novels().await
-}
-
-#[tauri::command]
-async fn create_novel(
-    state: State<'_, AppState>,
-    title: String,
-    description: String,
-) -> Result<NovelSummary, AppError> {
-    state
-        .runtime
-        .director
-        .create_novel(&title, &description)
-        .await
-}
-
-#[tauri::command]
-async fn create_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    title: String,
-    sort_order: i32,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .create_chapter(&novel_id, &title, sort_order)
-        .await
-}
-
-#[tauri::command]
-async fn get_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    chapter_id: String,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .get_chapter(&novel_id, &chapter_id)
-        .await
-}
-
-#[tauri::command]
-async fn save_chapter(
-    state: State<'_, AppState>,
-    novel_id: String,
-    chapter_id: String,
-    expected_version: i64,
-    title: String,
-    content: String,
-) -> Result<ChapterSnapshot, AppError> {
-    state
-        .runtime
-        .director
-        .save_chapter(&novel_id, &chapter_id, expected_version, &title, &content)
-        .await
-}
-
-#[tauri::command]
-async fn open_run(
-    state: State<'_, AppState>,
-    request: OpenRunRequest,
-) -> Result<CommandOutcome, AppError> {
-    state
-        .runtime
-        .director
-        .open_run(OpenRunInput {
-            command_id: request.command_id,
-            novel_id: request.novel_id,
-            target_chapter_id: request.target_chapter_id,
-            provider: request.provider,
-            model: request.model,
-            prompt_versions: request.prompt_versions,
-            token_budget: request.token_budget,
-            max_automatic_retries: request.max_automatic_retries,
-            endpoint: request.endpoint,
-            allow_localhost_http: request.allow_localhost_http,
-        })
-        .await
-}
-
-#[tauri::command]
-async fn approve_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.approve(&command_id, &run_id).await
-}
-
-#[tauri::command]
-async fn cancel_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.cancel(&command_id, &run_id).await
-}
-
-#[tauri::command]
-async fn resume_run(
-    state: State<'_, AppState>,
-    command_id: String,
-    run_id: String,
-    accept_candidate: bool,
-) -> Result<CommandOutcome, AppError> {
-    state
-        .runtime
-        .director
-        .resume(&command_id, &run_id, accept_candidate)
-        .await
-}
-
-#[tauri::command]
-async fn replay_run(
-    state: State<'_, AppState>,
-    run_id: String,
-    after_seq: i64,
-) -> Result<Vec<GenerationEvent>, AppError> {
-    state.runtime.director.replay(&run_id, after_seq).await
-}
-
-#[tauri::command]
-async fn subscribe_run(
-    state: State<'_, AppState>,
-    run_id: String,
-    channel: Channel<GenerationEvent>,
-) -> Result<(), AppError> {
-    let mut receiver = state.runtime.hub.subscribe();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            match receiver.recv().await {
-                Ok(event) if event.run_id() == run_id => {
-                    if channel.send(event).is_err() {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            }
-        }
-    });
-    Ok(())
-}
+use state::AppState;
+use tauri::Manager;
 
 pub fn run() {
     novel_platform::init_logging();
-    tauri::Builder::default()
+
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .setup(|app| {
-            let dir = data_dir();
-            std::fs::create_dir_all(&dir)
+            let data_dir = std::env::var_os("BIZ_NOVEL_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    app.path()
+                        .app_data_dir()
+                        .map_err(|error| format!("无法准备本地资料目录：{error}"))
+                })?;
+            std::fs::create_dir_all(&data_dir)
                 .map_err(|error| format!("无法准备本地资料目录：{error}"))?;
-            let db_path = dir.join("novel.sqlite");
+            std::fs::create_dir_all(data_dir.join("logs"))
+                .map_err(|error| format!("无法准备日志目录：{error}"))?;
+
+            let db_path = data_dir.join("novel.sqlite");
             let secrets: Arc<OsSecretStore> = Arc::new(OsSecretStore);
-            let model_secrets: Arc<dyn ModelSecrets> = Arc::new(OsModelSecrets {
-                store: secrets.clone(),
-            });
-            let (kernel, runtime) = tauri::async_runtime::block_on(async move {
+            let model_secrets: Arc<dyn novel_application::ModelSecrets> = {
+                #[cfg(feature = "e2e")]
+                {
+                    Arc::new(E2eModelSecrets)
+                }
+                #[cfg(not(feature = "e2e"))]
+                {
+                    Arc::new(commands::model::OsModelSecrets {
+                        store: secrets.clone(),
+                    })
+                }
+            };
+            let llm: Arc<dyn novel_llm::LlmProvider> = llm_provider();
+            #[cfg(feature = "e2e")]
+            let boot_started_ms = novel_platform::now_ms();
+            let (kernel, runtime) = tauri::async_runtime::block_on(async {
+                crate::commands::backup::recover_pending_restore(&data_dir, &db_path)
+                    .await
+                    .map_err(|error| error.to_string())?;
                 let kernel = Arc::new(
                     SqliteKernel::open(&db_path)
                         .await
                         .map_err(|error| error.to_string())?,
                 );
+                #[cfg(feature = "e2e")]
+                if let Ok(endpoint) = std::env::var("BIZ_NOVEL_E2E_ENDPOINT") {
+                    kernel
+                        .save_model_setup(&endpoint, "e2e-mock-model", true, novel_platform::now_ms())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
                 let runtime = Arc::new(Runtime::new(RuntimeDeps {
                     novels: kernel.clone(),
                     runs: kernel.clone(),
-                    llm: Arc::new(UnconfiguredProvider),
+                    worlds: kernel.clone(),
+                    lookups: kernel.clone(),
+                    task_center: kernel.clone(),
+                    llm: llm.clone(),
                     clock: Arc::new(SystemClock),
                     ids: Arc::new(UuidIds),
-                    faults: Arc::new(NoFault),
+                    faults: Arc::new(novel_application::NoFault),
                     secrets: model_secrets,
                     owner: format!("desktop-{}", std::process::id()),
                     lease_ms: 30_000,
@@ -364,12 +108,100 @@ pub fn run() {
                 }));
                 Ok::<_, String>((kernel, runtime))
             })?;
-            let worker = runtime.clone();
+
+            let recovery_kernel = kernel.clone();
+            let batch = Arc::new(BatchService::new(kernel.clone(), Arc::new(UuidIds)));
+            let native_tasks = Arc::new(NativeTaskService::new(kernel.clone()));
+            let structured_memory = Arc::new(StructuredMemoryService::new(kernel.clone()));
             app.manage(AppState {
                 runtime: runtime.clone(),
-                kernel: kernel.clone(),
-                secrets: secrets.clone(),
+                data_dir: data_dir.clone(),
+                batch,
+                native_tasks,
+                structured_memory,
+                kernel,
+                secrets,
+                llm,
+                cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
             });
+
+            // 性能采样用：数据库迁移与运行时就绪后写出时间戳，供外部进程测量冷启动。
+            #[cfg(feature = "e2e")]
+            if let Some(path) = std::env::var_os("BIZ_NOVEL_E2E_STARTUP_MARKER") {
+                let ready_ms = novel_platform::now_ms();
+                let payload = serde_json::json!({
+                    "bootStartedAtMs": boot_started_ms,
+                    "readyAtMs": ready_ms,
+                    "initMs": ready_ms - boot_started_ms,
+                    "dbPath": db_path.display().to_string(),
+                    "pid": std::process::id(),
+                });
+                let _ = std::fs::write(std::path::PathBuf::from(path), payload.to_string());
+            }
+
+            // E2E 构建可以缩短过期租约的回收间隔，生产构建恒为 30 秒。
+            let recover_secs = {
+                #[cfg(feature = "e2e")]
+                {
+                    std::env::var("BIZ_NOVEL_E2E_INDEX_RECOVER_SECS")
+                        .ok()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .filter(|value| *value > 0)
+                        .unwrap_or(30)
+                }
+                #[cfg(not(feature = "e2e"))]
+                {
+                    30u64
+                }
+            };
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let now = novel_platform::now_ms();
+                    let _ = recovery_kernel.recover_expired_index_jobs(now).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(recover_secs)).await;
+                }
+            });
+
+            let worker_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut seq = 0u64;
+                loop {
+                    seq += 1;
+                    if let Some(state) = worker_handle.try_state::<state::AppState>() {
+                        let now = novel_platform::now_ms();
+                        let owner = format!("index-worker-{}-{seq}", std::process::id());
+                        if let Ok(Some(job)) = state
+                            .kernel
+                            .claim_next_due_index_job(
+                                &owner,
+                                now + commands::knowledge::index_claim_lease_ms(120_000),
+                                now,
+                            )
+                            .await
+                        {
+                            let _ = commands::knowledge::execute_index_job(
+                                state.inner(),
+                                job,
+                                &owner,
+                            ).await;
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+
+            let batch_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Some(state) = batch_handle.try_state::<state::AppState>() {
+                        let owner = format!("batch-scheduler-{}", std::process::id());
+                        let _ = state.batch.tick(&state.runtime.director, &owner, novel_platform::now_ms()).await;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+
+            let worker = runtime.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     match worker.worker.tick().await {
@@ -380,25 +212,177 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             });
+
+            let start_route = std::env::var("BIZ_NOVEL_START_ROUTE").ok();
+            let route_script = start_route
+                .as_ref()
+                .filter(|route| route.starts_with('/'))
+                .map(|route| format!("window.location.hash = {};", serde_json::json!(format!("#{route}"))))
+                .unwrap_or_default();
+            let save_smoke_script = if std::env::var("BIZ_NOVEL_SMOKE_SAVE").is_ok() {
+                "window.__AI_NOVEL_SMOKE_SAVE__ = true;"
+            } else {
+                ""
+            };
+            let adapter_smoke_script = if std::env::var("BIZ_NOVEL_SMOKE_ADAPTER").is_ok() {
+                "window.__AI_NOVEL_SMOKE_ADAPTER__ = true;"
+            } else {
+                ""
+            };
+            let channel_smoke_script = if std::env::var("BIZ_NOVEL_SMOKE_CHANNEL").is_ok() {
+                "window.__AI_NOVEL_SMOKE_CHANNEL__ = true;"
+            } else {
+                ""
+            };
+            let director_smoke_script = if std::env::var("BIZ_NOVEL_SMOKE_DIRECTOR").is_ok() {
+                "window.__AI_NOVEL_SMOKE_DIRECTOR__ = true;"
+            } else {
+                ""
+            };
+            let runtime_script = format!(
+                "window.__AI_NOVEL_RUNTIME__ = {}; window.__AI_NOVEL_START_ROUTE__ = {}; {route_script}",
+                serde_json::json!({
+                    "mode": "desktop",
+                    "isPackaged": !tauri::is_dev(),
+                    "appVersion": app.package_info().version.to_string(),
+                    "isPortable": false,
+                    "updateChannel": "beta",
+                }),
+                serde_json::json!(start_route)
+            );
+            let runtime_script = format!("{runtime_script}{save_smoke_script}{adapter_smoke_script}{channel_smoke_script}{director_smoke_script}");
+            let webview_url = if tauri::is_dev() {
+                let dev_url = app
+                    .config()
+                    .build
+                    .dev_url
+                    .clone()
+                    .ok_or("开发模式缺少前端地址")?;
+                tauri::WebviewUrl::External(dev_url)
+            } else {
+                tauri::WebviewUrl::App(std::path::PathBuf::from("index.html"))
+            };
+            tauri::WebviewWindowBuilder::new(app.handle(), "main", webview_url)
+                .title("Biz Novel Studio")
+                .inner_size(1400.0, 900.0)
+                .min_inner_size(1000.0, 700.0)
+                .initialization_script(runtime_script)
+                .build()
+                .map_err(|error| format!("无法创建主窗口：{error}"))?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            list_novels,
-            list_chapters,
-            create_novel,
-            create_chapter,
-            get_chapter,
-            save_chapter,
-            open_run,
-            approve_run,
-            cancel_run,
-            cancel_generation,
-            resume_run,
-            replay_run,
-            subscribe_run,
-            get_model_setup,
-            save_model_setup,
-            has_api_key
+            commands::novel::list_novels,
+            commands::novel::get_novel,
+            commands::novel::create_novel,
+            commands::novel::create_novel_with_setup,
+            commands::novel::update_novel,
+            commands::novel::delete_novel,
+            commands::novel::list_chapters,
+            commands::novel::list_characters,
+commands::novel::create_character,
+            commands::novel::create_chapter,
+            commands::novel::get_chapter,
+            commands::novel::save_chapter,
+            commands::editor::clear_chapter_draft,
+            commands::editor::save_chapter_draft,
+            commands::editor::get_chapter_draft,
+        commands::editor::list_chapter_drafts,
+            commands::editor::get_chapter_editor_workspace,
+            commands::novel::delete_chapter,
+            commands::novel::update_chapter_meta,
+            commands::novel::export_novel,
+            commands::novel::export_chapters,
+            commands::novel::export_novel_to_file,
+            commands::novel::export_novel_selection,
+            commands::novel::list_chapter_revisions,
+            commands::novel::restore_chapter_revision,
+            commands::novel::list_volumes,
+            commands::novel::create_volume,
+            commands::novel::update_volume,
+            commands::novel::delete_volume,
+            commands::run::list_runs,
+            commands::run::get_active_run,
+            commands::run::get_run_detail,
+            commands::run::list_all_runs,
+            commands::run::open_run,
+            commands::batch::create_batch,
+            commands::batch::list_batches,
+            commands::batch::get_batch,
+            commands::batch::pause_batch,
+            commands::batch::resume_batch,
+            commands::batch::cancel_batch,
+            commands::batch::tick_batches,
+            commands::native_tasks::list_native_tasks,
+            commands::backup::list_backups,
+            commands::backup::create_backup,
+            commands::backup::verify_backup,
+            commands::backup::request_restore,
+            commands::windows::open_editor_window,
+            commands::windows::list_app_windows,
+            commands::windows::close_editor_window,
+            commands::structured_memory::list_structured_facts,
+            commands::structured_memory::confirm_structured_fact,
+            commands::run::approve_run,
+commands::run::reject_run,
+            commands::run::regenerate_run,
+            commands::run::confirm_after_edit_run,
+commands::run::confirm_candidate_after_edit_run,
+commands::run::get_candidate_edit_draft,
+            commands::run::save_candidate_edit_draft,
+            commands::run::clear_candidate_edit_draft,
+commands::run::list_candidate_edit_drafts,
+commands::run::accept_quality_debt,
+commands::run::list_review_occurrences,
+            commands::run::cancel_run,
+            commands::run::resume_run,
+            commands::run::resume_run_with_quality_debt,
+            commands::run::replay_run,
+            commands::run::subscribe_run,
+            commands::run::smoke_channel_message,
+            commands::run::cancel_generation,
+            commands::model::get_model_setup,
+            commands::model::save_model_setup,
+            commands::model::has_api_key,
+            commands::knowledge::index_knowledge,
+            commands::knowledge::list_knowledge_documents,
+            commands::knowledge::search_knowledge,
+            commands::knowledge::search_knowledge_vector,
+commands::knowledge::delete_knowledge_document,
+commands::knowledge::retry_knowledge_document,
+commands::knowledge::get_knowledge_document,
+commands::knowledge::upsert_character_state,
+            commands::knowledge::upsert_timeline_event,
+            commands::knowledge::upsert_plot_thread,
+            commands::knowledge::list_story_facts,
+commands::knowledge::extract_memory,
+            commands::knowledge::list_memory_candidates,
+            commands::knowledge::confirm_memory_candidate,
+            commands::knowledge::reject_memory_candidate,
+            commands::knowledge::defer_memory_candidate,
+            commands::knowledge::update_memory_candidate_value,
+commands::knowledge::sync_memory_conflicts,
+            commands::knowledge::list_memory_conflicts,
+            commands::knowledge::resolve_memory_conflict,
+commands::knowledge::list_index_jobs,
+            commands::knowledge::recover_index_jobs,
+            commands::knowledge::retry_index_job,
+            commands::knowledge::retry_knowledge_document_with_job,
+            commands::setup::list_genres,
+            commands::setup::list_story_modes,
+            commands::tasks::get_task_overview,
+            commands::tasks::list_recovery_candidates,
+            commands::setup::get_quick_setup_status,
+            commands::setup::get_first_novel_onboarding,
+            commands::setup::list_worlds,
+            commands::setup::create_world,
+            commands::setup::delete_world,
+            commands::generation::generate_text,
+            commands::generation::cancel_text_generation,
+            commands::shell::get_desktop_bootstrap_snapshot,
+            commands::shell::report_client_runtime,
+            commands::shell::open_desktop_logs_directory,
+            commands::shell::restart_desktop_app,
         ])
         .build(tauri::generate_context!())
         .expect("无法打开本地创作窗口")

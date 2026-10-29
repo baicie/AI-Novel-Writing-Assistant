@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-knowledge-document-with-job"
+description = "Enables the retry_knowledge_document_with_job command without any pre-configured scope."
+commands.allow = ["retry_knowledge_document_with_job"]
+
+[[permission]]
+identifier = "deny-retry-knowledge-document-with-job"
+description = "Denies the retry_knowledge_document_with_job command without any pre-configured scope."
+commands.deny = ["retry_knowledge_document_with_job"]

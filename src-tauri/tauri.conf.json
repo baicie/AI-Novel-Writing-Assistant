@@ -1,28 +1,48 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Biz Novel Studio",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.2",
   "identifier": "com.ai-novel.studio",
   "build": {
-    "frontendDist": "./frontend",
-    "devUrl": "http://127.0.0.1:5173"
+    "frontendDist": "../client/dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "pnpm --filter @ai-novel/client dev",
+    "beforeBuildCommand": "node scripts/build-client-relative.mjs"
   },
   "app": {
     "withGlobalTauri": false,
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset: data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+      "devCsp": "default-src 'self' 'unsafe-inline' http://127.0.0.1:5173 ws://127.0.0.1:5173; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:5173 ws://127.0.0.1:5173; img-src 'self' asset: http://asset: data: blob: http://127.0.0.1:5173; style-src 'self' 'unsafe-inline' http://127.0.0.1:5173; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:5173",
+      "capabilities": [
+        "default"
+      ]
     },
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Biz Novel Studio",
-        "width": 1200,
-        "height": 800
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "devtools": false
       }
     ]
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "icon": [
+      "icons/app-icon-32.png",
+      "icons/app-icon-64.png",
+      "icons/app-icon-128.png",
+      "icons/app-icon-256.png",
+      "icons/app-icon-512.png",
+      "icons/icon.ico"
+    ],
+    "targets": [
+      "app"
+    ]
   }
 }
