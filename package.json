@@ -87,6 +87,7 @@
     ]
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.2",
     "@wdio/cli": "9.31.2",
     "@wdio/local-runner": "9.31.2",
     "@wdio/mocha-framework": "9.31.2",
