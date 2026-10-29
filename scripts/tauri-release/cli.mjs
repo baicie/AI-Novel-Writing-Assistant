@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, appendFile } from "node:fs/promises";
+import { readdir, readFile, writeFile, appendFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -138,7 +138,9 @@ async function cmdNormalizeUpdater(argv) {
   for (const sig of sigs) {
     const archiveName = sig.name.slice(0, -4);
     if (!updaterArchiveSuffix(archiveName)) continue;
-    const archive = files.find((entry) => entry.name === archiveName);
+    // 同名文件可能出现在不同 target/<triple> 目录下，必须按同级路径取，不能按文件名找。
+    const archivePath = sig.path.slice(0, -4);
+    const archive = files.find((entry) => entry.path === archivePath);
     if (!archive) continue;
     const triple = tripleFromPath(archive.path);
     const normalized = normalizeUpdaterName(archiveName, triple);

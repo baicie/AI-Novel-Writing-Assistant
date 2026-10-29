@@ -68,6 +68,26 @@ test("更新包命名规范化：同名不同架构不再冲突", async () => {
   assert.equal(targetFromPath("artifacts/a.dmg"), null);
 });
 
+
+test("normalize-updater 处理不同架构的同名更新包", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "normalize-cli-"));
+  const arm = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  const x64 = path.join(dir, "target", "x86_64-apple-darwin", "release", "bundle", "macos");
+  await mkdir(arm, { recursive: true });
+  await mkdir(x64, { recursive: true });
+  for (const [dirPath, sig] of [[arm, "sig-arm"], [x64, "sig-x64"]]) {
+    await writeFile(path.join(dirPath, "Biz Novel Studio.app.tar.gz"), "app");
+    await writeFile(path.join(dirPath, "Biz Novel Studio.app.tar.gz.sig"), sig);
+  }
+  await run('node', [CLI, 'normalize-updater', '--dir', dir]);
+  const a = await readFile(path.join(dir, "Biz_Novel_Studio_aarch64.app.tar.gz.sig"), "utf8");
+  const x = await readFile(path.join(dir, "Biz_Novel_Studio_x64.app.tar.gz.sig"), "utf8");
+  assert.equal(a, "sig-arm");
+  assert.equal(x, "sig-x64");
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/dl" });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(Object.keys(platforms).sort(), ["darwin-aarch64", "darwin-x86_64"]);
+});
 test("latest.json 只采纳更新包签名，忽略安装包签名", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "latest-only-updater-"));
   const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
