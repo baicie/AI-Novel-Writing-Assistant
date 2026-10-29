@@ -242,6 +242,9 @@ jobs:
             echo "没有找到任何平台安装包" >&2
             exit 1
           fi
+      - name: 规范化更新包命名（仅 updater-signed）
+        if: ${{ env.UPDATER == 'true' }}
+        run: node scripts/tauri-release/cli.mjs normalize-updater --dir artifacts
       - name: 生成总 SHA256 清单
         run: |
           node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt             --extensions ".dmg,.exe,.msi,.deb,.AppImage,.app.tar.gz,.AppImage.tar.gz,.nsis.zip,.msi.zip,.sig"

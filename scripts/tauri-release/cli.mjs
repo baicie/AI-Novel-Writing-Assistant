@@ -88,6 +88,75 @@ export const RELEASE_ASSET_SUFFIXES = [
   ".sig",
 ];
 
+
+// download-artifact 保留了 target/<triple>/... 的路径，三元组是判断架构最可靠的依据。
+export const TRIPLE_TO_TARGET = {
+  'aarch64-apple-darwin': 'darwin-aarch64',
+  'x86_64-apple-darwin': 'darwin-x86_64',
+  'x86_64-pc-windows-msvc': 'windows-x86_64',
+  'x86_64-unknown-linux-gnu': 'linux-x86_64',
+};
+
+const TRIPLE_TO_ARCH = {
+  'aarch64-apple-darwin': 'aarch64',
+  'x86_64-apple-darwin': 'x64',
+  'x86_64-pc-windows-msvc': 'x64',
+  'x86_64-unknown-linux-gnu': 'amd64',
+};
+
+const UPDATER_ARCHIVE_SUFFIXES = ['.app.tar.gz', '.AppImage.tar.gz', '.nsis.zip', '.msi.zip'];
+
+export function updaterArchiveSuffix(name) {
+  return UPDATER_ARCHIVE_SUFFIXES.find((suffix) => name.endsWith(suffix)) ?? null;
+}
+
+export function tripleFromPath(filePath) {
+  const match = /target[\\/]([^\\/]+)[\\/]release/.exec(filePath);
+  return match ? match[1] : null;
+}
+
+export function targetFromPath(filePath) {
+  const triple = tripleFromPath(filePath);
+  return triple ? (TRIPLE_TO_TARGET[triple] ?? null) : null;
+}
+
+export function normalizeUpdaterName(base, triple) {
+  const slug = base.replace(/\s+/g, '_');
+  const arch = triple ? TRIPLE_TO_ARCH[triple] : null;
+  if (!arch) return slug;
+  if (/(aarch64|x86_64|x64|amd64|arm64)[._-]/i.test(slug)) return slug;
+  const suffix = updaterArchiveSuffix(slug);
+  if (!suffix) return slug;
+  return slug.slice(0, -suffix.length) + '_' + arch + suffix;
+}
+
+async function cmdNormalizeUpdater(argv) {
+  const dir = argValue(argv, 'dir', 'artifacts');
+  const files = (await collectFiles(dir)).filter((entry) => !entry.isDirectory);
+  const sigs = files.filter((entry) => entry.name.endsWith('.sig'));
+  const moves = [];
+  for (const sig of sigs) {
+    const archiveName = sig.name.slice(0, -4);
+    if (!updaterArchiveSuffix(archiveName)) continue;
+    const archive = files.find((entry) => entry.name === archiveName);
+    if (!archive) continue;
+    const triple = tripleFromPath(archive.path);
+    const normalized = normalizeUpdaterName(archiveName, triple);
+    moves.push({ archive, sig, normalized });
+  }
+  if (moves.length === 0) {
+    process.stdout.write('[release] 没有需要规范化的更新包\n');
+    return;
+  }
+  for (const move of moves) {
+    const target = path.join(dir, move.normalized);
+    if (move.archive.path !== target) await rename(move.archive.path, target);
+    const sigTarget = target + '.sig';
+    if (move.sig.path !== sigTarget) await rename(move.sig.path, sigTarget);
+    process.stdout.write(`[release] 更新包 ${move.archive.name} -> ${move.normalized}\n`);
+  }
+}
+
 export const RELEASE_MANIFEST_NAMES = ["SHA256SUMS.txt", "latest.json", "nightly-latest.json"];
 
 export function isReleaseAsset(name, suffixes = RELEASE_ASSET_SUFFIXES) {
@@ -123,11 +192,13 @@ export async function collectUpdaterPlatforms({ dir, baseUrl }) {
   for (const [name, fullPath] of byName) {
     if (!name.endsWith(".sig")) continue;
     const archive = name.slice(0, -4);
+    // 安装包（dmg/deb/exe）也会被签名，但只有更新包能进 latest.json。
+    if (!updaterArchiveSuffix(archive)) continue;
     if (!byName.has(archive)) {
       errors.push(`${name} 缺少对应的更新包 ${archive}`);
       continue;
     }
-    const target = detectTarget(archive);
+    const target = targetFromPath(fullPath) ?? detectTarget(archive);
     if (!target) {
       errors.push(`无法从 ${archive} 判断平台，拒绝生成 latest.json`);
       continue;
@@ -174,7 +245,11 @@ async function cmdListReleaseAssets(argv) {
   const dir = argValue(argv, "dir", "artifacts");
   const files = (await collectFiles(dir))
     .filter((entry) => !entry.isDirectory)
-    .filter((entry) => isReleaseAsset(entry.name) || RELEASE_MANIFEST_NAMES.includes(entry.name))
+    .filter((entry) => {
+      // 只有更新包的签名需要上传，安装包的 .sig 对客户端没有意义。
+      if (entry.name.endsWith(".sig")) return Boolean(updaterArchiveSuffix(entry.name.slice(0, -4)));
+      return isReleaseAsset(entry.name) || RELEASE_MANIFEST_NAMES.includes(entry.name);
+    })
     .map((entry) => path.relative(dir, entry.path))
     .sort();
   if (files.length === 0) {
@@ -293,6 +368,7 @@ const COMMANDS = {
   "write-sums": cmdWriteSums,
   "write-latest": cmdWriteLatest,
   "verify-artifacts": cmdVerifyArtifacts,
+  "normalize-updater": cmdNormalizeUpdater,
   "list-release-assets": cmdListReleaseAssets,
   "assert-bundles": cmdAssertBundles,
   "read-base-version": cmdReadBaseVersion,

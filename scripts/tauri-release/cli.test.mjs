@@ -6,7 +6,12 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 
-import { detectTarget, collectUpdaterPlatforms } from "./cli.mjs";
+import {
+  detectTarget,
+  collectUpdaterPlatforms,
+  normalizeUpdaterName,
+  targetFromPath,
+} from "./cli.mjs";
 
 const run = promisify(execFile);
 const CLI = path.join(import.meta.dirname, "cli.mjs");
@@ -48,6 +53,35 @@ test("更新包文件名映射到平台", () => {
 });
 
 
+
+test("更新包命名规范化：同名不同架构不再冲突", async () => {
+  const arm = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "aarch64-apple-darwin");
+  const x64 = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "x86_64-apple-darwin");
+  assert.notEqual(arm, x64);
+  assert.equal(detectTarget(arm), "darwin-aarch64");
+  assert.equal(detectTarget(x64), "darwin-x86_64");
+  assert.equal(
+    normalizeUpdaterName("Biz Novel Studio_0.1.1-beta.2_amd64.AppImage.tar.gz", "x86_64-unknown-linux-gnu"),
+    "Biz_Novel_Studio_0.1.1-beta.2_amd64.AppImage.tar.gz",
+  );
+  assert.equal(targetFromPath("artifacts/target/x86_64-pc-windows-msvc/release/bundle/nsis/x.zip"), "windows-x86_64");
+  assert.equal(targetFromPath("artifacts/a.dmg"), null);
+});
+
+test("latest.json 只采纳更新包签名，忽略安装包签名", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "latest-only-updater-"));
+  const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
+  await mkdir(mac, { recursive: true });
+  await writeFile(path.join(mac, "biz_0.1.1_aarch64.dmg"), "dmg");
+  await writeFile(path.join(mac, "biz_0.1.1_aarch64.dmg.sig"), "dmg-sig");
+  await writeFile(path.join(mac, "Biz Novel Studio.app.tar.gz"), "app");
+  await writeFile(path.join(mac, "Biz Novel Studio.app.tar.gz.sig"), "app-sig");
+
+  const { platforms, errors } = await collectUpdaterPlatforms({ dir, baseUrl: "https://example.com/dl" });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(Object.keys(platforms), ["darwin-aarch64"]);
+  assert.equal(platforms["darwin-aarch64"].signature, "app-sig");
+});
 test("latest.json 支持 download-artifact 的嵌套目录结构", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "latest-nested-"));
   const mac = path.join(dir, "target", "aarch64-apple-darwin", "release", "bundle", "macos");
