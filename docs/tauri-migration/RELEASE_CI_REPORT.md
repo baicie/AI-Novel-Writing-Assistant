@@ -211,7 +211,13 @@ macOS runner 当天长时间排队，排队超过约 15 分钟的作业会被取
 ### 结论
 
 ```text
-UPDATER_SIGNED_VERIFIED（Draft 未公开，latest.json 四平台齐全）
+UPDATER_SIGNED_VERIFIED（已作为预发布公开发布）
 ```
+
+发布方式：Draft 内容核对后手动执行 `gh release edit tauri-v0.1.1-beta.2 --draft=false --prerelease`。
+工作流自身的「正式发布」步骤只在 stable 通道且显式允许时才会执行，这次没有走那条路径。
+
+`latest.json` 在公开后可直接下载（HTTP 200），四个平台齐全；由于仓库还没有正式版，
+`releases/latest` 仍然 404，因此预发布版本不会自动推送给现有用户。
 
 仍未执行：安装 / 升级的人工验收（P6），以及把 Draft 真正公开（需要显式授权）。
