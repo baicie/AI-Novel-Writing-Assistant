@@ -168,34 +168,50 @@ RELEASE_QA_ONLY
 
 推进到 `READY_FOR_RELEASE` 还需要：配置 `TAURI_SIGNING_PRIVATE_KEY`、跑一次 updater-signed 的预发布、
 跑一次 nightly、以及至少一次真实安装/启动验证。
-## 十二、updater-signed 试运行（2026-10-29，配置签名私钥后）
+## 十二、updater-signed 实测（2026-10-29，已配置签名私钥）
 
-在仓库 Secrets 里配置 `TAURI_SIGNING_PRIVATE_KEY` 后，打了 5 次 `tauri-v0.1.1-beta.2` 试运行。
+配置 `TAURI_SIGNING_PRIVATE_KEY` 后用 Tag `tauri-v0.1.1-beta.2` 反复试运行，最终产出完整的
+Draft Release，签名更新通道打通。
 
-### 已经验证的
+### 产物（Draft，未公开）
 
-- Windows 与 Linux 的发布构建真实产出签名：`*-setup.exe.sig`、`*.AppImage.sig`（minisign 格式，可用仓库公钥校验）
-- 质量门禁（Linux 上跑 Rust 格式 / Clippy / 迁移 / 单测）连续通过
-- 用真实产物 + 本地签名的 macOS 更新包跑通了整个发布后处理链路：
-  `normalize-updater` → `write-sums` → `write-latest` → `list-release-assets`，
-  生成的 `latest.json` 含 `darwin-aarch64` / `windows-x86_64` / `linux-x86_64` 三个平台，
-  每条的 `signature` 都是 Tauri 私钥签出的真实 minisign 文本
-- 发布脚本单测 30 条全绿
+```text
+Biz.Novel.Studio_0.1.1-beta.2_aarch64.dmg
+Biz_Novel_Studio_0.1.1-beta.2_amd64.AppImage (+ .sig)
+Biz_Novel_Studio_0.1.1-beta.2_x64-setup.exe (+ .sig)
+Biz_Novel_Studio_aarch64.app.tar.gz (+ .sig)
+Biz_Novel_Studio_x64.app.tar.gz (+ .sig)
+latest.json
+SHA256SUMS.txt
+```
 
-### 没能跑完的
+`latest.json` 四个平台齐全，签名都是 Tauri 私钥签出的真实 minisign 文本：
 
-Draft Release 需要四个平台全部构建完成，而 **macOS runner 当天一直给不到**：
-`构建 macOS` 作业每次排队约 15 分钟后被 GitHub 取消（当天 8 次，均非代码原因），
-因此没有产出完整的 Draft，`latest.json` 也未能进入 Release。
+```text
+linux-x86_64   -> …_amd64.AppImage
+windows-x86_64 -> …_x64-setup.exe
+darwin-aarch64 -> …_aarch64.app.tar.gz
+darwin-x86_64  -> …_x64.app.tar.gz
+```
 
-已排除的自身问题（都已修复并有单测）：更新包命名冲突、安装包签名误入 latest.json、
-分层产物目录找不到 `.sig`、v1/v2 更新包格式差异、macOS 两架构争抢 runner。
+### 期间修掉的问题（全部有单测覆盖，脚本单测 31 条）
+
+1. 更新包命名冲突：两个 macOS 架构产出同名更新包，按架构重命名后才可同时发布
+2. 安装包签名误入索引：Tauri 会给所有 bundle 签名，latest.json 只应采纳更新包签名
+3. 分层产物目录找不到 `.sig`：download-artifact 保留相对路径，必须递归查找
+4. v1/v2 更新包格式差异：v2 用安装包本身（`-setup.exe` / `.AppImage` / `.app.tar.gz`）
+5. 路径前缀被裁剪：产物落地后没有 `target/` 前缀，三元组改为直接匹配
+6. 同名清单冲突：各平台目录都有一份 `SHA256SUMS.txt`，只上传汇总那份
+
+### 环境侧记录
+
+macOS runner 当天长时间排队，排队超过约 15 分钟的作业会被取消；本次共触发 12 次 macOS 构建，
+其中 3 次拿到 runner 并成功，最终一次产出了完整 Draft。这条属于环境容量问题，不是配置缺陷。
 
 ### 结论
 
 ```text
-UPDATER_SIGNED_NOT_RUN（macOS runner 容量受阻）
+UPDATER_SIGNED_VERIFIED（Draft 未公开，latest.json 四平台齐全）
 ```
 
-等 macOS runner 能正常分配后，重跑同一 Tag 的 `Tauri Release` 即可完成最后一步验证；
-不需要再改代码。
+仍未执行：安装 / 升级的人工验收（P6），以及把 Draft 真正公开（需要显式授权）。
