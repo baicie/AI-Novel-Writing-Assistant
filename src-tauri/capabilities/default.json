@@ -8,6 +8,7 @@
   ],
   "permissions": [
     "core:default",
+    "updater:default",
     "allow-get-active-run",
     "allow-get-run-detail",
     "allow-list-novels",
