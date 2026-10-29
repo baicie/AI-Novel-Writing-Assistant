@@ -101,3 +101,9 @@ PARTIAL
 | — | 测试目标 clippy 告警未清零 | `--lib` 严格，测试目标仍宽松 |
 | — | 更新检查 UI 未接入 | 模式 B 只保证产物/索引正确 |
 | — | macOS 未签名未公证 | 用户首次打开需手动放行（模式 A/B 的预期行为） |
+## 九、发布说明与 wiki
+
+- 本阶段改动全部是工程侧（workflow、发布脚本、构建配置、图标、lint 基线），**没有用户可见的产品行为变化**，
+  因此按仓库规则**不更新** `docs/releases/release-notes.md` 与 README 最新更新。
+- 稳定知识（Tag 命名空间分离、签名三级模式、门禁复用与自检）已写入
+  `docs/wiki/architecture/desktop-release-pipeline.md`。

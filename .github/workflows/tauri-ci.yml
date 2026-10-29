@@ -167,3 +167,32 @@ jobs:
             target/${{ matrix.target }}/bundle-SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
+
+  native-e2e:
+    name: 原生端到端（可选）
+    # 原生 E2E 需要真实 GUI 与 WebDriver，只在打标签或手动触发时运行，避免常规 PR 被 GUI 抖动阻塞。
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-native-e2e') }}
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: native-e2e
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+      - name: 索引崩溃接管三阶段
+        run: bash scripts/run-tauri-index-crash-e2e.sh
+      - name: 备份写到一半被强杀
+        run: bash scripts/run-tauri-backup-crash-e2e.sh
