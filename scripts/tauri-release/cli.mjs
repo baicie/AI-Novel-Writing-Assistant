@@ -121,7 +121,12 @@ export function updaterArchiveSuffix(name) {
 }
 
 export function tripleFromPath(filePath) {
-  const match = /target[\\/]([^\\/]+)[\\/]release/.exec(filePath);
+  // upload-artifact 按路径列表的公共前缀裁剪，落地后可能没有 target/ 前缀，
+  // 因此直接匹配已知三元组，而不是依赖固定前缀。
+  const match =
+    /(?:^|\/)((?:aarch64|x86_64|i686|universal)-(?:apple-darwin|unknown-linux-gnu|pc-windows-msvc))\//.exec(
+      filePath,
+    );
   return match ? match[1] : null;
 }
 

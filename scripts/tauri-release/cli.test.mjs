@@ -11,6 +11,7 @@ import {
   collectUpdaterPlatforms,
   normalizeUpdaterName,
   targetFromPath,
+  tripleFromPath,
   updaterArchiveSuffix,
 } from "./cli.mjs";
 
@@ -64,6 +65,13 @@ test("Tauri v2 更新包格式：安装包本身即可作为更新包", async ()
   assert.equal(updaterArchiveSuffix("x_x64-setup.exe"), "-setup.exe");
   assert.equal(updaterArchiveSuffix("x_amd64.AppImage"), ".AppImage");
   assert.equal(updaterArchiveSuffix("x_0.1.1_amd64.deb"), null);
+});
+
+test("三元组识别兼容 upload-artifact 裁剪后的路径", async () => {
+  assert.equal(tripleFromPath("artifacts/target/aarch64-apple-darwin/release/bundle/macos/x"), "aarch64-apple-darwin");
+  assert.equal(tripleFromPath("artifacts/x86_64-apple-darwin/release/bundle/macos/x"), "x86_64-apple-darwin");
+  assert.equal(tripleFromPath("artifacts/x86_64-unknown-linux-gnu/release/bundle/deb/x"), "x86_64-unknown-linux-gnu");
+  assert.equal(tripleFromPath("artifacts/a.dmg"), null);
 });
 test("更新包命名规范化：同名不同架构不再冲突", async () => {
   const arm = normalizeUpdaterName("Biz Novel Studio.app.tar.gz", "aarch64-apple-darwin");
