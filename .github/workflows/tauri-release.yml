@@ -111,23 +111,23 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            label: macOS arm64
-            target: aarch64-apple-darwin
-            bundles: app,dmg
-            kinds: app,dmg
-          - os: macos-14
-            label: macOS x64
-            target: x86_64-apple-darwin
+            label: macOS
+            slug: macos
+            # 两个架构在同一个 macOS runner 上顺序构建：macOS 并发很少，
+            # 拆成两个作业时后一个经常排队到被取消。
+            targets: aarch64-apple-darwin x86_64-apple-darwin
             bundles: app,dmg
             kinds: app,dmg
           - os: windows-2022
             label: Windows x64
-            target: x86_64-pc-windows-msvc
+            slug: windows
+            targets: x86_64-pc-windows-msvc
             bundles: nsis
             kinds: nsis
           - os: ubuntu-22.04
             label: Linux x64
-            target: x86_64-unknown-linux-gnu
+            slug: linux
+            targets: x86_64-unknown-linux-gnu
             bundles: deb,appimage
             kinds: deb,appimage
     steps:
@@ -151,12 +151,12 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
       - name: 安装本平台编译目标
-        # rust-toolchain.toml 固定了 1.96.0，交叉目标必须装到这个工具链上
-        run: rustup target add ${{ matrix.target }}
+        # rust-toolchain.toml 固定了工具链版本，交叉目标必须装到这个工具链上
+        run: rustup target add ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
-          key: release-${{ matrix.target }}
+          key: release-${{ matrix.slug }}
       - name: 安装依赖（锁定锁文件）
         run: pnpm install --frozen-lockfile
       - name: 构建共享包（client 依赖其 dist）
@@ -173,28 +173,40 @@ jobs:
           if [ "${{ needs.prepare.outputs.create_updater_artifacts }}" = "true" ]; then
             extra="--config src-tauri/tauri.updater.conf.json"
           fi
-          pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${extra}
+          for target in ${{ matrix.targets }}; do
+            echo "[release] 构建 $target"
+            pnpm tauri build --target "$target" --bundles ${{ matrix.bundles }} ${extra}
+          done
       - name: 校验产物真实存在
         shell: bash
         run: |
-          node scripts/tauri-release/cli.mjs assert-bundles \
-            --dir "target/${{ matrix.target }}/release/bundle" --kinds "${{ matrix.kinds }}"
+          for target in ${{ matrix.targets }}; do
+            node scripts/tauri-release/cli.mjs assert-bundles \
+              --dir "target/$target/release/bundle" --kinds "${{ matrix.kinds }}"
+          done
       - name: 生成 SHA256 清单
         shell: bash
         run: |
-          node scripts/tauri-release/cli.mjs write-sums \
-            --dir "target/${{ matrix.target }}/release/bundle" \
-            --out "target/${{ matrix.target }}/SHA256SUMS.txt"
+          for target in ${{ matrix.targets }}; do
+            node scripts/tauri-release/cli.mjs write-sums \
+              --dir "target/$target/release/bundle" \
+              --out "target/$target/SHA256SUMS.txt"
+          done
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: tauri-release-${{ needs.prepare.outputs.version }}-${{ matrix.target }}
+          name: tauri-release-${{ needs.prepare.outputs.version }}-${{ matrix.slug }}
           path: |
-            target/${{ matrix.target }}/release/bundle
-            target/${{ matrix.target }}/SHA256SUMS.txt
+            target/aarch64-apple-darwin/release/bundle
+            target/aarch64-apple-darwin/SHA256SUMS.txt
+            target/x86_64-apple-darwin/release/bundle
+            target/x86_64-apple-darwin/SHA256SUMS.txt
+            target/x86_64-pc-windows-msvc/release/bundle
+            target/x86_64-pc-windows-msvc/SHA256SUMS.txt
+            target/x86_64-unknown-linux-gnu/release/bundle
+            target/x86_64-unknown-linux-gnu/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
-
   publish:
     name: 汇总产物并创建 Draft Release
     needs: [prepare, build]
