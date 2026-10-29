@@ -107,3 +107,62 @@ PARTIAL
   因此按仓库规则**不更新** `docs/releases/release-notes.md` 与 README 最新更新。
 - 稳定知识（Tag 命名空间分离、签名三级模式、门禁复用与自检）已写入
   `docs/wiki/architecture/desktop-release-pipeline.md`。
+## 十、预发布干跑实测（2026-10-29，真实 GitHub Actions）
+
+把 `beta` 的版本升到 `0.1.1-beta.1` 并打 Tag `tauri-v0.1.1-beta.1`（指向 `c384726`），完整跑了一遍
+`tauri-release.yml`。为了排除真实缺陷，一共跑了 5 次（前 4 次各自暴露一个问题，均已修复）：
+
+| 轮次 | 结果 | 暴露的问题 | 修复 |
+| --- | --- | --- | --- |
+| 1 | Windows / macOS x64 失败 | Windows runner 默认 shell 是 pwsh，bash 语法解析失败；macOS x64 用的 macos-13 排队过久 | 构建步骤显式 `shell: bash`；macOS x64 改用 macos-14 交叉编译 |
+| 2 | Windows / macOS x64 失败 | `beforeBuildCommand` 用 bash 环境变量前缀，Windows cmd 不认；交叉编译目标没装到 rust-toolchain.toml 固定的 1.95/1.96 工具链上 | 新增 `scripts/build-client-relative.mjs` 统一设置环境变量；补 `rustup target add` |
+| 3 | 4 平台构建全绿，发布失败 | 上传用了全量文件，AppImage 的 AppDir 内部文件触发 `HTTP 422`，Draft 里塞进 86 个无关文件 | 上传与校验和按发布产物后缀过滤 |
+| 4 | 全绿，但 Draft 含 `control.tar.gz` / `data.tar.gz` | `.tar.gz` 规则过宽，误收 deb 控制包 | 改为精确后缀（`.app.tar.gz` / `.AppImage.tar.gz` / `.nsis.zip` 等），并新增 `list-release-assets` 作为唯一判定 |
+| 5 | **全部 success** | — | — |
+
+第 5 轮 run `40828347751`（commit `c384726`）：
+
+```text
+校验 Tag、版本与签名模式        success
+质量门禁 / 发布脚本单测          success
+质量门禁 / 前端类型检查与单测     success
+质量门禁 / Rust 格式 / Clippy / 单测 success
+质量门禁 / Bundle 构建检查（macOS arm64）success
+质量门禁 / Bundle 构建检查（Linux x64） success
+构建 macOS arm64              success
+构建 macOS x64                success
+构建 Windows x64              success
+构建 Linux x64                success
+汇总产物并创建 Draft Release    success
+```
+
+生成的 Draft Release `tauri-v0.1.1-beta.1`（`draft=true`、`prerelease=true`、**未公开**，共 6 个资产）：
+
+| 资产 | 大小 |
+| --- | --- |
+| Biz.Novel.Studio_0.1.1-beta.1_aarch64.dmg | 10.5 MB |
+| Biz.Novel.Studio_0.1.1-beta.1_x64.dmg | 10.9 MB |
+| Biz.Novel.Studio_0.1.1-beta.1_x64-setup.exe | 7.5 MB |
+| Biz.Novel.Studio_0.1.1-beta.1_amd64.deb | 11.2 MB |
+| Biz.Novel.Studio_0.1.1-beta.1_amd64.AppImage | 88.8 MB |
+| SHA256SUMS.txt | 539 B |
+
+断言成立：
+
+- unsigned-qa 模式**没有**产出 `latest.json`（stable 索引未被触碰）
+- Draft 保持未公开；Tag 推送并没有触发任何公开发布
+- 资产里没有 AppImage 内部文件、没有 deb 控制包
+
+## 十一、状态更新
+
+```text
+RELEASE_QA_ONLY
+```
+
+- 未签名 QA 构建已由真实 GitHub Actions 产出并校验（4 平台 + Draft + 校验和）
+- updater-signed 模式仍只有本地证据（GitHub Secret 未配置）
+- nightly 通道从未真实执行
+- 安装/升级验证（P6）仍为 NOT_RUN
+
+推进到 `READY_FOR_RELEASE` 还需要：配置 `TAURI_SIGNING_PRIVATE_KEY`、跑一次 updater-signed 的预发布、
+跑一次 nightly、以及至少一次真实安装/启动验证。
