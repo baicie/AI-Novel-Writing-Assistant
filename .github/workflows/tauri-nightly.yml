@@ -198,7 +198,7 @@ jobs:
           merge-multiple: true
       - name: 生成 SHA256 清单
         run: |
-          node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt             --extensions ".dmg,.exe,.msi,.deb,.AppImage,.tar.gz,.zip,.sig"
+          node scripts/tauri-release/cli.mjs write-sums --dir artifacts --out artifacts/SHA256SUMS.txt             --extensions ".dmg,.exe,.msi,.deb,.AppImage,.app.tar.gz,.AppImage.tar.gz,.nsis.zip,.msi.zip,.sig"
       - name: 生成 nightly 更新索引（独立文件名，不覆盖 stable）
         if: ${{ env.UPDATER == 'true' }}
         run: |
@@ -215,13 +215,12 @@ jobs:
             gh release create "${TAG}" --prerelease --title "Nightly ${VERSION}" \
               --notes "自动构建的夜间版本：${GITHUB_SHA}。不用于正式分发，不进入 stable 更新通道。"
           fi
-      - name: 上传产物
+      - name: 上传产物（只上传分发产物）
         run: |
-          mapfile -t files < <(find artifacts -type f             \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb'                -o -name '*.AppImage' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.sig'                -o -name 'SHA256SUMS.txt' -o -name 'latest.json' -o -name 'nightly-latest.json' \) | sort)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "没有可上传的 nightly 产物" >&2
-            exit 1
-          fi
+          mapfile -t rel < <(node scripts/tauri-release/cli.mjs list-release-assets --dir artifacts)
+          files=()
+          for item in "${rel[@]}"; do files+=("artifacts/${item}"); done
+          printf '%s\n' "${files[@]}"
           gh release upload "${TAG}" "${files[@]}" --clobber
       - name: 断言没有触碰 stable 索引
         run: |

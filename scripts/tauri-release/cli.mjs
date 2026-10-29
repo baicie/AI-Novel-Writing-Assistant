@@ -74,10 +74,24 @@ async function cmdCheckVersions(argv) {
   process.stdout.write(`[release] 版本一致：${JSON.stringify(result.versions)}\n`);
 }
 
-export const RELEASE_ASSET_EXTENSIONS = [".dmg", ".exe", ".msi", ".deb", ".AppImage", ".tar.gz", ".zip", ".sig"];
+// 只认真正的分发产物：deb 控制包（control.tar.gz / data.tar.gz）和 AppImage 内部文件都不能被上传。
+export const RELEASE_ASSET_SUFFIXES = [
+  ".dmg",
+  ".exe",
+  ".msi",
+  ".deb",
+  ".AppImage",
+  ".app.tar.gz",
+  ".AppImage.tar.gz",
+  ".nsis.zip",
+  ".msi.zip",
+  ".sig",
+];
 
-export function isReleaseAsset(name, extensions = RELEASE_ASSET_EXTENSIONS) {
-  return extensions.some((extension) => name.endsWith(extension));
+export const RELEASE_MANIFEST_NAMES = ["SHA256SUMS.txt", "latest.json", "nightly-latest.json"];
+
+export function isReleaseAsset(name, suffixes = RELEASE_ASSET_SUFFIXES) {
+  return suffixes.some((suffix) => name.endsWith(suffix));
 }
 
 async function cmdWriteSums(argv) {
@@ -151,6 +165,20 @@ async function cmdWriteLatest(argv) {
   }
   await writeFile(out, `${JSON.stringify(built.manifest, null, 2)}\n`);
   process.stdout.write(`[release] 已写入 ${out}：${Object.keys(built.manifest.platforms).join(", ")}\n`);
+}
+
+async function cmdListReleaseAssets(argv) {
+  const dir = argValue(argv, "dir", "artifacts");
+  const files = (await collectFiles(dir))
+    .filter((entry) => !entry.isDirectory)
+    .filter((entry) => isReleaseAsset(entry.name) || RELEASE_MANIFEST_NAMES.includes(entry.name))
+    .map((entry) => path.relative(dir, entry.path))
+    .sort();
+  if (files.length === 0) {
+    process.stderr.write("[release] 没有找到可上传的发布产物\n");
+    process.exit(1);
+  }
+  process.stdout.write(files.join("\n") + "\n");
 }
 
 async function cmdVerifyArtifacts(argv) {
@@ -262,6 +290,7 @@ const COMMANDS = {
   "write-sums": cmdWriteSums,
   "write-latest": cmdWriteLatest,
   "verify-artifacts": cmdVerifyArtifacts,
+  "list-release-assets": cmdListReleaseAssets,
   "assert-bundles": cmdAssertBundles,
   "read-base-version": cmdReadBaseVersion,
   "check-workflows": cmdCheckWorkflows,
