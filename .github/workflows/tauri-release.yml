@@ -115,25 +115,21 @@ jobs:
             target: aarch64-apple-darwin
             bundles: app,dmg
             kinds: app,dmg
-            updater_glob: "*.app.tar.gz"
           - os: macos-14
             label: macOS x64
             target: x86_64-apple-darwin
             bundles: app,dmg
             kinds: app,dmg
-            updater_glob: "*.app.tar.gz"
           - os: windows-2022
             label: Windows x64
             target: x86_64-pc-windows-msvc
             bundles: nsis
             kinds: nsis
-            updater_glob: "*.nsis.zip"
           - os: ubuntu-22.04
             label: Linux x64
             target: x86_64-unknown-linux-gnu
             bundles: deb,appimage
             kinds: deb,appimage
-            updater_glob: "*.AppImage.tar.gz"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -178,33 +174,6 @@ jobs:
             extra="--config src-tauri/tauri.updater.conf.json"
           fi
           pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${extra}
-      - name: 统一更新包命名（版本 + 平台）
-        if: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' }}
-        shell: bash
-        run: |
-          dir="target/${{ matrix.target }}/release/bundle"
-          found=0
-          while IFS= read -r sig; do
-            archive="${sig%.sig}"
-            base="$(basename "${archive}")"
-            stem="${base%.tar.gz}"
-            stem="${stem%.zip}"
-            case "${{ matrix.target }}" in
-              aarch64-apple-darwin) arch="aarch64" ;;
-              x86_64-apple-darwin) arch="x64" ;;
-              x86_64-pc-windows-msvc) arch="x64" ;;
-              x86_64-unknown-linux-gnu) arch="amd64" ;;
-            esac
-            suffix="${base#${stem}}"
-            newbase="${stem}_${{ needs.prepare.outputs.version }}_${arch}${suffix}"
-            mv "${archive}" "$(dirname "${archive}")/${newbase}"
-            mv "${sig}" "$(dirname "${sig}")/${newbase}.sig"
-            found=$((found + 1))
-          done < <(find "${dir}" -name "*.sig")
-          if [ "${found}" -eq 0 ]; then
-            echo "updater-signed 模式没有生成任何 .sig 更新包" >&2
-            exit 1
-          fi
       - name: 校验产物真实存在
         shell: bash
         run: |
