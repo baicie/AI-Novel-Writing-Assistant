@@ -1,20 +1,31 @@
+// 这些 HTTP 应用骨架属于后续服务端内核，桌面内核尚未接线，显式允许未使用。
+#[allow(dead_code)]
 mod app;
 mod batch;
 mod context;
+// 编排层函数按显式参数传值，便于调用方看到完整契约；拆结构体属于后续重构，先按模块允许。
+#[allow(clippy::too_many_arguments)]
 mod director;
 mod dto;
 mod error;
 mod hash;
+#[allow(dead_code)]
 mod http_error;
+#[allow(dead_code)]
 mod http_handlers;
+#[allow(dead_code, clippy::collapsible_if)]
 mod http_request;
+#[allow(dead_code)]
 mod http_response;
+#[allow(dead_code)]
 mod http_routes;
 mod hub;
 mod integration_tests;
 mod knowledge;
+#[allow(clippy::too_many_arguments)]
 mod memory;
 mod native_tasks;
+#[allow(clippy::too_many_arguments)]
 mod ports;
 mod runtime;
 mod services_chapter;

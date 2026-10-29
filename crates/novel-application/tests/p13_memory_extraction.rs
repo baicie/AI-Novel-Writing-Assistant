@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use novel_application::{
-    ExtractMemoryInput, MemoryRepository, MemoryService, NewChapter, NewCharacter, NewNovel,
-    NewTimelineEvent, NovelRepository,
+    ExtractMemoryInput, MemoryService, NewChapter, NewCharacter, NewNovel, NewTimelineEvent,
+    NovelRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};

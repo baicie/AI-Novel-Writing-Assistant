@@ -399,6 +399,8 @@ impl MemoryService {
     }
 }
 
+/// 记忆抽取使用的章节来源标识，供后续抽取链路复用。
+#[allow(dead_code)]
 pub fn chapter_source_identity(chapter: &ChapterSnapshot) -> (i64, String) {
     (
         chapter.official_version,

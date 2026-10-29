@@ -385,7 +385,7 @@ pub async fn assemble_director_context(
                 text.push('\n');
             }
             drafts.push(SourceDraft {
-                source_type: "chapter_arc_summary".into(),
+                source_type: "chapter_arc_summary",
                 source_id: novel_id.to_string(),
                 source_version: Some(plan.version),
                 source_status: "confirmed".into(),
@@ -431,13 +431,11 @@ pub async fn assemble_director_context(
     let mut used_tokens = 0u64;
     for draft in &drafts {
         if draft.text.trim().is_empty() {
-            let reason = match draft.source_status.as_str() {
-                "not_migrated" => "not_migrated",
-                "missing" => "missing",
-                "stale_artifact" => "stale_artifact",
-                other => other,
-            };
-            traces.push(source_trace(draft, false, Some(reason)));
+            traces.push(source_trace(
+                draft,
+                false,
+                Some(draft.source_status.as_str()),
+            ));
             continue;
         }
         let tokens = estimate_tokens(&draft.text);

@@ -58,7 +58,7 @@ pub async fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>,
             modified_at: modified,
         });
     }
-    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    items.sort_by_key(|item| std::cmp::Reverse(item.modified_at));
     Ok(items)
 }
 
@@ -512,6 +512,11 @@ mod tests {
         assert!(PathBuf::from(format!("{}-wal", original.display())).exists());
         assert!(PathBuf::from(format!("{}-shm", original.display())).exists());
         assert_eq!(titles(&db).await, vec!["原书".to_string()]);
+        // 造出来的 wal/shm 是坏字节，只用于验证"随原库一起搬走"；
+        // 验证保护副本可独立打开之前先清掉它们，避免把坏 WAL 干扰误判为副本损坏。
+        for suffix in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(PathBuf::from(format!("{}{suffix}", original.display())));
+        }
         assert_eq!(
             titles(&original).await,
             vec!["原书".to_string()],
@@ -637,13 +642,12 @@ mod tests {
             .unwrap();
         assert!(attached.success(), "无法挂载磁盘映像");
 
-        let outcome = run_enospc_case(&mount).await;
+        run_enospc_case(&mount).await;
         let _ = Command::new("hdiutil")
             .arg("detach")
             .arg(&mount)
             .args(["-force", "-quiet"])
             .status();
-        outcome;
     }
 
     #[cfg(target_os = "macos")]

@@ -387,10 +387,10 @@ commands::knowledge::list_index_jobs,
         .build(tauri::generate_context!())
         .expect("无法打开本地创作窗口")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app.try_state::<AppState>() {
-                    state.runtime.worker.stop();
-                }
+            if let tauri::RunEvent::Exit = event
+                && let Some(state) = app.try_state::<AppState>()
+            {
+                state.runtime.worker.stop();
             }
         });
 }

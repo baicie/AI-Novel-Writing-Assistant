@@ -147,10 +147,10 @@ pub async fn generate_text(
 
 #[tauri::command]
 pub fn cancel_text_generation(state: State<'_, AppState>, request_id: String) {
-    if let Ok(mut cancellations) = state.cancellations.lock() {
-        if let Some(token) = cancellations.remove(&request_id) {
-            token.cancel();
-        }
+    if let Ok(mut cancellations) = state.cancellations.lock()
+        && let Some(token) = cancellations.remove(&request_id)
+    {
+        token.cancel();
     }
 }
 

@@ -5,7 +5,7 @@ use novel_application::{
     KnowledgeDocumentSummary, KnowledgeRepository, NewDocument, PortError, RetrievalTrace,
     SearchHit,
 };
-use novel_context::{Lexicon, cosine, decode_f32, encode_f32, fts_query, tokenize};
+use novel_context::{cosine, decode_f32, encode_f32, fts_query};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 

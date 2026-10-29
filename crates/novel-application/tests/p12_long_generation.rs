@@ -162,9 +162,9 @@ async fn hundred_chapter_mock_generation_benchmark() {
         );
     }
     // Continuity: every chapter after the first must see the immediately previous official chapter.
-    for index in 1..prompt_snapshots.len() {
+    for (index, snapshot) in prompt_snapshots.iter().enumerate().skip(1) {
         assert!(
-            prompt_snapshots[index].contains(&format!("第{index}章正文")),
+            snapshot.contains(&format!("第{index}章正文")),
             "chapter {} context is missing previous chapter",
             index + 1
         );

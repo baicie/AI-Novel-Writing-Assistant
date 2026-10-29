@@ -1871,6 +1871,7 @@ async fn record_chapter_index_job(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_chapter_knowledge(
     tx: &mut crate::db::Tx<'_>,
     novel_id: &str,

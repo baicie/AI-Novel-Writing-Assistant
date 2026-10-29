@@ -55,7 +55,7 @@ impl EventCache {
 
     /// 记录一条事件到缓存
     pub fn record_event(&self, run_id: String, seq: i64, event: GenerationEvent) {
-        let mut entry = self.active_runs.entry(run_id).or_insert_with(Vec::new);
+        let mut entry = self.active_runs.entry(run_id).or_default();
         entry.push((seq, event));
 
         // 只保留最近 1000 条事件，防止内存无限增长

@@ -93,7 +93,7 @@ async fn read_model_setup(
     let stored = kernel.load_model_setup().await.map_err(AppError::from)?;
     Ok(match stored {
         Some(stored) => {
-            let mut has_api_key = secrets
+            let has_api_key = secrets
                 .get(&stored.secret_ref)
                 .await
                 .map_err(|_| AppError::from(PortError::Storage("系统凭据暂时不可用".into())))?
