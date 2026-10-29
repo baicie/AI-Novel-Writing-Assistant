@@ -365,6 +365,22 @@ mod tests {
         dir.join("restore-intent.json")
     }
 
+    #[cfg(unix)]
+    pub(super) fn permissions_enforced(dir: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+        permissions.set_mode(0o555);
+        std::fs::set_permissions(dir, permissions).unwrap();
+        let probe = dir.join("write-probe");
+        let denied = std::fs::write(&probe, b"x").is_err();
+        let _ = std::fs::remove_file(&probe);
+        let mut restore = std::fs::metadata(dir).unwrap().permissions();
+        restore.set_mode(0o755);
+        std::fs::set_permissions(dir, restore).unwrap();
+        denied
+    }
+
     async fn seed(kernel: &novel_storage_sqlite::SqliteKernel, id: &str, title: &str) {
         novel_application::NovelRepository::create_novel(
             kernel,
@@ -538,6 +554,10 @@ mod tests {
         seed(&live, "n-live", "原书").await;
         let read_only = dir.path().join("readonly");
         std::fs::create_dir_all(&read_only).unwrap();
+        if !super::tests::permissions_enforced(&read_only) {
+            eprintln!("当前文件系统不限制目录写权限，跳过只读目录用例");
+            return;
+        }
         let mut permissions = std::fs::metadata(&read_only).unwrap().permissions();
         permissions.set_mode(0o555);
         std::fs::set_permissions(&read_only, permissions).unwrap();
@@ -569,6 +589,10 @@ mod tests {
         let marker = intent_paths(dir.path(), &staged, &original);
 
         // 数据目录只读：切换时的重命名必须失败，而不是把库切坏。
+        if !super::tests::permissions_enforced(dir.path()) {
+            eprintln!("当前文件系统不限制目录写权限，跳过只读目录用例");
+            return;
+        }
         let mut permissions = std::fs::metadata(dir.path()).unwrap().permissions();
         permissions.set_mode(0o555);
         std::fs::set_permissions(dir.path(), permissions).unwrap();
