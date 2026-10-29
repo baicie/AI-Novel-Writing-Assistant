@@ -19,7 +19,7 @@ members = [
 edition = "2024"
 license = "AGPL-3.0-only"
 publish = false
-version = "0.1.1-beta.2"
+version = "0.1.1-beta.3"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -57,4 +57,3 @@ debug = false
 # cargo test 的 test profile 继承自 dev；显式再声明一次，确保 CI/本地测试同样生效。
 [profile.test.package."*"]
 debug = false
-
