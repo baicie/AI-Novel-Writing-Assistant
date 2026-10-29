@@ -1,0 +1,370 @@
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+use novel_domain::{ArtifactView, ControlEvent, RunControl};
+use novel_workflow::AttemptView;
+
+use crate::dto::{ChapterSnapshot, NovelSummary, RunContract};
+use crate::error::PortError;
+
+#[derive(Debug, Clone)]
+pub struct NewNovel {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewChapter {
+    pub id: String,
+    pub novel_id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SaveChapterRecord {
+    pub novel_id: String,
+    pub chapter_id: String,
+    pub expected_version: i64,
+    pub title: String,
+    pub content: String,
+    pub revision_id: String,
+    pub artifact_id: String,
+    pub content_sha256: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromoteOutcome {
+    Promoted { version: i64 },
+    Blocked,
+    MissingCandidate,
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenRunRecord {
+    pub command_id: String,
+    pub request_hash: String,
+    pub run_id: String,
+    pub novel_id: String,
+    pub contract_json: String,
+    pub plan_version: String,
+    pub seed_artifact_id: String,
+    pub seed_payload: String,
+    pub seed_hash: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandOutcome {
+    pub run_id: String,
+    pub status: String,
+    pub replayed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimedRun {
+    pub run_id: String,
+    pub novel_id: String,
+    pub contract: RunContract,
+    pub control: RunControl,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewArtifact {
+    pub id: String,
+    pub novel_id: String,
+    pub run_id: Option<String>,
+    pub artifact_type: String,
+    pub scope: String,
+    pub status: String,
+    pub protected_user_content: bool,
+    pub payload_json: String,
+    pub content_sha256: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAttempt {
+    pub id: String,
+    pub run_id: String,
+    pub step_id: String,
+    pub control_version: i64,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewCandidate {
+    pub id: String,
+    pub chapter_id: String,
+    pub run_id: String,
+    pub step_id: String,
+    pub content: String,
+    pub content_sha256: String,
+    pub now_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewInvocation {
+    pub id: String,
+    pub request_id: String,
+    pub run_id: String,
+    pub step_id: String,
+    pub provider: String,
+    pub model: String,
+    pub input_summary: String,
+    pub started_at: i64,
+    pub finished_at: i64,
+    pub prompt_tokens: Option<i64>,
+    pub completion_tokens: Option<i64>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControlCommit {
+    pub control: RunControl,
+    pub seq: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControlWrite {
+    pub run_id: String,
+    pub expected_version: i64,
+    pub event: ControlEvent,
+    pub artifact: Option<NewArtifact>,
+    pub event_kind: String,
+    pub event_step_id: Option<String>,
+    pub event_payload: String,
+    pub occurred_at: i64,
+    pub invocation: Option<NewInvocation>,
+    pub attempt_id: Option<String>,
+    pub attempt_phase: Option<String>,
+    pub clear_lease: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredEvent {
+    pub run_id: String,
+    pub seq: i64,
+    pub kind: String,
+    pub step_id: Option<String>,
+    pub payload_json: String,
+    pub occurred_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CandidateBody {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewDocument {
+    pub id: String,
+    pub novel_id: String,
+    pub owner_type: String,
+    pub title: String,
+    pub body: String,
+    pub terms: String,
+    pub created_at: i64,
+    pub embedding: Option<NewEmbedding>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewEmbedding {
+    pub model: String,
+    pub normalized: bool,
+    pub vector: Vec<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub chunk_id: String,
+    pub owner_type: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RetrievalTrace {
+    pub id: String,
+    pub novel_id: String,
+    pub query_summary: String,
+    pub chunk_ids: Vec<String>,
+    pub created_at: i64,
+}
+
+pub trait Clock: Send + Sync {
+    fn now_ms(&self) -> i64;
+}
+
+pub trait Ids: Send + Sync {
+    fn new_id(&self) -> String;
+}
+
+pub struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now_ms(&self) -> i64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0)
+    }
+}
+
+pub struct UuidIds;
+
+impl Ids for UuidIds {
+    fn new_id(&self) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+}
+
+#[async_trait]
+pub trait FaultInjector: Send + Sync {
+    async fn fail_after_candidate(&self, step_id: &str) -> bool;
+}
+
+pub struct NoFault;
+
+#[async_trait]
+impl FaultInjector for NoFault {
+    async fn fail_after_candidate(&self, _step_id: &str) -> bool {
+        false
+    }
+}
+
+#[async_trait]
+pub trait ModelSecrets: Send + Sync {
+    async fn api_key(&self, provider: &str) -> Result<Option<String>, PortError>;
+}
+
+pub struct NoModelSecrets;
+
+#[async_trait]
+impl ModelSecrets for NoModelSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+pub trait NovelRepository: Send + Sync {
+    async fn list_novels(&self) -> Result<Vec<NovelSummary>, PortError>;
+    async fn create_novel(&self, novel: NewNovel) -> Result<NovelSummary, PortError>;
+    async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
+    async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
+    async fn get_chapter(
+        &self,
+        novel_id: &str,
+        chapter_id: &str,
+    ) -> Result<ChapterSnapshot, PortError>;
+    async fn save_user_chapter(
+        &self,
+        input: SaveChapterRecord,
+    ) -> Result<ChapterSnapshot, PortError>;
+    async fn promote_candidate(
+        &self,
+        chapter_id: &str,
+        candidate_id: &str,
+        revision_id: &str,
+        now_ms: i64,
+    ) -> Result<PromoteOutcome, PortError>;
+}
+
+#[async_trait]
+pub trait WorkflowRepository: Send + Sync {
+    async fn open_run(&self, record: OpenRunRecord) -> Result<CommandOutcome, PortError>;
+    async fn claim_next(
+        &self,
+        owner: &str,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<ClaimedRun>, PortError>;
+    async fn list_artifacts(&self, novel_id: &str) -> Result<Vec<ArtifactView>, PortError>;
+    async fn list_attempts(&self, run_id: &str) -> Result<Vec<AttemptView>, PortError>;
+    async fn insert_external_artifact(&self, artifact: NewArtifact) -> Result<(), PortError>;
+    async fn start_attempt(&self, attempt: NewAttempt) -> Result<(), PortError>;
+    async fn mark_remote_started(
+        &self,
+        attempt_id: &str,
+        request_id: &str,
+        now_ms: i64,
+    ) -> Result<bool, PortError>;
+    async fn save_candidate(&self, candidate: NewCandidate) -> Result<(), PortError>;
+    async fn record_invocation(&self, invocation: NewInvocation) -> Result<(), PortError>;
+    async fn mark_attempt(
+        &self,
+        attempt_id: &str,
+        phase: &str,
+        candidate_id: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn latest_candidate(&self, run_id: &str) -> Result<Option<CandidateBody>, PortError>;
+    async fn apply_control(&self, write: ControlWrite) -> Result<ControlCommit, PortError>;
+    async fn approve(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
+    async fn resume(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        intent: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
+    async fn cancel(
+        &self,
+        command_id: &str,
+        request_hash: &str,
+        run_id: &str,
+        now_ms: i64,
+    ) -> Result<CommandOutcome, PortError>;
+    async fn events_after(
+        &self,
+        run_id: &str,
+        after_seq: i64,
+    ) -> Result<Vec<StoredEvent>, PortError>;
+    async fn remote_call_count(&self, run_id: &str, step_id: &str) -> Result<i64, PortError>;
+    #[allow(clippy::too_many_arguments)]
+    async fn append_debt(
+        &self,
+        id: &str,
+        novel_id: &str,
+        run_id: &str,
+        chapter_order: i32,
+        code: &str,
+        detail: &str,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+}
+
+#[async_trait]
+pub trait KnowledgeRepository: Send + Sync {
+    async fn index_document(&self, document: NewDocument) -> Result<(), PortError>;
+    async fn search_keyword(
+        &self,
+        novel_id: &str,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<SearchHit>, PortError>;
+    async fn search_vector(
+        &self,
+        novel_id: &str,
+        model: &str,
+        vector: &[f32],
+        normalized: bool,
+        limit: i64,
+    ) -> Result<Vec<SearchHit>, PortError>;
+    async fn record_trace(&self, trace: RetrievalTrace) -> Result<(), PortError>;
+    async fn latest_trace(&self, novel_id: &str) -> Result<Option<RetrievalTrace>, PortError>;
+}
