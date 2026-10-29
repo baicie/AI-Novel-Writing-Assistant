@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - "migration/tauri-2-rust"
+      - "beta"
       - "main"
     paths: *tauri_paths
 
