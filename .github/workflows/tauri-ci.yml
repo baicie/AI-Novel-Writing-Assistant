@@ -82,9 +82,14 @@ jobs:
 
   rust:
     name: Rust 格式 / Clippy / 单测
-    runs-on: macos-14
+    # 放在 Linux 上跑：macOS runner 排队时间长、并发少，把内核检查留给真正需要 macOS 的 bundle 作业。
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf             libdbus-1-dev libssl-dev build-essential pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
