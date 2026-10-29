@@ -265,7 +265,12 @@ async function cmdListReleaseAssets(argv) {
     .filter((entry) => {
       // 只有更新包的签名需要上传，安装包的 .sig 对客户端没有意义。
       if (entry.name.endsWith(".sig")) return Boolean(updaterArchiveSuffix(entry.name.slice(0, -4)));
-      return isReleaseAsset(entry.name) || RELEASE_MANIFEST_NAMES.includes(entry.name);
+      if (RELEASE_MANIFEST_NAMES.includes(entry.name)) {
+        // 每个平台目录里也有一份 SHA256SUMS.txt，只有汇总目录那份该上传，
+        // 否则同名资产会在上传时触发 HTTP 422。
+        return path.dirname(entry.path) === dir;
+      }
+      return isReleaseAsset(entry.name);
     })
     .map((entry) => path.relative(dir, entry.path))
     .sort();
