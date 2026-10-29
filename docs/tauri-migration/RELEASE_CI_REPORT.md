@@ -160,6 +160,8 @@ RELEASE_QA_ONLY
 ```
 
 - 未签名 QA 构建已由真实 GitHub Actions 产出并校验（4 平台 + Draft + 校验和）
+- 设置页的更新检查已接入（`UpdateCheckCard` + 可单测状态机 + `updater:default` 权限），
+  但只有在产出 `latest.json` 之后客户端才真能查到更新
 - updater-signed 模式仍只有本地证据（GitHub Secret 未配置）
 - nightly 通道从未真实执行
 - 安装/升级验证（P6）仍为 NOT_RUN

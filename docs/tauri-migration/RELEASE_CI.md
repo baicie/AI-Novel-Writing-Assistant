@@ -97,7 +97,7 @@ TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.config/biz-novel-studio/tauri-updater.key)" 
 
 见 `docs/tauri-migration/RELEASE_CI_AUDIT.md`。当前仍未覆盖：
 
-- **R10** Linux/Windows 构建从未在真实 runner 上跑过（本地仅 macOS 实测）
+- **R10 已关闭**：Linux/Windows 已在 2026-10-29 的预发布干跑中真实构建成功（见交付报告第十节）
 - **R6** `crates/novel-http` 的历史 rustfmt 债务未清理，CI 只检查迁移 crate 子集
 - 测试目标的 clippy 债务未清零（`--lib` 已严格，测试目标仍有历史告警）
 - macOS 未做 Developer ID 签名与公证（模式 C），用户首次打开仍需手动放行
