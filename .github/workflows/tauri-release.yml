@@ -116,7 +116,7 @@ jobs:
             bundles: app,dmg
             kinds: app,dmg
             updater_glob: "*.app.tar.gz"
-          - os: macos-13
+          - os: macos-14
             label: macOS x64
             target: x86_64-apple-darwin
             bundles: app,dmg
@@ -167,6 +167,7 @@ jobs:
       - name: 校验版本三处一致
         run: pnpm run tauri:release:check-versions
       - name: 构建安装包
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.prepare.outputs.create_updater_artifacts == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}

@@ -153,6 +153,7 @@ jobs:
       - name: 校验版本三处一致
         run: pnpm run tauri:release:check-versions
       - name: 构建未签名 bundle
+        shell: bash
         run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: 校验产物真实存在
         run: |

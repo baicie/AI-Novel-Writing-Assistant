@@ -144,6 +144,7 @@ jobs:
         run: |
           node -e "const fs=require('fs');fs.writeFileSync('src-tauri/tauri.nightly.conf.json', JSON.stringify({version: process.argv[1]}, null, 2));" "${{ needs.prepare.outputs.version }}"
       - name: 构建 nightly 安装包
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ needs.prepare.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.prepare.outputs.updater == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
