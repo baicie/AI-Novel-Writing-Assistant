@@ -104,7 +104,7 @@ jobs:
 
   bundle:
     name: Bundle 构建检查（${{ matrix.label }}）
-    if: ${{ inputs.bundle_check != false }}
+    if: ${{ github.event_name != 'workflow_call' || inputs.bundle_check == true }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
