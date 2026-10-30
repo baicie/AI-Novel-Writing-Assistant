@@ -148,6 +148,8 @@ pub struct UpsertModelRequest {
     pub supports_streaming: Option<bool>,
     pub supports_tools: Option<bool>,
     pub supports_reasoning: Option<bool>,
+    /// 该模型支持的推理强度档位；为空表示交给默认档位。
+    pub reasoning_efforts: Option<Vec<String>>,
     pub expected_revision: Option<i64>,
 }
 
@@ -275,7 +277,9 @@ pub async fn upsert_provider_model(
             supports_tools: request.supports_tools,
             supports_reasoning: request.supports_reasoning,
             input_modalities: None,
-            reasoning_efforts: None,
+            reasoning_efforts: request
+                .reasoning_efforts
+                .map(|list| list.into_iter().collect()),
         },
         source: novel_domain::ModelSource::User,
         overridden: [
@@ -284,6 +288,7 @@ pub async fn upsert_provider_model(
             novel_domain::CapabilityField::SupportsStreaming,
             novel_domain::CapabilityField::SupportsTools,
             novel_domain::CapabilityField::SupportsReasoning,
+            novel_domain::CapabilityField::ReasoningEfforts,
         ]
         .into_iter()
         .collect(),

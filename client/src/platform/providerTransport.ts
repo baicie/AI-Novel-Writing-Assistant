@@ -136,6 +136,7 @@ export interface UpsertModelInput {
   supportsStreaming?: boolean | null;
   supportsTools?: boolean | null;
   supportsReasoning?: boolean | null;
+  reasoningEfforts?: string[] | null;
   expectedRevision?: number | null;
 }
 

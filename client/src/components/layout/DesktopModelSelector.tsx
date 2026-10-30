@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { providerClient } from "@/platform/providerTransport";
 import type { ModelBindingView, ModelView, ProviderView } from "@/platform/providerTransport";
@@ -11,6 +11,7 @@ const FALLBACK_EFFORTS = ["low", "medium", "high"];
 
 export default function DesktopModelSelector() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [models, setModels] = useState<ModelView[]>([]);
   const [providerId, setProviderId] = useState("");
@@ -46,8 +47,15 @@ export default function DesktopModelSelector() {
     }
   }, [applyBinding]);
 
+  // 切页或回到窗口时重新读取：在设置里刚加完模型，导航栏要立刻反映。
   useEffect(() => {
     void load();
+  }, [load, location.pathname]);
+
+  useEffect(() => {
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [load]);
 
   useEffect(() => {

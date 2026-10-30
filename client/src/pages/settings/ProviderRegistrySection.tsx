@@ -40,6 +40,7 @@ export default function ProviderRegistrySection() {
   const [previewToken, setPreviewToken] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<ModelView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [effortDrafts, setEffortDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string>("");
 
   const run = useCallback(async (label: string, action: () => Promise<void>) => {
@@ -165,16 +166,42 @@ export default function ProviderRegistrySection() {
       );
     });
 
-  const saveBinding = (taskType: string, providerId: string, modelId: string) =>
+  const saveBinding = (
+    taskType: string,
+    providerId: string,
+    modelId: string,
+    reasoningEffort?: string | null,
+  ) =>
     run(`bind-${taskType}`, async () => {
       const provider = providers.find((item) => item.id === providerId);
       if (!provider || !canBindForGeneration(provider.protocol)) {
         setMessage("这个来源暂时只能取模型，还不能用于创作生成。");
         return;
       }
-      await providerClient.upsertBinding({ taskType, providerId, modelId, expectedRevision: provider.revision });
+      await providerClient.upsertBinding({
+        taskType,
+        providerId,
+        modelId,
+        reasoningEffort: reasoningEffort ?? null,
+        expectedRevision: provider.revision,
+      });
       setBindings(await providerClient.listBindings());
       setMessage("任务绑定已更新。");
+    });
+
+  const saveModelEfforts = (providerId: string, modelId: string, raw: string) =>
+    run(`efforts-${modelId}`, async () => {
+      const list = raw
+        .split(/[,，\s]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      await providerClient.upsertModel({
+        providerId,
+        modelId,
+        reasoningEfforts: list.length ? list : null,
+      });
+      await loadModels(providerId);
+      setMessage(list.length ? "推理强度档位已保存。" : "已清除档位限制，改用默认档位。");
     });
 
   return (
@@ -306,10 +333,39 @@ export default function ProviderRegistrySection() {
             <span className="text-xs text-muted-foreground">已保存模型</span>
             <ul className="space-y-1">
               {models.map((model) => (
-                <li key={model.modelId} className="flex items-center justify-between text-sm">
+                <li key={model.modelId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                   <span>
                     {model.displayName ?? model.modelId}
                     <span className="ml-2 text-xs text-muted-foreground">{model.source}</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Input
+                      className="h-8 w-40"
+                      aria-label={model.modelId + " 推理强度档位"}
+                      placeholder="low, medium, high"
+                      value={
+                        effortDrafts[model.modelId] ??
+                        (model.capabilities.reasoningEfforts ?? []).join(", ")
+                      }
+                      onChange={(event) =>
+                        setEffortDrafts((current) => ({ ...current, [model.modelId]: event.target.value }))
+                      }
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        void saveModelEfforts(
+                          draft.providerId,
+                          model.modelId,
+                          effortDrafts[model.modelId] ??
+                            (model.capabilities.reasoningEfforts ?? []).join(", "),
+                        )
+                      }
+                      disabled={busy !== null}
+                    >
+                      保存档位
+                    </Button>
                   </span>
                   <Button
                     size="sm"
@@ -362,6 +418,28 @@ export default function ProviderRegistrySection() {
                   ))}
                 </select>
                 <span className="text-xs text-muted-foreground">{binding?.modelId ?? "默认模型"}</span>
+                <select
+                  aria-label={task.label + " 推理强度"}
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                  value={binding?.reasoningEffort ?? ""}
+                  disabled={!binding || busy !== null}
+                  onChange={(event) => {
+                    if (!binding) return;
+                    void saveBinding(
+                      task.value,
+                      binding.providerId,
+                      binding.modelId,
+                      event.target.value || null,
+                    );
+                  }}
+                >
+                  <option value="">推理强度：默认</option>
+                  {["low", "medium", "high"].map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
               </li>
             );
           })}
