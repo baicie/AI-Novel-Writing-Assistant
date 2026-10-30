@@ -13,7 +13,9 @@
 | G4 路由解析 + 生成接线 | PASS | `resolve_route` / `resolve_generation_target` / `generate_text.taskType`，20 条应用用例 |
 | G4 Run 冻结与恢复校验 | PARTIAL | `RunContract.protocol/credentialRef` 可选字段 + worker 优先用冻结引用 + `check_run_route` 校验；**Director 尚未自动填充冻结字段** |
 | G5 历史迁移进 CI | PASS | `tauri-ci.yml`、`tauri-kernel-check.yml` 新增 `--features test-harness` 步骤；YAML 解析校验通过 |
-| G5 原生 E2E / 多窗口 CAS / 故障注入端到端 | 未完成 | — |
+| G5 多窗口 CAS | PASS | `concurrent_updates_with_same_revision_conflict`、`concurrent_binding_writes_conflict`、`concurrent_model_delete_conflict`（事务内版本守卫） |
+| G5 密钥不外泄 | PASS（已覆盖面） | `error_messages_never_echo_the_api_key`、`provider_view_serializes_camel_case`、`route_resolves_from_binding_without_secret` |
+| G5 原生 E2E / 故障注入端到端 | 未完成 | — |
 | G6 最终验收 | 未执行 | — |
 
 ## 2. 关键不变量与对应测试
@@ -38,3 +40,4 @@
 3. **Director 尚未从 route 填充冻结字段**：`RunContract.protocol/credentialRef` 目前恒为空，worker 回退到 `provider`，行为与旧版一致。
 4. **无组件级 UI 测试**：仓库未引入 RTL，本轮未新增依赖；界面验收留给人工。
 5. **既有债务**：`novel-http` 的 fmt/lint 与 `novel-storage-sqlite` 两个测试文件的 clippy 告警仍未处理（非本轮引入）。
+6. **原生 E2E 未运行**：Tauri 端到端（含 wdio）需要构建桌面产物与驱动，本轮未执行，属外部/重量级验证缺口。
