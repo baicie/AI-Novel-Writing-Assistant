@@ -133,6 +133,8 @@ pub struct UpsertProviderRequest {
     pub sort_order: Option<i32>,
     pub is_builtin: Option<bool>,
     pub credential: CredentialActionDto,
+    /// 改到别的主机继续用明文连接时，需要显式再确认一次。
+    pub confirm_plaintext_host_change: Option<bool>,
     /// 新建时省略；更新时必填（CAS）。
     pub expected_revision: Option<i64>,
 }
@@ -233,11 +235,12 @@ pub async fn upsert_provider_profile(
         is_builtin: request.is_builtin.unwrap_or(false),
     };
     service(&state)
-        .upsert_provider(
+        .upsert_provider_with_confirmation(
             draft,
             credential,
             request.expected_revision,
             novel_platform::now_ms(),
+            request.confirm_plaintext_host_change.unwrap_or(false),
         )
         .await
 }

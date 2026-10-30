@@ -862,3 +862,34 @@ async fn run_without_binding_keeps_legacy_parameters() {
     assert!(allow_local);
     assert_eq!(frozen, FrozenRoute::default(), "没有绑定就不冻结任何路由");
 }
+
+/// 明文授权绑主机：换主机必须显式确认，确认后才落库。
+#[tokio::test]
+async fn plaintext_authorization_is_bound_to_host() {
+    let (service, _registry, _vault) = service();
+    let mut first = draft("gw");
+    first.base_url = "http://72.1.1.1:8080/v1".to_string();
+    first.allow_localhost_http = true;
+    service
+        .upsert_provider(
+            first.clone(),
+            CredentialAction::Replace("k".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+
+    let mut moved = draft("gw");
+    moved.base_url = "http://72.2.2.2:8080/v1".to_string();
+    moved.allow_localhost_http = true;
+    let blocked = service
+        .upsert_provider(moved.clone(), CredentialAction::Keep, Some(1), 2)
+        .await;
+    assert!(blocked.is_err(), "换主机未确认应当被拒");
+
+    service
+        .upsert_provider_with_confirmation(moved, CredentialAction::Keep, Some(1), 3, true)
+        .await
+        .expect("确认后可以改到新主机");
+}

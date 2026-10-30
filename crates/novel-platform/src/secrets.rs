@@ -3,6 +3,8 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -41,9 +43,106 @@ fn fallback_file(id: &str) -> Option<std::path::PathBuf> {
     Some(dir.join(format!("{safe}.secret")))
 }
 
+/// 加密文件头：用于区分「加密后的密文」与「历史明文」。
+const MAGIC: &[u8] = b"P16ENC1";
+
+fn random_bytes<const N: usize>() -> [u8; N] {
+    let mut out = [0_u8; N];
+    let mut filled = 0;
+    while filled < N {
+        let chunk = uuid::Uuid::new_v4();
+        let bytes = chunk.as_bytes();
+        let take = (N - filled).min(bytes.len());
+        out[filled..filled + take].copy_from_slice(&bytes[..take]);
+        filled += take;
+    }
+    out
+}
+
+/// 主密钥：优先放系统钥匙库；不可用时落 0600 文件。
+fn parse_key_hex(text: &str) -> Option<[u8; 32]> {
+    let bytes = hex::decode(text.trim()).ok()?;
+    let array: [u8; 32] = bytes.try_into().ok()?;
+    Some(array)
+}
+
+/// 主密钥：优先放系统钥匙库；不可用时落 0600 文件（并发下只允许一个写入者）。
+fn master_key(dir: &std::path::Path) -> Result<[u8; 32], SecretError> {
+    #[cfg(feature = "os-keychain")]
+    {
+        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", "local-master-key") {
+            if let Some(key) = entry
+                .get_password()
+                .ok()
+                .and_then(|hex| parse_key_hex(&hex))
+            {
+                return Ok(key);
+            }
+            let key = random_bytes::<32>();
+            let encoded = hex::encode(key);
+            if entry.set_password(&encoded).is_ok()
+                && entry.get_password().ok().as_deref() == Some(encoded.as_str())
+            {
+                return Ok(key);
+            }
+        }
+    }
+
+    let path = dir.join("master.key");
+    if let Some(key) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| parse_key_hex(&text))
+    {
+        return Ok(key);
+    }
+
+    let key = random_bytes::<32>();
+    let encoded = hex::encode(key);
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(encoded.as_bytes())
+                .map_err(|_| SecretError::Unavailable)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+            Ok(key)
+        }
+        // 并发创建时后到者直接读赢家的密钥，避免同一目录里出现两把主密钥。
+        Err(_) => std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| parse_key_hex(&text))
+            .ok_or(SecretError::Unavailable),
+    }
+}
+
 fn write_fallback(id: &str, secret: &str) -> Result<(), SecretError> {
     let path = fallback_file(id).ok_or(SecretError::Unavailable)?;
-    std::fs::write(&path, secret.as_bytes()).map_err(|_| SecretError::Unavailable)?;
+    let dir = path.parent().ok_or(SecretError::Unavailable)?;
+    let key = master_key(dir)?;
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce_bytes = random_bytes::<12>();
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let sealed = cipher
+        .encrypt(
+            nonce,
+            Payload {
+                msg: secret.as_bytes(),
+                aad: id.as_bytes(),
+            },
+        )
+        .map_err(|_| SecretError::Unavailable)?;
+    let mut payload = Vec::with_capacity(MAGIC.len() + nonce_bytes.len() + sealed.len());
+    payload.extend_from_slice(MAGIC);
+    payload.extend_from_slice(&nonce_bytes);
+    payload.extend_from_slice(&sealed);
+    std::fs::write(&path, &payload).map_err(|_| SecretError::Unavailable)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -54,7 +153,30 @@ fn write_fallback(id: &str, secret: &str) -> Result<(), SecretError> {
 
 fn read_fallback(id: &str) -> Option<String> {
     let path = fallback_file(id)?;
-    std::fs::read_to_string(path)
+    let raw = std::fs::read(&path).ok()?;
+    if raw.len() < MAGIC.len() + 12 || !raw.starts_with(MAGIC) {
+        // 历史明文：读得出来就顺手加密写回，完成迁移。
+        let legacy = String::from_utf8(raw)
+            .ok()
+            .filter(|value| !value.is_empty())?;
+        let _ = write_fallback(id, &legacy);
+        return Some(legacy);
+    }
+    let dir = path.parent()?;
+    let key = master_key(dir).ok()?;
+    let cipher = ChaCha20Poly1305::new((&key).into());
+    let nonce_bytes: [u8; 12] = raw[MAGIC.len()..MAGIC.len() + 12].try_into().ok()?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let plain = cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: &raw[MAGIC.len() + 12..],
+                aad: id.as_bytes(),
+            },
+        )
+        .ok()?;
+    String::from_utf8(plain)
         .ok()
         .filter(|value| !value.is_empty())
 }
@@ -160,28 +282,90 @@ mod tests {
 mod fallback_tests {
     use super::*;
 
-    /// 钥匙库不可用时，回退文件必须能一写一读，且删除后读不到。
-    #[test]
-    fn fallback_round_trip_works_without_keychain() {
+    /// 回退目录是进程级全局配置，测试共用一个目录，避免主密钥被反复重建。
+    fn temp_dir() -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("p16-secrets-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
         configure_secret_fallback(dir.clone());
+        dir
+    }
 
-        write_fallback("probe-id", "sk-probe").unwrap();
-        assert_eq!(read_fallback("probe-id").as_deref(), Some("sk-probe"));
+    #[cfg(unix)]
+    fn mode_of(path: &std::path::Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
 
+    /// 写入后是密文、能读回、删除后读不到，且主密钥与密文文件都是 0600。
+    #[test]
+    fn fallback_round_trip_is_encrypted_and_private() {
+        let dir = temp_dir();
+        write_fallback("probe-id", "sk-probe-secret").unwrap();
+
+        let path = dir.join("probe-id.secret");
+        let raw = std::fs::read(&path).unwrap();
+        assert!(raw.starts_with(MAGIC), "密文必须带文件头");
+        assert!(
+            !String::from_utf8_lossy(&raw).contains("sk-probe-secret"),
+            "磁盘上不能出现明文密钥"
+        );
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(dir.join("probe-id.secret"))
-                .unwrap()
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o777, 0o600, "回退文件必须是 0600");
+            assert_eq!(mode_of(&path), 0o600, "密文文件必须 0600");
+            assert_eq!(
+                mode_of(&dir.join("master.key")),
+                0o600,
+                "主密钥文件必须 0600"
+            );
         }
+        assert_eq!(
+            read_fallback("probe-id").as_deref(),
+            Some("sk-probe-secret")
+        );
 
         delete_fallback("probe-id").unwrap();
         assert_eq!(read_fallback("probe-id"), None);
-        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 历史明文文件读一次就会升级成密文，值不变。
+    #[test]
+    fn legacy_plaintext_is_migrated_on_read() {
+        let dir = temp_dir();
+        let path = dir.join("legacy-id.secret");
+        std::fs::write(&path, b"legacy-secret").unwrap();
+
+        assert_eq!(read_fallback("legacy-id").as_deref(), Some("legacy-secret"));
+        let raw = std::fs::read(&path).unwrap();
+        assert!(raw.starts_with(MAGIC), "读一次之后应已加密");
+        assert_eq!(read_fallback("legacy-id").as_deref(), Some("legacy-secret"));
+        assert!(
+            !String::from_utf8_lossy(&raw).contains("legacy-secret"),
+            "迁移后不应再存明文"
+        );
+    }
+
+    /// 密文被改动后必须读不出来，不能把损坏数据当密钥用。
+    #[test]
+    fn tampered_ciphertext_is_rejected() {
+        let dir = temp_dir();
+        write_fallback("tamper-id", "sk-original").unwrap();
+        let path = dir.join("tamper-id.secret");
+        let mut raw = std::fs::read(&path).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0b0000_0001;
+        std::fs::write(&path, &raw).unwrap();
+
+        assert_eq!(read_fallback("tamper-id"), None, "篡改后必须拒绝解密");
+    }
+
+    /// 不同槽位的密文不能互相冒充（AAD 绑定 id）。
+    #[test]
+    fn ciphertext_is_bound_to_slot_id() {
+        let dir = temp_dir();
+        write_fallback("slot-a", "sk-a").unwrap();
+        let stolen = std::fs::read(dir.join("slot-a.secret")).unwrap();
+        std::fs::write(dir.join("slot-b.secret"), &stolen).unwrap();
+
+        assert_eq!(read_fallback("slot-b"), None, "换个槽位不能解开");
     }
 }

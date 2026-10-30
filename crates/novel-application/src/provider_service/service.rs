@@ -89,6 +89,30 @@ impl ProviderService {
         expected_revision: Option<i64>,
         now_ms: i64,
     ) -> Result<ProviderView, ProviderError> {
+        self.upsert_provider_with_confirmation(draft, credential, expected_revision, now_ms, false)
+            .await
+    }
+
+    /// 明文 HTTP 的授权绑在主机上：改到别的主机时必须显式再确认一次。
+    pub async fn upsert_provider_with_confirmation(
+        &self,
+        draft: ProviderDraft,
+        credential: CredentialAction,
+        expected_revision: Option<i64>,
+        now_ms: i64,
+        confirm_plaintext_host_change: bool,
+    ) -> Result<ProviderView, ProviderError> {
+        if draft.allow_localhost_http
+            && !confirm_plaintext_host_change
+            && let Ok(existing) = self.get_provider(&draft.id).await
+            && plaintext_host_of(&existing.base_url) != plaintext_host_of(&draft.base_url)
+        {
+            return Err(ProviderError::validation(format!(
+                "新地址的主机是 {}，与已允许明文连接的 {} 不同；确认后重新保存",
+                plaintext_host_of(&draft.base_url),
+                plaintext_host_of(&existing.base_url)
+            )));
+        }
         if matches!(&credential, CredentialAction::Replace(secret) if secret.trim().is_empty()) {
             return Err(ProviderError::validation(
                 "替换密钥时不能传空字符串，保留请用 keep、清除请用 clear",
@@ -395,4 +419,18 @@ impl ProviderService {
             credential_ref: provider.credential.reference.clone(),
         })
     }
+}
+
+/// 从地址里取主机（含端口）：只用于「明文授权是否换了目标」这一件事。
+fn plaintext_host_of(endpoint: &str) -> String {
+    let trimmed = endpoint.trim();
+    let without_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
 }
