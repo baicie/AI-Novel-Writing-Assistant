@@ -21,6 +21,8 @@ import SettingsActionResult from "./SettingsActionResult";
 import { AUTO_DIRECTOR_MOBILE_CLASSES } from "@/mobile/autoDirector";
 import { LocalCreationKeyManager } from "@/components/localCreation";
 import UpdateCheckCard from "./UpdateCheckCard";
+import DesktopSettingsView from "./DesktopSettingsView";
+import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
 
 function formatConnectionTestResult(response: Awaited<ReturnType<typeof testLLMConnection>>): string {
   const latency = response.data?.latency ?? 0;
@@ -39,7 +41,7 @@ function formatConnectionTestResult(response: Awaited<ReturnType<typeof testLLMC
   return `连接成功，总耗时 ${latency}ms · ${plainText} · ${structuredText}`;
 }
 
-export default function SettingsPage() {
+function WebSettingsPage() {
   const queryClient = useQueryClient();
   const [editingProvider, setEditingProvider] = useState("");
   const [isCreatingCustomProvider, setIsCreatingCustomProvider] = useState(false);
@@ -546,4 +548,11 @@ export default function SettingsPage() {
       />
     </div>
   );
+}
+// 桌面版走本地内核，网页版保留原有的厂商配置页面。
+export default function SettingsPage() {
+  if (shouldUseDesktopApiAdapter()) {
+    return <DesktopSettingsView />;
+  }
+  return <WebSettingsPage />;
 }

@@ -149,3 +149,60 @@ async fn check_has_api_key(secrets: &OsSecretStore) -> Result<bool, AppError> {
         .map_err(|_| AppError::from(PortError::Storage("系统凭据暂时不可用".into())))?;
     Ok(value.is_some())
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestModelSetupRequest {
+    pub endpoint: String,
+    pub model: String,
+    pub api_key: String,
+    pub allow_localhost_http: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestModelSetupResult {
+    pub ok: bool,
+    pub message: String,
+    pub latency_ms: u64,
+}
+
+/// 用一次最小生成验证「地址 + 模型 + 密钥」是否可用，供桌面端模型配置页直接反馈结果。
+#[tauri::command]
+pub async fn test_model_setup(request: TestModelSetupRequest) -> Result<TestModelSetupResult, AppError> {
+    use novel_llm::LlmRequest;
+    use tokio_util::sync::CancellationToken;
+
+    let provider = crate::llm_provider();
+    let started = std::time::Instant::now();
+    let (tokens, mut receiver) = tokio::sync::mpsc::channel::<String>(8);
+    let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
+    let result = provider
+        .generate(
+            LlmRequest {
+                request_id: format!("model-setup-test-{}", started.elapsed().as_nanos()),
+                model: request.model.clone(),
+                prompt: "回复 ok 两个字符即可。".into(),
+                endpoint: request.endpoint.clone(),
+                api_key: request.api_key.clone(),
+                allow_localhost_http: request.allow_localhost_http,
+                max_output_tokens: Some(16),
+            },
+            tokens,
+            CancellationToken::new(),
+        )
+        .await;
+    drop(drain);
+    let latency_ms = started.elapsed().as_millis() as u64;
+    Ok(match result {
+        Ok(response) => TestModelSetupResult {
+            ok: true,
+            message: format!("连接成功，模型返回：{}", response.text.trim().chars().take(40).collect::<String>()),
+            latency_ms,
+        },
+        Err(error) => TestModelSetupResult {
+            ok: false,
+            message: format!("{error}"),
+            latency_ms,
+        },
+    })
+}

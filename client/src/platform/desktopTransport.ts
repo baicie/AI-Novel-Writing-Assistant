@@ -1081,6 +1081,23 @@ export function hasApiKey(): Promise<boolean> {
   return invoke("has_api_key");
 }
 
+export interface TestModelSetupInput {
+  endpoint: string;
+  model: string;
+  apiKey: string;
+  allowLocalhostHttp: boolean;
+}
+
+export interface TestModelSetupResult {
+  ok: boolean;
+  message: string;
+  latencyMs: number;
+}
+
+export function testModelSetup(input: TestModelSetupInput): Promise<TestModelSetupResult> {
+  return invoke("test_model_setup", { request: input });
+}
+
 export function cancelGeneration(runId: string): Promise<void> {
   return invoke("cancel_generation", { runId });
 }
