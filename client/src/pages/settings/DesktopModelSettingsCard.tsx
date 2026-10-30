@@ -158,9 +158,12 @@ export default function DesktopModelSettingsCard() {
           <p className={phase === "error" ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{message}</p>
         ) : null}
 
+        <p className="text-xs text-muted-foreground">
+          「保存并测试」会向该网关发送一次真实请求（只要求回一个字），可能产生少量费用。
+        </p>
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={() => void save(true)} disabled={phase === "saving" || phase === "testing"}>
-            {phase === "testing" ? "测试中…" : phase === "saving" ? "保存中…" : "保存并测试"}
+            {phase === "testing" ? "测试中…" : phase === "saving" ? "保存中…" : "保存并发送测试请求"}
           </Button>
           <Button type="button" variant="outline" onClick={() => void save(false)} disabled={phase === "saving" || phase === "testing"}>
             仅保存

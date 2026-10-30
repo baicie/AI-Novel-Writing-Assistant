@@ -66,27 +66,17 @@ fn parse_key_hex(text: &str) -> Option<[u8; 32]> {
     Some(array)
 }
 
-/// 主密钥：优先放系统钥匙库；不可用时落 0600 文件（并发下只允许一个写入者）。
+static MASTER_KEY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 主密钥：以应用数据目录的 0600 文件为唯一权威（钥匙库只做尽力而为的副本）。
+///
+/// 之所以不让钥匙库和文件各当一次来源：钥匙库在部分签名环境下「写入成功但读不回来」，
+/// 两处都当权威会出现同一进程内拿到两把不同密钥，导致自己刚写的密文解不开。
 fn master_key(dir: &std::path::Path) -> Result<[u8; 32], SecretError> {
-    #[cfg(feature = "os-keychain")]
-    {
-        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", "local-master-key") {
-            if let Some(key) = entry
-                .get_password()
-                .ok()
-                .and_then(|hex| parse_key_hex(&hex))
-            {
-                return Ok(key);
-            }
-            let key = random_bytes::<32>();
-            let encoded = hex::encode(key);
-            if entry.set_password(&encoded).is_ok()
-                && entry.get_password().ok().as_deref() == Some(encoded.as_str())
-            {
-                return Ok(key);
-            }
-        }
-    }
+    // 并发下必须串行：否则两个线程可能各建一把密钥，互相解不开。
+    let _guard = MASTER_KEY_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
 
     let path = dir.join("master.key");
     if let Some(key) = std::fs::read_to_string(&path)
@@ -112,13 +102,28 @@ fn master_key(dir: &std::path::Path) -> Result<[u8; 32], SecretError> {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
+            mirror_master_key_to_keychain(&encoded);
             Ok(key)
         }
-        // 并发创建时后到者直接读赢家的密钥，避免同一目录里出现两把主密钥。
+        // 并发创建时后到者直接读赢家的密钥。
         Err(_) => std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| parse_key_hex(&text))
             .ok_or(SecretError::Unavailable),
+    }
+}
+
+/// 尽力而为：把主密钥副本放一份到系统钥匙库，失败完全忽略（文件才是权威）。
+fn mirror_master_key_to_keychain(encoded: &str) {
+    #[cfg(feature = "os-keychain")]
+    {
+        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", "local-master-key") {
+            let _ = entry.set_password(encoded);
+        }
+    }
+    #[cfg(not(feature = "os-keychain"))]
+    {
+        let _ = encoded;
     }
 }
 

@@ -388,7 +388,7 @@ async fn ollama_provider_posts_to_chat_and_maps_response() {
     let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
     let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
     let response = novel_llm::ProtocolRouterProvider::new()
-        .generate_with_protocol(request, "ollama", sender, CancellationToken::new())
+        .generate_with_protocol(request, "ollama", None, sender, CancellationToken::new())
         .await
         .unwrap();
     drop(drain);
