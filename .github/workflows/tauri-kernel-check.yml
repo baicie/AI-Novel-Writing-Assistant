@@ -51,6 +51,9 @@ jobs:
       - name: Rust kernel tests
         run: cargo test --workspace --exclude novel-http
 
+      - name: 历史迁移测试（test-harness）
+        run: cargo test -p novel-storage-sqlite --features test-harness
+
       - name: Build shared package
         run: pnpm --filter @ai-novel/shared build
 

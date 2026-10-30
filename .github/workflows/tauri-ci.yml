@@ -110,6 +110,10 @@ jobs:
         run: cargo clippy --workspace --exclude novel-http --lib -- -D warnings
       - name: SQLite 迁移校验
         run: cargo test -p novel-storage-sqlite
+
+      # 历史 schema 迁移用例需要 test-harness 特性，默认 workspace 测试会跳过，单独跑一遍。
+      - name: 历史迁移测试（test-harness）
+        run: cargo test -p novel-storage-sqlite --features test-harness
       - name: Rust 单测
         run: cargo test --workspace --exclude novel-http
 
