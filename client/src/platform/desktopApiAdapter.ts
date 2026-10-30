@@ -9,6 +9,7 @@ import { AxiosError as AxiosErrorClass, AxiosHeaders } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import type { Chapter, Novel } from "@ai-novel/shared/types/novel";
 import type { NovelDetailResponse, NovelListItem, NovelListResponse } from "@/api/novel/shared";
+import type { QuickSetupProviderOption, QuickSetupStatus } from "@ai-novel/shared/types/onboarding";
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
 
@@ -65,6 +66,36 @@ function ok<T>(data: T): ApiResponse<T> {
   return { success: true, data };
 }
 
+// 桌面内核只支持一套「地址 + 模型 + 密钥」配置，这里把内核状态映射成界面需要的形状。
+// 内核返回的字段比 Web 侧精简（没有 providers / routeCoverage），缺字段会让界面直接崩，必须补齐。
+function toQuickSetupStatus(raw: unknown): QuickSetupStatus {
+  const record = asRecord(raw);
+  const ready = record.readyForCreation === true;
+  const endpoint = typeof record.endpoint === "string" ? record.endpoint : "";
+  const model = typeof record.model === "string" ? record.model : "";
+  const provider: QuickSetupProviderOption = {
+    id: "openai-compatible",
+    kind: "custom",
+    name: "自定义接口",
+    requiresApiKey: true,
+    configured: ready,
+    active: ready,
+    currentModel: model,
+    defaultModel: "",
+    currentBaseURL: endpoint,
+    defaultBaseURL: "",
+    models: [],
+  };
+  return {
+    readyForCreation: ready,
+    providers: [provider],
+    selectedProvider: ready ? provider.id : null,
+    selectedModel: ready && model ? model : null,
+    routeCoverage: { configured: 0, total: 0, missingTaskTypes: [] },
+    blockingReasons: ready ? [] : ["先在设置里填好模型地址和 API Key。"],
+    recommendedAction: ready ? "start_creating" : "configure_provider",
+  };
+}
 function pathOf(config: AxiosRequestConfig): string {
   const raw = config.url ?? "";
   try {
@@ -690,7 +721,7 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   }
   // 首次上手面板要读的就绪状态：桌面版直接问本地内核，未映射会让面板一直报错。
   if (path === "/settings/quick-setup/status" && method === "get") {
-    return ok(await transport.getQuickSetupStatus());
+    return ok(toQuickSetupStatus(await transport.getQuickSetupStatus()));
   }
   if (path === "/settings/model-setup" && method === "get") {
     return ok(await transport.getModelSetup());

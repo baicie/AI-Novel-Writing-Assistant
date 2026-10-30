@@ -88,20 +88,22 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
     }
   }, [props.forceConfiguration, props.open]);
 
+  // 后端字段可能不完整，这里兜底，避免一处缺字段让整页白屏。
+  const providers = props.status?.providers ?? [];
   const selectedProvider = useMemo(
-    () => props.status?.providers.find((provider) => provider.id === form.provider) ?? null,
-    [form.provider, props.status?.providers],
+    () => providers.find((provider) => provider.id === form.provider) ?? null,
+    [form.provider, providers],
   );
   const recommendedProvider = useMemo(
-    () => props.status?.providers.find((provider) => provider.id === props.status?.selectedProvider)
-      ?? props.status?.providers.find((provider) => provider.id === "deepseek")
-      ?? props.status?.providers[0]
+    () => providers.find((provider) => provider.id === props.status?.selectedProvider)
+      ?? providers.find((provider) => provider.id === "deepseek")
+      ?? providers[0]
       ?? null,
-    [props.status?.providers, props.status?.selectedProvider],
+    [providers, props.status?.selectedProvider],
   );
   const preferredProvider = selectedProvider ?? recommendedProvider;
   const providerChoices: QuickSetupProviderOption[] = showAllProviderChoices
-    ? props.status?.providers ?? []
+    ? providers
     : preferredProvider ? [preferredProvider] : [];
   const modelOptions = form.providerKind === "custom"
     ? customModels
@@ -117,10 +119,10 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
       return;
     }
     if (!props.status) return;
-    const preferred = props.status.providers.find(
+    const preferred = providers.find(
       (provider) => provider.id === props.status?.selectedProvider,
-    ) ?? props.status.providers.find((provider) => provider.id === "deepseek")
-      ?? props.status.providers[0];
+    ) ?? providers.find((provider) => provider.id === "deepseek")
+      ?? providers[0];
     if (!preferred) return;
     setForm({
       providerKind: preferred.kind,
