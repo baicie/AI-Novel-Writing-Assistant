@@ -677,6 +677,45 @@ pub enum FrozenRouteStatus {
     Legacy,
 }
 
+/// 冻结进 Run 的路由信息：只含引用，不含密钥。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FrozenRoute {
+    pub protocol: Option<String>,
+    pub credential_ref: Option<String>,
+}
+
+/// 把任务路由套到一次 Run 的模型参数上。
+///
+/// 有绑定就整体替换 provider/model/endpoint/本地地址许可，并冻结协议与凭据引用；
+/// 没有绑定则原样返回，调用方行为与旧版本一致。
+pub fn apply_route_to_run(
+    provider: String,
+    model: String,
+    endpoint: String,
+    allow_localhost_http: bool,
+    route: Option<ResolvedModelRoute>,
+) -> (String, String, String, bool, FrozenRoute) {
+    match route {
+        Some(route) => (
+            route.provider_id,
+            route.model_id,
+            route.endpoint,
+            route.allow_localhost_http,
+            FrozenRoute {
+                protocol: Some(route.protocol),
+                credential_ref: Some(route.credential_ref),
+            },
+        ),
+        None => (
+            provider,
+            model,
+            endpoint,
+            allow_localhost_http,
+            FrozenRoute::default(),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1392,5 +1431,48 @@ mod tests {
             FrozenRouteStatus::Legacy,
             "旧默认配置必须继续可恢复"
         );
+    }
+    #[tokio::test]
+    async fn run_uses_bound_route_and_freezes_refs() {
+        let route = ResolvedModelRoute {
+            task_type: "writer".into(),
+            provider_id: "gw".into(),
+            model_id: "bound".into(),
+            protocol: "openai-compatible".into(),
+            endpoint: "https://gw/v1".into(),
+            allow_localhost_http: false,
+            credential_ref: "gw".into(),
+            reasoning_effort: None,
+            source: "binding".into(),
+        };
+        let (provider, model, endpoint, allow_local, frozen) = apply_route_to_run(
+            "default".into(),
+            "legacy".into(),
+            "https://legacy/v1".into(),
+            false,
+            Some(route),
+        );
+        assert_eq!(provider, "gw");
+        assert_eq!(model, "bound");
+        assert_eq!(endpoint, "https://gw/v1");
+        assert!(!allow_local);
+        assert_eq!(frozen.protocol.as_deref(), Some("openai-compatible"));
+        assert_eq!(frozen.credential_ref.as_deref(), Some("gw"));
+    }
+
+    #[tokio::test]
+    async fn run_without_binding_keeps_legacy_parameters() {
+        let (provider, model, endpoint, allow_local, frozen) = apply_route_to_run(
+            "default".into(),
+            "legacy".into(),
+            "https://legacy/v1".into(),
+            true,
+            None,
+        );
+        assert_eq!(provider, "default");
+        assert_eq!(model, "legacy");
+        assert_eq!(endpoint, "https://legacy/v1");
+        assert!(allow_local);
+        assert_eq!(frozen, FrozenRoute::default(), "没有绑定就不冻结任何路由");
     }
 }

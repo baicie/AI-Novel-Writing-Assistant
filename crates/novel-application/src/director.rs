@@ -23,6 +23,7 @@ use crate::ports::{
     SaveChapterDraftRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
     WorkflowRepository,
 };
+use crate::provider_service::FrozenRoute;
 
 #[derive(Debug, Clone)]
 pub struct OpenRunInput {
@@ -461,6 +462,16 @@ impl DirectorService {
     }
 
     pub async fn open_run(&self, input: OpenRunInput) -> Result<CommandOutcome, AppError> {
+        self.open_run_with_route(input, FrozenRoute::default())
+            .await
+    }
+
+    /// 与 open_run 相同，但把任务路由冻结进 Run 记录（旧调用方不传即保持原行为）。
+    pub async fn open_run_with_route(
+        &self,
+        input: OpenRunInput,
+        route: FrozenRoute,
+    ) -> Result<CommandOutcome, AppError> {
         if input.command_id.trim().is_empty() {
             return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
         }
@@ -506,8 +517,8 @@ impl DirectorService {
             max_automatic_retries: input.max_automatic_retries,
             repair_budget: input.repair_budget.unwrap_or(0),
             endpoint: input.endpoint.clone(),
-            protocol: None,
-            credential_ref: None,
+            protocol: route.protocol.clone(),
+            credential_ref: route.credential_ref.clone(),
             allow_localhost_http: input.allow_localhost_http,
         };
         let request_hash = json_hash(&OpenRunHash {
