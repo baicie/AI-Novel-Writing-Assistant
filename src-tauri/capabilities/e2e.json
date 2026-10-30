@@ -7,6 +7,25 @@
   "permissions": [
     "core:default",
     "wdio:default",
-    "wdio-webdriver:default"
+    "wdio-webdriver:default",
+    "allow-list-provider-templates",
+    "allow-list-provider-profiles",
+    "allow-get-provider-profile",
+    "allow-upsert-provider-profile",
+    "allow-delete-provider-profile",
+    "allow-list-provider-models",
+    "allow-upsert-provider-model",
+    "allow-delete-provider-model",
+    "allow-discover-provider-models",
+    "allow-apply-provider-discovery",
+    "allow-list-model-bindings",
+    "allow-upsert-model-binding",
+    "allow-reconcile-credential-intents",
+    "allow-get-effective-model-route",
+    "allow-check-run-route",
+    "allow-get-model-setup",
+    "allow-save-model-setup",
+    "allow-has-api-key",
+    "allow-test-model-setup"
   ]
 }

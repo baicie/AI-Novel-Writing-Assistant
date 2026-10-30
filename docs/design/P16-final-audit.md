@@ -27,7 +27,7 @@
 | `p151_historical_migration` 进 CI | PASS | 两个工作流新增 `--features test-harness` 步骤；本地同命令绿 |
 | 真实本地 HTTP mock（认证/分页/重定向/取消/超时/无付费） | PASS | `discovery_http.rs` 19 条 |
 | 前端 typecheck / contract | PASS | `pnpm --filter @ai-novel/client typecheck`；209 条前端测试（含 5 条 transport 契约） |
-| Tauri Native E2E | PASS | `pnpm e2e`（`e2e/wdio.conf.js` + `e2e/provider-smoke.e2e.js`）真实启动带 `e2e` 特性的桌面产物：webkit/macOS 会话 2 passing（见 §原生 E2E 实测） |
+| Tauri Native E2E | PASS | `pnpm e2e` 真实启动带 `e2e` 特性的桌面产物：**2 个 spec 文件 / 5 条用例全绿**，其中业务链路覆盖建来源→草稿发现→确认落库→绑定→解析路由（见 §原生 E2E 实测） |
 | 密钥不可见（响应/日志/导出） | PASS（已覆盖面） | 视图/路由/预览快照断言 + 错误消息不回显密钥用例 |
 | 受保护未跟踪文件未触碰 | PASS | `crates/novel-http/tests/integration_runs.rs` 始终 `??` |
 
@@ -115,3 +115,21 @@ package.json : @wdio/cli 9.31.2 / @wdio/tauri-service 1.5.0 等依赖已安装
 
 顺带修掉一个**既有缺陷**：`e2e` 特性下 `has_api_key` 是不可变绑定却被二次赋值，
 导致 `--features e2e` 构建一直失败——这也是此前原生 E2E 从未跑起来的原因之一。
+
+### 业务链路 E2E（第 12 轮补）
+
+`e2e/provider-flow.e2e.js` 在真实桌面进程里通过 IPC 走完：
+
+```text
+✓ 保存来源后能取回，并带回版本号
+✓ 草稿发现只返回候选，确认后才落库
+✓ 绑定后能解析出路由，且不含密钥
+Spec Files: 2 passed, 2 total (100% completed) in 00:00:09
+```
+
+**这次 E2E 抓到的真实缺陷**：Provider 命令虽然注册进 `invoke_handler`，但 capability 里
+没有对应 `allow-*` 权限，运行时报 `Command … not allowed by ACL`——意味着界面根本调不通。
+已补 `src-tauri/capabilities/{default,e2e}.json` 并给 `test_model_setup` 生成权限。
+
+已知限制：macOS 无头会话里系统钥匙库可能读不到刚写入的条目，因此 E2E 只断言
+`credentialPresent` 为布尔值；凭据安全性由单元测试与序列化断言覆盖（P2）。

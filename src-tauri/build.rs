@@ -71,6 +71,7 @@ fn main() {
         "get_model_setup",
         "save_model_setup",
         "has_api_key",
+        "test_model_setup",
         "list_provider_templates",
         "list_provider_profiles",
         "get_provider_profile",

@@ -2,7 +2,7 @@
 // 需要先构建：pnpm tauri build --features e2e --bundles app
 export const config = {
   runner: "local",
-  specs: ["./provider-smoke.e2e.js"],
+  specs: ["./provider-smoke.e2e.js", "./provider-flow.e2e.js"],
   maxInstances: 1,
   logLevel: "warn",
   waitforTimeout: 15000,
