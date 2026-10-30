@@ -27,7 +27,7 @@
 | `p151_historical_migration` 进 CI | PASS | 两个工作流新增 `--features test-harness` 步骤；本地同命令绿 |
 | 真实本地 HTTP mock（认证/分页/重定向/取消/超时/无付费） | PASS | `discovery_http.rs` 19 条 |
 | 前端 typecheck / contract | PASS | `pnpm --filter @ai-novel/client typecheck`；209 条前端测试（含 5 条 transport 契约） |
-| Tauri Native E2E | PARTIAL | 已做「原生冷启动 + 迁移 + 命令进入产物」；**未做 webdriver 交互** |
+| Tauri Native E2E | BLOCKED（未实现） | 见 §原生 E2E 现状：wdio 依赖已装，但**无 wdio 配置、无 spec、无 tauri-driver**；替代证据为 `src-tauri/tests/provider_flow.rs` 全链路集成测试 |
 | 密钥不可见（响应/日志/导出） | PASS（已覆盖面） | 视图/路由/预览快照断言 + 错误消息不回显密钥用例 |
 | 受保护未跟踪文件未触碰 | PASS | `crates/novel-http/tests/integration_runs.rs` 始终 `??` |
 
@@ -79,3 +79,20 @@ cargo fmt --all -- --check
   属于产品决策而非实现细节，需单独评审。
 
 证据：`review_and_writer_bindings_resolve_independently`（两个绑定各自解析、互不干扰、未绑定的 `repair` 返回空）。
+## 附：原生 E2E 现状（本轮实测，据实归类）
+
+```text
+tauri-driver : MISSING
+chromedriver : MISSING
+geckodriver  : MISSING
+package.json : @wdio/cli 9.31.2 / @wdio/tauri-service 1.5.0 等依赖已安装
+仓库内       : 无 wdio.conf.*，无 *.e2e.* spec（E2E 从未搭建过）
+```
+
+结论：这不是「跑一次就能过」的验证，而是**尚未搭建的测试基建**。归类为 `BLOCKED（未实现）`，
+不写成「待补」以免误导；要解除需要单独交付：wdio 配置 + spec + 带 `e2e` 特性的构建产物 + 驱动二进制。
+
+替代证据（真实执行，非模拟）：`src-tauri/tests/provider_flow.rs`
+—— 真实 SQLite + 真实 OpenAI 兼容发现适配器（打本地 mock 服务）走完
+「建来源 → 取模型 → 确认候选（只追加、CAS 生效）→ 绑定 → 解析路由 → 恢复校验 → 重开数据库仍在」，
+并断言路由序列化不含密钥。
