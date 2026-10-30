@@ -10,6 +10,7 @@ mod provider;
 mod provider_registry_adapter;
 
 pub use db::MIGRATION_COUNT;
+pub use provider::ApplyDiscoveredOutcome;
 mod native_tasks;
 mod novels;
 mod structured_memory;

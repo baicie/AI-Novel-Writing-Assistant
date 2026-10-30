@@ -21,4 +21,6 @@ pub struct AppState {
     pub secrets: Arc<OsSecretStore>,
     pub llm: Arc<dyn LlmProvider>,
     pub cancellations: Mutex<HashMap<String, CancellationToken>>,
+    /// 发现结果预览（仅进程内、短 TTL、一次性 token），不落库。
+    pub provider_previews: crate::commands::provider::ProviderPreviews,
 }
