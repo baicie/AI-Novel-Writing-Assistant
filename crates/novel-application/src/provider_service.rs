@@ -1483,6 +1483,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn review_and_writer_bindings_resolve_independently() {
+        let (service, _registry, _vault) = service();
+        for id in ["gw-a", "gw-b"] {
+            service
+                .upsert_provider(draft(id), CredentialAction::Keep, None, 1)
+                .await
+                .unwrap();
+            service
+                .upsert_model(
+                    novel_domain::ModelProfile {
+                        provider_id: id.into(),
+                        model_id: format!("{id}-model"),
+                        display_name: None,
+                        capabilities: Default::default(),
+                        source: novel_domain::ModelSource::User,
+                        overridden: Default::default(),
+                    },
+                    true,
+                    None,
+                    2,
+                )
+                .await
+                .unwrap();
+        }
+        service
+            .upsert_binding(
+                novel_domain::ModelBinding {
+                    task_type: "writer".into(),
+                    provider_id: "gw-a".into(),
+                    model_id: "gw-a-model".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                3,
+            )
+            .await
+            .unwrap();
+        service
+            .upsert_binding(
+                novel_domain::ModelBinding {
+                    task_type: "review".into(),
+                    provider_id: "gw-b".into(),
+                    model_id: "gw-b-model".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                3,
+            )
+            .await
+            .unwrap();
+
+        let writer = service.resolve_route("writer").await.unwrap().unwrap();
+        let review = service.resolve_route("review").await.unwrap().unwrap();
+        assert_eq!(writer.provider_id, "gw-a");
+        assert_eq!(
+            review.provider_id, "gw-b",
+            "review 绑定独立解析，不影响 writer"
+        );
+        assert!(service.resolve_route("repair").await.unwrap().is_none());
+    }
+    #[tokio::test]
     async fn binding_rejects_discovery_only_protocol() {
         let (service, _registry, _vault) = service();
         let mut ollama = draft("ollama");

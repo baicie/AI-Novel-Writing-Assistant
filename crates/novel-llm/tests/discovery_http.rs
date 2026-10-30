@@ -342,13 +342,23 @@ async fn ollama_loopback_needs_permission() {
 /// 服务端把密钥回显在错误体里时，我们也不能把它带进错误消息。
 #[tokio::test]
 async fn error_messages_never_echo_the_api_key() {
-    let (base, handle) = mock(vec![reply(401, r#"{"error":"invalid api key sk-leaked-123"}"#)]).await;
+    let (base, handle) = mock(vec![reply(
+        401,
+        r#"{"error":"invalid api key sk-leaked-123"}"#,
+    )])
+    .await;
     let error = OpenAiCompatibleDiscovery
-        .discover(&request(&base, "sk-leaked-123", true), CancellationToken::new())
+        .discover(
+            &request(&base, "sk-leaked-123", true),
+            CancellationToken::new(),
+        )
         .await
         .unwrap_err();
     let message = error.to_string();
-    assert!(!message.contains("sk-leaked-123"), "错误消息泄漏了密钥：{message}");
+    assert!(
+        !message.contains("sk-leaked-123"),
+        "错误消息泄漏了密钥：{message}"
+    );
     handle.await.unwrap();
 }
 

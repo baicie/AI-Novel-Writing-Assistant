@@ -14,7 +14,7 @@
 | 手动模型不因发现失败/空返回丢失，覆盖不被刷新 | PASS | `apply_with_empty_selection_is_a_noop`、`apply_keeps_user_overrides` |
 | 新旧配置共享权威 + legacy revision bump + 跨窗口 stale 拒绝 | PASS | `legacy_save_bumps_provider_revision`、三条并发用例（Provider/绑定/删除模型） |
 | Keep/Replace/Clear、崩溃补偿、无明文、不跨域借用默认 Key | PASS | 意图表 + reconcile；`credential_failure_never_writes_the_database`；凭据槽 = provider id |
-| 默认模型 / 任务绑定 / 生成 / Director / Review-Repair 路由 | PASS（review/repair 走同一冻结路由） | `resolve_route`、`apply_route_to_run`、`generate_text.taskType` |
+| 默认模型 / 任务绑定 / 生成 / Director / Review-Repair 路由 | PASS（按 ADR-5 语义） | `resolve_route`、`apply_route_to_run`、`generate_text.taskType`；`review_and_writer_bindings_resolve_independently` |
 | Running Run 冻结模型/端点/凭据引用，恢复不漂移 | PARTIAL | `RunContract.protocol/credentialRef` + worker 优先用引用；**Director 仅对 writer 绑定填冻结值**，review/repair 复用同一 contract（无独立绑定入口） |
 | 「可用于创作」的协议有真实 generation adapter | PARTIAL | `protocol_supports_generation` 仅放行 openai-compatible；Anthropic/Ollama 仍只有发现能力，已禁止绑定 |
 
@@ -22,7 +22,7 @@
 
 | 条目 | 判定 | 证据 |
 | --- | --- | --- |
-| `cargo fmt --all -- --check` | FAIL（未全仓验证） | 仅对涉及 crate 跑 `cargo fmt`；`novel-http` 历史 fmt 债务未清 |
+| `cargo fmt --all -- --check` | PARTIAL（已实测） | 见 §格式审计：本仓参与 crate 全部已格式化干净；剩余 84 处差异**全部**来自 `novel-http` 的历史债务（非本轮引入） |
 | 涉及 crate Rust test/clippy | PASS | application 181 / storage 17 / desktop 21 / llm 42；lib 级 `-D warnings` 通过 |
 | `p151_historical_migration` 进 CI | PASS | 两个工作流新增 `--features test-harness` 步骤；本地同命令绿 |
 | 真实本地 HTTP mock（认证/分页/重定向/取消/超时/无付费） | PASS | `discovery_http.rs` 19 条 |
@@ -58,3 +58,24 @@
 4. Gate B「Tauri Native E2E」——缺 webdriver 交互证据。
 
 在这些项补齐前，不写 `P16_COMPLETE`。
+## 附：格式审计（本轮实测）
+
+```text
+cargo fmt --all -- --check
+  → 87 处差异；对本轮涉及的 crate 执行 cargo fmt 后
+  → 剩余 84 处差异全部位于 crates/novel-http/**（历史债务）
+  → 非 novel-http 目标：0 处
+```
+
+因此 Gate B 的格式项对本轮改动范围是干净的；`novel-http` 债务单独记录，未顺手改动（避免把无关格式化混进 P16 提交）。
+
+## ADR-5：一次 Run 只用一个冻结模型
+
+- Run 创建时按任务类型解析路由并冻结 `provider + model + protocol + endpoint + credentialRef`；
+- worker 执行期间（含 review / repair 步骤）一直使用这条冻结路由，**不会**在步骤间切换模型；
+- `review` / `repair` 的绑定用于**独立的**审校/修复调用（例如 `generate_text` 带该 `taskType`），
+  与某个 Run 的冻结路由互不影响；
+- 这样选择的原因：单模型让正文一致性与「重启不漂移」可验证；步骤级换模型会让同一次 Run 的输出口径变化，
+  属于产品决策而非实现细节，需单独评审。
+
+证据：`review_and_writer_bindings_resolve_independently`（两个绑定各自解析、互不干扰、未绑定的 `repair` 返回空）。
