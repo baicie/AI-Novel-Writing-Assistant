@@ -1,7 +1,7 @@
 //! 把 SQLite 内核适配成 `ProviderRegistry` 端口。
 
 use async_trait::async_trait;
-use novel_application::{PortError, ProviderRegistry};
+use novel_application::{CredentialIntents, PendingCredentialIntent, PortError, ProviderRegistry};
 use novel_domain::{ModelBinding, ModelProfile, ProviderProfile};
 
 use crate::db::SqliteKernel;
@@ -83,5 +83,44 @@ impl ProviderRegistry for SqliteKernel {
 
     async fn binding_count(&self, provider_id: &str) -> Result<i64, PortError> {
         SqliteKernel::binding_count(self, provider_id).await
+    }
+}
+#[async_trait]
+impl CredentialIntents for SqliteKernel {
+    async fn begin(
+        &self,
+        id: &str,
+        provider_id: &str,
+        secret_ref: &str,
+        action: &str,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        self.insert_credential_intent(id, provider_id, secret_ref, action, now_ms)
+            .await
+    }
+
+    async fn finish(
+        &self,
+        id: &str,
+        state: &str,
+        last_error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        self.finish_credential_intent(id, state, last_error, now_ms)
+            .await
+    }
+
+    async fn pending(&self) -> Result<Vec<PendingCredentialIntent>, PortError> {
+        Ok(self
+            .pending_credential_intents()
+            .await?
+            .into_iter()
+            .map(|intent| PendingCredentialIntent {
+                id: intent.id,
+                provider_id: intent.provider_id,
+                secret_ref: intent.secret_ref,
+                action: intent.action,
+            })
+            .collect())
     }
 }

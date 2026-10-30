@@ -83,6 +83,7 @@ fn main() {
         "apply_provider_discovery",
         "list_model_bindings",
         "upsert_model_binding",
+        "reconcile_credential_intents",
         "index_knowledge",
         "list_knowledge_documents",
         "search_knowledge",

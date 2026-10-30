@@ -81,12 +81,10 @@ fn preview_expired() -> ProviderError {
 }
 
 fn service(state: &AppState) -> ProviderService {
-    ProviderService::new(
-        state.kernel.clone(),
-        std::sync::Arc::new(OsCredentialVault::new(
-            state.secrets.clone() as std::sync::Arc<dyn novel_platform::SecretStore>
-        )),
-    )
+    let vault: std::sync::Arc<dyn novel_application::CredentialVault> =
+        std::sync::Arc::new(OsCredentialVault::new(state.secrets.clone()));
+    let intents: std::sync::Arc<dyn novel_application::CredentialIntents> = state.kernel.clone();
+    ProviderService::new(state.kernel.clone(), vault, intents)
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -441,6 +439,15 @@ pub async fn upsert_model_binding(
             request.expected_revision,
             novel_platform::now_ms(),
         )
+        .await
+}
+
+#[tauri::command]
+pub async fn reconcile_credential_intents(
+    state: State<'_, AppState>,
+) -> Result<novel_application::CredentialReconcileReport, ProviderError> {
+    service(&state)
+        .reconcile_credentials(novel_platform::now_ms())
         .await
 }
 

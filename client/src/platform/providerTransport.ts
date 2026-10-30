@@ -92,6 +92,12 @@ export interface ApplyDiscoveredOutcome {
   revision: number;
 }
 
+export interface CredentialReconcileReport {
+  completed: number;
+  /** 需要用户重新输入密钥的 provider id（密钥正文从不落库，无法自动重放）。 */
+  needsUserAction: string[];
+}
+
 export interface UpsertProviderInput {
   providerId: string;
   displayName?: string | null;
@@ -185,6 +191,8 @@ export function createProviderClient(call: Invoker) {
     listBindings: () => call<ModelBindingView[]>("list_model_bindings"),
     upsertBinding: (request: UpsertBindingInput) =>
       call<void>("upsert_model_binding", { request }),
+    reconcileCredentialIntents: () =>
+      call<CredentialReconcileReport>("reconcile_credential_intents"),
   };
 }
 

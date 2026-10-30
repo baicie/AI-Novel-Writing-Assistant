@@ -80,8 +80,9 @@ pub use ports::{
     WorldRepository,
 };
 pub use provider_service::{
-    CredentialAction, CredentialActionKind, CredentialVault, ProviderDraft, ProviderError,
-    ProviderErrorCode, ProviderRegistry, ProviderService, ProviderView,
+    CredentialAction, CredentialActionKind, CredentialIntents, CredentialReconcileReport,
+    CredentialVault, PendingCredentialIntent, ProviderDraft, ProviderError, ProviderErrorCode,
+    ProviderRegistry, ProviderService, ProviderView,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

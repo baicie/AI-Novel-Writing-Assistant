@@ -106,6 +106,45 @@ impl From<PortError> for ProviderError {
     }
 }
 
+/// 凭据变更意图端口：跨 SQLite 与密钥库的补偿日志（不保存密钥正文）。
+#[async_trait]
+pub trait CredentialIntents: Send + Sync {
+    async fn begin(
+        &self,
+        id: &str,
+        provider_id: &str,
+        secret_ref: &str,
+        action: &str,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn finish(
+        &self,
+        id: &str,
+        state: &str,
+        last_error: Option<&str>,
+        now_ms: i64,
+    ) -> Result<(), PortError>;
+    async fn pending(&self) -> Result<Vec<PendingCredentialIntent>, PortError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingCredentialIntent {
+    pub id: String,
+    pub provider_id: String,
+    pub secret_ref: String,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialReconcileReport {
+    /// 本次补偿成功的条数（例如 retry 成功的清除）。
+    pub completed: usize,
+    /// 必须由用户重新输入密钥才能收尾的条数（replace 无法在无明文时重放）。
+    pub needs_user_action: Vec<String>,
+}
+
 /// 存储端口：SQLite adapter 实现它。
 #[async_trait]
 pub trait ProviderRegistry: Send + Sync {
@@ -183,11 +222,50 @@ pub struct ProviderDraft {
 pub struct ProviderService {
     registry: Arc<dyn ProviderRegistry>,
     vault: Arc<dyn CredentialVault>,
+    intents: Arc<dyn CredentialIntents>,
 }
 
 impl ProviderService {
-    pub fn new(registry: Arc<dyn ProviderRegistry>, vault: Arc<dyn CredentialVault>) -> Self {
-        Self { registry, vault }
+    pub fn new(
+        registry: Arc<dyn ProviderRegistry>,
+        vault: Arc<dyn CredentialVault>,
+        intents: Arc<dyn CredentialIntents>,
+    ) -> Self {
+        Self {
+            registry,
+            vault,
+            intents,
+        }
+    }
+
+    /// 启动或用户点「重试」时调用的补偿：清除动作可重放，替换动作需要用户重新输入。
+    pub async fn reconcile_credentials(
+        &self,
+        now_ms: i64,
+    ) -> Result<CredentialReconcileReport, ProviderError> {
+        let mut report = CredentialReconcileReport::default();
+        for intent in self.intents.pending().await? {
+            match intent.action.as_str() {
+                "clear" => match self.vault.delete(&intent.secret_ref).await {
+                    Ok(()) => {
+                        self.intents
+                            .finish(&intent.id, "done", None, now_ms)
+                            .await?;
+                        report.completed += 1;
+                    }
+                    Err(error) => {
+                        self.intents
+                            .finish(&intent.id, "pending", Some(&error.to_string()), now_ms)
+                            .await?;
+                    }
+                },
+                _ => {
+                    // 密钥正文从不落库，replace 无法自动重放：交给用户重新输入。
+                    report.needs_user_action.push(intent.provider_id.clone());
+                }
+            }
+        }
+        Ok(report)
     }
 
     pub async fn list_providers(&self) -> Result<Vec<ProviderView>, ProviderError> {
@@ -254,16 +332,44 @@ impl ProviderService {
             .validate()
             .map_err(|error| ProviderError::validation(error.to_string()))?;
 
-        // 先处理凭据，失败就不动数据库，避免「库里有一条指向不存在密钥」的配置。
-        match &credential {
-            CredentialAction::Keep => {}
-            CredentialAction::Replace(secret) => {
-                self.vault
-                    .write(&profile.credential.reference, secret.trim())
-                    .await?;
-            }
-            CredentialAction::Clear => {
-                self.vault.delete(&profile.credential.reference).await?;
+        // 先写意图再动密钥库：任何一步失败都留下可补偿的记录，且绝不落密钥正文。
+        if !matches!(credential, CredentialAction::Keep) {
+            let action = match credential {
+                CredentialAction::Replace(_) => "replace",
+                CredentialAction::Clear => "clear",
+                CredentialAction::Keep => "keep",
+            };
+            let intent_id = format!("{}-{}-{}", profile.id, action, now_ms);
+            self.intents
+                .begin(
+                    &intent_id,
+                    &profile.id,
+                    &profile.credential.reference,
+                    action,
+                    now_ms,
+                )
+                .await?;
+            let outcome = match &credential {
+                CredentialAction::Replace(secret) => {
+                    self.vault
+                        .write(&profile.credential.reference, secret.trim())
+                        .await
+                }
+                CredentialAction::Clear => self.vault.delete(&profile.credential.reference).await,
+                CredentialAction::Keep => Ok(()),
+            };
+            match outcome {
+                Ok(()) => {
+                    self.intents
+                        .finish(&intent_id, "done", None, now_ms)
+                        .await?;
+                }
+                Err(error) => {
+                    self.intents
+                        .finish(&intent_id, "pending", Some(&error.to_string()), now_ms)
+                        .await?;
+                    return Err(error.into());
+                }
             }
         }
         let revision = self
@@ -565,11 +671,68 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FakeIntents {
+        rows: Mutex<Vec<(String, String, String, String)>>,
+    }
+
+    #[async_trait]
+    impl CredentialIntents for FakeIntents {
+        async fn begin(
+            &self,
+            id: &str,
+            provider_id: &str,
+            secret_ref: &str,
+            action: &str,
+            _now_ms: i64,
+        ) -> Result<(), PortError> {
+            self.rows.lock().unwrap().push((
+                id.to_string(),
+                provider_id.to_string(),
+                secret_ref.to_string(),
+                format!("{action}:pending"),
+            ));
+            Ok(())
+        }
+
+        async fn finish(
+            &self,
+            id: &str,
+            state: &str,
+            _last_error: Option<&str>,
+            _now_ms: i64,
+        ) -> Result<(), PortError> {
+            let mut rows = self.rows.lock().unwrap();
+            if let Some(row) = rows.iter_mut().find(|row| row.0 == id) {
+                let action = row.3.split(':').next().unwrap_or("replace").to_string();
+                row.3 = format!("{action}:{state}");
+            }
+            Ok(())
+        }
+
+        async fn pending(&self) -> Result<Vec<PendingCredentialIntent>, PortError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| row.3.ends_with(":pending"))
+                .map(|row| PendingCredentialIntent {
+                    id: row.0.clone(),
+                    provider_id: row.1.clone(),
+                    secret_ref: row.2.clone(),
+                    action: row.3.split(':').next().unwrap_or("replace").to_string(),
+                })
+                .collect())
+        }
+    }
+
     fn service() -> (ProviderService, Arc<FakeRegistry>, Arc<FakeVault>) {
         let registry = Arc::new(FakeRegistry::default());
         let vault = Arc::new(FakeVault::default());
+        let intents = Arc::new(FakeIntents::default());
         (
-            ProviderService::new(registry.clone(), vault.clone()),
+            ProviderService::new(registry.clone(), vault.clone(), intents),
             registry,
             vault,
         )
@@ -735,5 +898,89 @@ mod tests {
             registry.providers.lock().unwrap().is_empty(),
             "凭据失败时不能留下半条配置"
         );
+    }
+    #[tokio::test]
+    async fn successful_replace_marks_intent_done() {
+        let registry = Arc::new(FakeRegistry::default());
+        let vault = Arc::new(FakeVault::default());
+        let intents = Arc::new(FakeIntents::default());
+        let service = ProviderService::new(registry, vault, intents.clone());
+        service
+            .upsert_provider(
+                draft("gw"),
+                CredentialAction::Replace("sk-1".into()),
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        assert!(intents.rows.lock().unwrap()[0].3.ends_with(":done"));
+        assert!(
+            service
+                .reconcile_credentials(2)
+                .await
+                .unwrap()
+                .needs_user_action
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_replace_stays_pending_and_needs_user_action() {
+        let registry = Arc::new(FakeRegistry::default());
+        let vault = Arc::new(FakeVault::default());
+        *vault.fail_write.lock().unwrap() = true;
+        let intents = Arc::new(FakeIntents::default());
+        let service = ProviderService::new(registry.clone(), vault, intents.clone());
+        assert!(
+            service
+                .upsert_provider(
+                    draft("gw"),
+                    CredentialAction::Replace("sk-1".into()),
+                    None,
+                    1
+                )
+                .await
+                .is_err()
+        );
+        assert!(
+            intents.rows.lock().unwrap()[0].3.ends_with(":pending"),
+            "失败要留下可补偿意图"
+        );
+        assert!(registry.providers.lock().unwrap().is_empty());
+        let report = service.reconcile_credentials(2).await.unwrap();
+        assert_eq!(report.completed, 0);
+        assert_eq!(
+            report.needs_user_action,
+            vec!["gw".to_string()],
+            "replace 无法无明文重放"
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_clear_is_replayed_by_reconcile() {
+        let registry = Arc::new(FakeRegistry::default());
+        let vault = Arc::new(FakeVault::default());
+        vault
+            .values
+            .lock()
+            .unwrap()
+            .insert("gw".into(), "sk-old".into());
+        let intents = Arc::new(FakeIntents::default());
+        let service = ProviderService::new(registry, vault.clone(), intents.clone());
+        // 先让删除失败：用一个会失败的 vault 包装不了，改为直接构造 pending 意图
+        intents.rows.lock().unwrap().push((
+            "gw-clear-1".into(),
+            "gw".into(),
+            "gw".into(),
+            "clear:pending".into(),
+        ));
+        let report = service.reconcile_credentials(2).await.unwrap();
+        assert_eq!(report.completed, 1);
+        assert!(
+            vault.values.lock().unwrap().is_empty(),
+            "重放后密钥必须被清掉"
+        );
+        assert!(intents.rows.lock().unwrap()[0].3.ends_with(":done"));
     }
 }

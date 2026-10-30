@@ -1,4 +1,5 @@
 mod batch;
+mod credential_intent;
 mod db;
 mod index_jobs;
 mod knowledge;
@@ -9,6 +10,7 @@ mod model;
 mod provider;
 mod provider_registry_adapter;
 
+pub use credential_intent::StoredCredentialIntent;
 pub use db::MIGRATION_COUNT;
 pub use provider::ApplyDiscoveredOutcome;
 mod native_tasks;

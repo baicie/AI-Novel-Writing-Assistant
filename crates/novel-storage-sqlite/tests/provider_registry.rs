@@ -481,3 +481,32 @@ async fn legacy_save_bumps_provider_revision() {
     );
     kernel.pool().close().await;
 }
+/// 凭据意图：写入 → 待补偿 → 完成后不再出现在待办里。
+#[tokio::test]
+async fn credential_intents_track_until_done() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .insert_credential_intent("gw-replace-1", "gw", "gw", "replace", 1)
+        .await
+        .unwrap();
+    let pending = kernel.pending_credential_intents().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].action, "replace");
+    assert_eq!(pending[0].state, "pending");
+
+    kernel
+        .finish_credential_intent("gw-replace-1", "done", None, 2)
+        .await
+        .unwrap();
+    assert!(
+        kernel
+            .pending_credential_intents()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    kernel.pool().close().await;
+}
