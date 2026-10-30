@@ -168,7 +168,9 @@ pub struct TestModelSetupResult {
 
 /// 用一次最小生成验证「地址 + 模型 + 密钥」是否可用，供桌面端模型配置页直接反馈结果。
 #[tauri::command]
-pub async fn test_model_setup(request: TestModelSetupRequest) -> Result<TestModelSetupResult, AppError> {
+pub async fn test_model_setup(
+    request: TestModelSetupRequest,
+) -> Result<TestModelSetupResult, AppError> {
     use novel_llm::LlmRequest;
     use tokio_util::sync::CancellationToken;
 
@@ -196,7 +198,10 @@ pub async fn test_model_setup(request: TestModelSetupRequest) -> Result<TestMode
     Ok(match result {
         Ok(response) => TestModelSetupResult {
             ok: true,
-            message: format!("连接成功，模型返回：{}", response.text.trim().chars().take(40).collect::<String>()),
+            message: format!(
+                "连接成功，模型返回：{}",
+                response.text.trim().chars().take(40).collect::<String>()
+            ),
             latency_ms,
         },
         Err(error) => TestModelSetupResult {
