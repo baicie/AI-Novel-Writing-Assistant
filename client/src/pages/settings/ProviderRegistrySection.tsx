@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import ProviderBindingList from "./providerRegistry/ProviderBindingList";
+import ProviderModelList from "./providerRegistry/ProviderModelList";
 import { Input } from "@/components/ui/input";
 import { providerClient } from "@/platform/providerTransport";
 import type {
@@ -328,123 +330,39 @@ export default function ProviderRegistrySection() {
           </ul>
         ) : null}
 
-        {models.length > 0 ? (
-          <div className="space-y-1">
-            <span className="text-xs text-muted-foreground">已保存模型</span>
-            <ul className="space-y-1">
-              {models.map((model) => (
-                <li key={model.modelId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span>
-                    {model.displayName ?? model.modelId}
-                    <span className="ml-2 text-xs text-muted-foreground">{model.source}</span>
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <Input
-                      className="h-8 w-40"
-                      aria-label={model.modelId + " 推理强度档位"}
-                      placeholder="low, medium, high"
-                      value={
-                        effortDrafts[model.modelId] ??
-                        (model.capabilities.reasoningEfforts ?? []).join(", ")
-                      }
-                      onChange={(event) =>
-                        setEffortDrafts((current) => ({ ...current, [model.modelId]: event.target.value }))
-                      }
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        void saveModelEfforts(
-                          draft.providerId,
-                          model.modelId,
-                          effortDrafts[model.modelId] ??
-                            (model.capabilities.reasoningEfforts ?? []).join(", "),
-                        )
-                      }
-                      disabled={busy !== null}
-                    >
-                      保存档位
-                    </Button>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      void run("delete-model", async () => {
-                        await providerClient.deleteModel(draft.providerId, model.modelId, draft.expectedRevision);
-                        await loadModels(draft.providerId);
-                      })
-                    }
-                    disabled={busy !== null}
-                  >
-                    删除
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        <ProviderModelList
+          models={models}
+          busy={busy !== null}
+          effortDrafts={effortDrafts}
+          onEffortDraftChange={(modelId, value) =>
+            setEffortDrafts((current) => ({ ...current, [modelId]: value }))
+          }
+          onSaveEfforts={(modelId, raw) => void saveModelEfforts(draft.providerId, modelId, raw)}
+          onDeleteModel={(modelId) =>
+            void run("delete-model", async () => {
+              await providerClient.deleteModel(draft.providerId, modelId, draft.expectedRevision);
+              await loadModels(draft.providerId);
+            })
+          }
+        />
       </div>
 
-      <div className="space-y-2">
-        <h3 className="text-sm font-semibold">任务绑定</h3>
-        <p className="text-xs text-muted-foreground">给每个创作环节指定模型，未绑定的环节使用默认模型。</p>
-        <ul className="space-y-2">
-          {BINDING_TASK_TYPES.map((task) => {
-            const binding = bindings.find((item) => item.taskType === task.value);
-            return (
-              <li key={task.value} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="w-24 text-muted-foreground">{task.label}</span>
-                <select
-                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-                  value={binding?.providerId ?? ""}
-                  onChange={(event) => {
-                    const providerId = event.target.value;
-                    if (!providerId) return;
-                    void run(`models-${providerId}`, async () => {
-                      const list = await providerClient.listModels(providerId);
-                      setModels(list);
-                      const first = list[0]?.modelId;
-                      if (first) await saveBinding(task.value, providerId, binding?.modelId ?? first);
-                    });
-                  }}
-                >
-                  <option value="">未绑定</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.displayName ?? provider.id}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-muted-foreground">{binding?.modelId ?? "默认模型"}</span>
-                <select
-                  aria-label={task.label + " 推理强度"}
-                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
-                  value={binding?.reasoningEffort ?? ""}
-                  disabled={!binding || busy !== null}
-                  onChange={(event) => {
-                    if (!binding) return;
-                    void saveBinding(
-                      task.value,
-                      binding.providerId,
-                      binding.modelId,
-                      event.target.value || null,
-                    );
-                  }}
-                >
-                  <option value="">推理强度：默认</option>
-                  {["low", "medium", "high"].map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+      <ProviderBindingList
+        providers={providers}
+        bindings={bindings}
+        busy={busy !== null}
+        onSelectProvider={(taskType, providerId, currentModelId) =>
+          void run("models-" + providerId, async () => {
+            const list = await providerClient.listModels(providerId);
+            setModels(list);
+            const first = list[0]?.modelId;
+            if (first) await saveBinding(taskType, providerId, currentModelId ?? first);
+          })
+        }
+        onSelectEffort={(taskType, binding, effort) =>
+          void saveBinding(taskType, binding.providerId, binding.modelId, effort)
+        }
+      />
 
       {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
     </div>
