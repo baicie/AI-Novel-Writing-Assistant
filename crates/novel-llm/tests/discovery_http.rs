@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use novel_llm::{
-    AnthropicDiscovery, DiscoveryError, DiscoveryRequest, OpenAiCompatibleDiscovery,
-    ProviderModelDiscovery,
+    AnthropicDiscovery, DiscoveryError, DiscoveryRequest, OllamaDiscovery,
+    OpenAiCompatibleDiscovery, ProviderModelDiscovery,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -279,6 +279,64 @@ async fn anthropic_401_is_auth_failed_not_network() {
         .unwrap_err();
     assert_eq!(error.code(), "AUTH_FAILED");
     handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn ollama_reads_its_own_tags_shape() {
+    // Ollama 的响应结构是 { models: [ { name, model, details } ] }，不是 OpenAI 的 data。
+    let (base, handle) = mock(vec![reply(
+        200,
+        r#"{"models":[{"name":"llama3.1:8b","model":"llama3.1:8b","details":{"family":"llama"}},{"name":"qwen2.5:7b","model":"qwen2.5:7b"}]}"#,
+    )])
+    .await;
+    let request = DiscoveryRequest::new(base.replace("/v1", ""), "", true)
+        .with_timeout(Duration::from_millis(400));
+    let outcome = OllamaDiscovery
+        .discover(&request, CancellationToken::new())
+        .await
+        .unwrap();
+    let ids: Vec<&str> = outcome
+        .models
+        .iter()
+        .map(|model| model.id.as_str())
+        .collect();
+    assert_eq!(ids, vec!["llama3.1:8b", "qwen2.5:7b"]);
+    let captured = handle.await.unwrap();
+    assert!(
+        captured[0].contains("GET /api/tags"),
+        "必须打 Ollama 自己的端点：{}",
+        captured[0]
+    );
+}
+
+#[tokio::test]
+async fn ollama_404_means_not_supported() {
+    let (base, handle) = mock(vec![reply(404, "{}")]).await;
+    let request = DiscoveryRequest::new(base.replace("/v1", ""), "", true)
+        .with_timeout(Duration::from_millis(400));
+    let error = OllamaDiscovery
+        .discover(&request, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "NOT_SUPPORTED");
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn ollama_loopback_needs_permission() {
+    let (base, handle) = mock(vec![reply(200, r#"{"models":[]}"#)]).await;
+    let request = DiscoveryRequest::new(base.replace("/v1", ""), "", false)
+        .with_timeout(Duration::from_millis(400));
+    let error = OllamaDiscovery
+        .discover(&request, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.code(),
+        "INVALID_RESPONSE",
+        "本地 Ollama 也必须显式允许"
+    );
+    handle.abort();
 }
 
 #[test]

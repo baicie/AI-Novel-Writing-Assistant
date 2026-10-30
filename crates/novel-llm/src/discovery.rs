@@ -393,11 +393,92 @@ impl ProviderModelDiscovery for AnthropicDiscovery {
     }
 }
 
+/// Ollama：`GET {base}/api/tags`，按 Ollama 自己的响应结构解析（不是 OpenAI 的 /models）。
+///
+/// 请求只允许本地地址（Ollama 默认 `http://127.0.0.1:11434`），
+/// 回环地址同样需要调用方显式允许，避免把请求发到意外的内网地址。
+pub struct OllamaDiscovery;
+
+#[async_trait::async_trait]
+impl ProviderModelDiscovery for OllamaDiscovery {
+    async fn discover(
+        &self,
+        request: &DiscoveryRequest,
+        cancel: CancellationToken,
+    ) -> Result<DiscoveryOutcome, DiscoveryError> {
+        validate(request)?;
+        let url = join(&request.base_url, "api/tags");
+        let client = client(request.timeout)?;
+        let mut builder = client.get(&url).header("accept", "application/json");
+        if !request.api_key.trim().is_empty() {
+            // Ollama 默认不需要密钥；如果部署在网关后面，允许 Bearer。
+            builder = builder.header(
+                "authorization",
+                format!("Bearer {}", request.api_key.trim()),
+            );
+        }
+        let send = async {
+            let response = builder.send().await.map_err(|error| {
+                if error.is_timeout() {
+                    DiscoveryError::Timeout
+                } else {
+                    DiscoveryError::Network(error.to_string())
+                }
+            })?;
+            if !response.status().is_success() {
+                return Err(map_status(response.status().as_u16()));
+            }
+            read_body(response).await
+        };
+        let bytes = tokio::select! {
+            _ = cancel.cancelled() => return Err(DiscoveryError::Cancelled),
+            result = tokio::time::timeout(request.timeout, send) => match result {
+                Err(_) => return Err(DiscoveryError::Timeout),
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(error)) => return Err(error),
+            },
+        };
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|error| DiscoveryError::InvalidResponse(format!("不是合法 JSON：{error}")))?;
+        let items = value
+            .get("models")
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut models = Vec::with_capacity(items.len());
+        for item in items {
+            // Ollama 的条目是 { name, model, modified_at, size, details: {...} }
+            let Some(id) = item
+                .get("model")
+                .or_else(|| item.get("name"))
+                .and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            models.push(DiscoveredModel {
+                id: id.to_string(),
+                display_name: item
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                context_window: None,
+                max_output_tokens: None,
+                input_modalities: None,
+            });
+        }
+        Ok(DiscoveryOutcome {
+            models: dedupe(models),
+            warnings: Vec::new(),
+        })
+    }
+}
+
 /// 按协议挑适配器；未知协议不猜，直接报不支持。
 pub fn discovery_for(protocol: &str) -> Option<Box<dyn ProviderModelDiscovery>> {
     match protocol {
         "openai-compatible" => Some(Box::new(OpenAiCompatibleDiscovery)),
         "anthropic-messages" => Some(Box::new(AnthropicDiscovery)),
+        "ollama" => Some(Box::new(OllamaDiscovery)),
         _ => None,
     }
 }
@@ -459,8 +540,8 @@ mod tests {
         assert!(discovery_for("openai-compatible").is_some());
         assert!(discovery_for("anthropic-messages").is_some());
         assert!(
-            discovery_for("ollama").is_none(),
-            "Ollama 适配器尚未实现，不能猜成 openai"
+            discovery_for("ollama").is_some(),
+            "Ollama 有独立适配器，不能猜成 openai"
         );
         assert!(discovery_for("openai").is_none());
     }
