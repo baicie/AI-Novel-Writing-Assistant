@@ -12,6 +12,7 @@ import type { NovelDetailResponse, NovelListItem, NovelListResponse } from "@/ap
 import type { QuickSetupProviderOption, QuickSetupStatus } from "@ai-novel/shared/types/onboarding";
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
+import { providerClient } from "./providerTransport";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -40,8 +41,28 @@ function appError(error: unknown): { code: string; message: string; retryable: b
   };
 }
 
+
+// 未映射的桌面路由会被记进应用日志，方便从用户日志里直接看到缺哪个接口。
+function reportMissingRoute(method: string, path: string): void {
+  if (typeof window !== "undefined") {
+    const store = (window as unknown as { __missingRoutes?: string[] });
+    store.__missingRoutes = [...(store.__missingRoutes ?? []), `${method.toUpperCase()} ${path}`];
+  }
+  void import("@tauri-apps/api/core")
+    .then(({ invoke }) =>
+      invoke("report_client_runtime", {
+        config: null,
+        locationHash: typeof window === "undefined" ? "" : window.location.hash,
+        runtimeMode: "desktop",
+        message: `NOT_MIGRATED ${method.toUpperCase()} ${path}`,
+      }),
+    )
+    .catch(() => {});
+}
+
 function unsupported(config: InternalAxiosRequestConfig): never {
   const message = "这个功能还没有接入桌面本地内核，请先从已迁移的书稿入口继续。";
+  reportMissingRoute(methodOf(config), pathOf(config));
   throw new AxiosErrorClass(
     message,
     "ERR_DESKTOP_NOT_MIGRATED",
@@ -60,6 +81,116 @@ function unsupported(config: InternalAxiosRequestConfig): never {
       },
     },
   );
+}
+
+
+// 桌面端的「厂商列表」来自本地模型来源注册表，不再调用网页版厂商接口。
+async function desktopProviders(): Promise<unknown[]> {
+  const [profiles, bindings] = await Promise.all([
+    providerClient.listProfiles(),
+    providerClient.listBindings(),
+  ]);
+  const modelsByProvider = await Promise.all(
+    profiles.map((profile) => providerClient.listModels(profile.id)),
+  );
+  return profiles.map((profile, index) => {
+    const models = modelsByProvider[index]?.map((model) => model.modelId) ?? [];
+    const bound = bindings.find((binding) => binding.providerId === profile.id);
+    return {
+      provider: profile.id,
+      kind: "custom",
+      name: profile.displayName ?? profile.id,
+      displayName: profile.displayName ?? profile.id,
+      currentModel: bound?.modelId ?? models[0] ?? "",
+      currentImageModel: null,
+      currentBaseURL: profile.baseUrl,
+      currentAuthMode: "api_key",
+      models,
+      imageModels: [],
+      defaultModel: models[0] ?? "",
+      defaultImageModel: null,
+      defaultBaseURL: profile.baseUrl,
+      requiresApiKey: true,
+      isConfigured: profile.credentialPresent,
+      isActive: profile.credentialPresent,
+    };
+  });
+}
+
+async function desktopLlmSelection(): Promise<unknown> {
+  const route = await providerClient.getEffectiveRoute("writer");
+  if (!route) return null;
+  return { provider: route.providerId, model: route.modelId, temperature: 0.7 };
+}
+
+// 桌面版没有网页版的成长引导与自动导演跟进队列，返回中性空数据，不报「未接入」。
+function desktopOnboarding(): unknown {
+  return {
+    graduated: true,
+    currentMilestone: "first_novel_created",
+    completedCount: 0,
+    totalCount: 0,
+    headline: "",
+    description: "",
+    reason: "desktop",
+    primaryAction: { label: "", route: "/", kind: "navigate" },
+    novel: null,
+    directorTask: null,
+    firstReadableChapter: null,
+    milestones: [],
+    optionalEnhancements: [],
+  };
+}
+
+function emptyFollowUps(): unknown {
+  return { totalCount: 0, countersByReason: {}, countersBySection: {} };
+}
+
+
+// 桌面端的任务模型路由来自本地绑定表；没绑定的任务不返回路由。
+const DESKTOP_TASK_TYPES = [
+  "planner", "writer", "review", "light_review", "critical_review", "repair",
+  "replan", "state_resolution", "summary", "fact_extraction", "chat",
+];
+
+async function desktopModelRoutes(): Promise<unknown> {
+  const bindings = await providerClient.listBindings();
+  return {
+    taskTypes: DESKTOP_TASK_TYPES,
+    routes: bindings.map((binding) => ({
+      taskType: binding.taskType,
+      provider: binding.providerId,
+      model: binding.modelId,
+      temperature: 0.7,
+      maxTokens: null,
+      requestProtocol: "auto",
+      structuredResponseFormat: "auto",
+    })),
+  };
+}
+
+
+// 桌面端的连通性检查只做本地事实核对，不发真实生成请求，避免产生费用。
+async function desktopConnectivity(): Promise<unknown[]> {
+  const [profiles, bindings] = await Promise.all([
+    providerClient.listProfiles(),
+    providerClient.listBindings(),
+  ]);
+  return bindings.map((binding) => {
+    const profile = profiles.find((item) => item.id === binding.providerId);
+    const ok = Boolean(profile?.credentialPresent);
+    return {
+      taskType: binding.taskType,
+      provider: binding.providerId,
+      model: binding.modelId,
+      ok,
+      latency: null,
+      error: ok ? null : "这个来源还没有可用的密钥",
+      requestProtocol: null,
+      plain: { ok, latency: null, error: ok ? null : "缺少可用密钥", requestProtocol: null },
+      structured: null,
+    };
+  });
 }
 
 function ok<T>(data: T): ApiResponse<T> {
@@ -438,6 +569,19 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
     return getTaskDetail(config, decodeURIComponent(taskDetail[1]!));
   }
   if (path === "/tasks" && method === "get") return listTaskRuns(config);
+  if (path === "/settings/api-keys" && method === "get") return desktopProviders();
+  if (path === "/settings/llm-selection" && method === "get") return desktopLlmSelection();
+  if (path === "/settings/llm-selection" && method === "put") return asRecord(config.data);
+  if (path === "/onboarding/first-novel" && method === "get") return desktopOnboarding();
+  if (path === "/auto-director/follow-ups/overview" && method === "get") return emptyFollowUps();
+  if (path === "/llm/model-routes" && method === "get") return desktopModelRoutes();
+  if (path === "/llm/model-routes/connectivity" && method === "post") return desktopConnectivity();
+  if (path === "/tasks/recovery-candidates" && method === "get") return [];
+  if (path === "/rag/health" && method === "get") return { ready: false, documents: 0, chunks: 0, embeddingProvider: "none" };
+  if (path === "/rag/jobs" && method === "get") return [];
+  if (path === "/rag/jobs/finished" && method === "get") return [];
+  if (path === "/settings/rag" && method === "get") return { embeddingProvider: "none", chunkSize: 0, chunkOverlap: 0, topK: 0 };
+  if (path === "/settings/style-engine-runtime" && method === "get") return { styleExtractionTimeoutMs: 0 };
   if (path === "/novels" && method === "get") return listNovelPage(config);
   if (path === "/novels" && method === "post") {
     const payload = asRecord(config.data);

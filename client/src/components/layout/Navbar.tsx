@@ -1,6 +1,8 @@
 import { useLocation } from "react-router-dom";
 import { SlidersHorizontal } from "lucide-react";
 import LLMSelector from "@/components/common/LLMSelector";
+import DesktopModelStatus from "@/components/layout/DesktopModelStatus";
+import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
 import { useCreationSetup } from "@/components/onboarding/CreationSetupContext";
 import AppVersionBadge from "@/components/layout/AppVersionBadge";
 import DesktopBrandMark from "@/components/layout/DesktopBrandMark";
@@ -74,14 +76,18 @@ export default function Navbar(props: NavbarProps) {
           <SlidersHorizontal className="h-4 w-4" />
           <span className="hidden lg:inline">模型设置</span>
         </Button>
-        <div className={useMobileAutoDirectorShell ? AUTO_DIRECTOR_MOBILE_CLASSES.navbarModelSelector : undefined}>
-          <LLMSelector
-            compact
-            showBadge={false}
-            showHelperText={false}
-            showCompactTemperature
-          />
-        </div>
+        {shouldUseDesktopApiAdapter() ? (
+          <DesktopModelStatus />
+        ) : (
+          <div className={useMobileAutoDirectorShell ? AUTO_DIRECTOR_MOBILE_CLASSES.navbarModelSelector : undefined}>
+            <LLMSelector
+              compact
+              showBadge={false}
+              showHelperText={false}
+              showCompactTemperature
+            />
+          </div>
+        )}
       </div>
     </header>
   );
