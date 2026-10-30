@@ -117,7 +117,7 @@ pub async fn generate_text(
         }
     });
     let result = llm
-        .generate(
+        .generate_with_protocol(
             LlmRequest {
                 request_id: request_id.clone(),
                 model,
@@ -127,6 +127,7 @@ pub async fn generate_text(
                 allow_localhost_http: target.allow_localhost_http,
                 max_output_tokens: request.max_output_tokens,
             },
+            &target.protocol,
             sender,
             cancel,
         )

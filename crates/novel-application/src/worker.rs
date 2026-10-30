@@ -421,7 +421,7 @@ impl Worker {
         let started = self.clock.now_ms();
         let generated = self
             .llm
-            .generate(
+            .generate_with_protocol(
                 LlmRequest {
                     request_id: request_id.clone(),
                     model: claimed.contract.model.clone(),
@@ -431,6 +431,11 @@ impl Worker {
                     allow_localhost_http: claimed.contract.allow_localhost_http,
                     max_output_tokens: claimed.contract.token_budget,
                 },
+                claimed
+                    .contract
+                    .protocol
+                    .as_deref()
+                    .unwrap_or("openai-compatible"),
                 sender,
                 cancel,
             )
@@ -647,7 +652,7 @@ impl Worker {
         let started = self.clock.now_ms();
         let generated = self
             .llm
-            .generate(
+            .generate_with_protocol(
                 LlmRequest {
                     request_id: request_id.clone(),
                     model: claimed.contract.model.clone(),
@@ -657,6 +662,11 @@ impl Worker {
                     allow_localhost_http: claimed.contract.allow_localhost_http,
                     max_output_tokens: claimed.contract.token_budget,
                 },
+                claimed
+                    .contract
+                    .protocol
+                    .as_deref()
+                    .unwrap_or("openai-compatible"),
                 sender,
                 cancel,
             )
@@ -1310,7 +1320,7 @@ async fn execute_structured(
     let started = worker.clock.now_ms();
     let generated = worker
         .llm
-        .generate(
+        .generate_with_protocol(
             LlmRequest {
                 request_id: request_id.clone(),
                 model: claimed.contract.model.clone(),
@@ -1320,6 +1330,11 @@ async fn execute_structured(
                 allow_localhost_http: claimed.contract.allow_localhost_http,
                 max_output_tokens: claimed.contract.token_budget,
             },
+            claimed
+                .contract
+                .protocol
+                .as_deref()
+                .unwrap_or("openai-compatible"),
             sender,
             cancel,
         )

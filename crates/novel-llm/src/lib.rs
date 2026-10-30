@@ -2,7 +2,9 @@ mod catalog;
 mod discovery;
 mod endpoint;
 mod error;
+mod ollama;
 mod provider;
+mod router;
 mod sse;
 mod structured;
 
@@ -17,9 +19,11 @@ pub use discovery::{
 };
 pub use endpoint::{authorize_endpoint, authorize_resolved_endpoint};
 pub use error::LlmError;
+pub use ollama::OllamaProvider;
 pub use provider::{
     LlmProvider, LlmRequest, LlmResponse, OpenAiCompatibleProvider, ProviderCapabilities,
     ProviderPolicy, TokenUsage, UnconfiguredProvider, redact_secrets,
 };
+pub use router::ProtocolRouterProvider;
 pub use sse::{SsePiece, consume_sse, parse_sse_line};
 pub use structured::{may_repair, parse_structured_json};

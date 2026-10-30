@@ -8,7 +8,7 @@ use novel_application::{
     BatchService, IndexJobRepository, NativeTaskService, Runtime, RuntimeDeps,
     StructuredMemoryService, SystemClock, TickOutcome, UuidIds,
 };
-use novel_llm::OpenAiCompatibleProvider;
+use novel_llm::ProtocolRouterProvider;
 
 #[cfg(feature = "e2e")]
 struct E2eModelSecrets;
@@ -26,7 +26,7 @@ impl novel_application::ModelSecrets for E2eModelSecrets {
 
 /// The Release composition root uses the real OpenAI-compatible HTTP/SSE provider.
 pub fn llm_provider() -> Arc<dyn novel_llm::LlmProvider> {
-    Arc::new(OpenAiCompatibleProvider::new())
+    Arc::new(ProtocolRouterProvider::new())
 }
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;

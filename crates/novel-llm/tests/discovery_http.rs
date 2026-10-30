@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use novel_llm::{
-    AnthropicDiscovery, DiscoveryError, DiscoveryRequest, OllamaDiscovery,
-    OpenAiCompatibleDiscovery, ProviderModelDiscovery,
+    AnthropicDiscovery, DiscoveryError, DiscoveryRequest, LlmProvider, OllamaDiscovery,
+    OpenAiCompatibleDiscovery, ProtocolRouterProvider, ProviderModelDiscovery,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -366,4 +366,38 @@ async fn error_messages_never_echo_the_api_key() {
 fn discovery_error_codes_are_stable() {
     assert_eq!(DiscoveryError::Cancelled.code(), "CANCELLED");
     assert_eq!(DiscoveryError::Timeout.code(), "TIMEOUT");
+}
+
+/// Ollama 生成适配器：走它自己的 /api/chat，并把结果映射回统一响应。
+#[tokio::test]
+async fn ollama_provider_posts_to_chat_and_maps_response() {
+    let (base, handle) = mock(vec![reply(
+        200,
+        r#"{"message":{"role":"assistant","content":"你好"},"prompt_eval_count":7,"eval_count":3}"#,
+    )])
+    .await;
+    let request = novel_llm::LlmRequest {
+        request_id: "req-1".into(),
+        model: "llama3".into(),
+        prompt: "打个招呼".into(),
+        endpoint: base.replace("/v1", ""),
+        api_key: String::new(),
+        allow_localhost_http: true,
+        max_output_tokens: Some(64),
+    };
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(8);
+    let drain = tokio::spawn(async move { while receiver.recv().await.is_some() {} });
+    let response = novel_llm::ProtocolRouterProvider::new()
+        .generate_with_protocol(request, "ollama", sender, CancellationToken::new())
+        .await
+        .unwrap();
+    drop(drain);
+    assert_eq!(response.text, "你好");
+    assert_eq!(response.usage.prompt_tokens, Some(7));
+    let captured = handle.await.unwrap();
+    assert!(
+        captured[0].contains("POST /api/chat"),
+        "必须打 Ollama 自己的端点：{}",
+        captured[0]
+    );
 }

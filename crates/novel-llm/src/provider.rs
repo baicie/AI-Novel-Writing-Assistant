@@ -63,6 +63,19 @@ pub trait LlmProvider: Send + Sync {
         tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError>;
+
+    /// 带协议上下文的生成入口：默认忽略协议，等价于 \`generate\`；
+    /// 只有真正要按协议分发的实现才覆盖它。
+    async fn generate_with_protocol(
+        &self,
+        request: LlmRequest,
+        protocol: &str,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let _ = protocol;
+        self.generate(request, tokens, cancel).await
+    }
 }
 
 pub struct UnconfiguredProvider;
