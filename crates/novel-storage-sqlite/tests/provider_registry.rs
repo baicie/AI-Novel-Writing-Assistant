@@ -553,3 +553,72 @@ async fn concurrent_updates_with_same_revision_conflict() {
     assert_eq!(kernel.provider_revision("gw").await.unwrap(), Some(2));
     kernel.pool().close().await;
 }
+/// 绑定写入同样必须互斥：同一版本号两次提交只能成功一次。
+#[tokio::test]
+async fn concurrent_binding_writes_conflict() {
+    let dir = tempdir().unwrap();
+    let kernel = std::sync::Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    kernel
+        .upsert_provider_cas(&provider("gw", "https://gw.example.com/v1"), None, 1)
+        .await
+        .unwrap();
+
+    let make = |model: &str| ModelBinding {
+        task_type: "writer".into(),
+        provider_id: "gw".into(),
+        model_id: model.into(),
+        reasoning_effort: None,
+    };
+    let a = {
+        let kernel = kernel.clone();
+        let binding = make("a");
+        tokio::spawn(async move { kernel.set_binding_cas(&binding, Some(1), 2).await })
+    };
+    let b = {
+        let kernel = kernel.clone();
+        let binding = make("b");
+        tokio::spawn(async move { kernel.set_binding_cas(&binding, Some(1), 2).await })
+    };
+    let (a, b) = (a.await.unwrap(), b.await.unwrap());
+    let successes = [&a, &b].iter().filter(|result| result.is_ok()).count();
+    assert_eq!(successes, 1, "只能有一次绑定写入成功");
+    let bindings = kernel.list_model_bindings().await.unwrap();
+    assert_eq!(bindings.len(), 1);
+    kernel.pool().close().await;
+}
+
+/// 模型删除同样走版本守卫，重复提交不会双删成功。
+#[tokio::test]
+async fn concurrent_model_delete_conflict() {
+    let dir = tempdir().unwrap();
+    let kernel = std::sync::Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    kernel
+        .upsert_provider_cas(&provider("gw", "https://gw.example.com/v1"), None, 1)
+        .await
+        .unwrap();
+    kernel
+        .upsert_model(&model("gw", "a"), false, 2)
+        .await
+        .unwrap();
+
+    let a = {
+        let kernel = kernel.clone();
+        tokio::spawn(async move { kernel.delete_model_cas("gw", "a", Some(1)).await })
+    };
+    let b = {
+        let kernel = kernel.clone();
+        tokio::spawn(async move { kernel.delete_model_cas("gw", "a", Some(1)).await })
+    };
+    let (a, b) = (a.await.unwrap(), b.await.unwrap());
+    let successes = [&a, &b].iter().filter(|result| result.is_ok()).count();
+    assert_eq!(successes, 1, "只能有一次删除成功");
+    kernel.pool().close().await;
+}

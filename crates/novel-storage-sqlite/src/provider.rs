@@ -625,57 +625,102 @@ impl SqliteKernel {
             .await
             .map_err(map_sql)
     }
+}
 
+// P16.5：模型与绑定的 CAS 也改成「守卫 + 写入同一事务」，避免并发双写。
+
+impl SqliteKernel {
+    /// 删除模型：删除与版本 bump 在同一事务里完成。
     pub async fn delete_model_cas(
         &self,
         provider_id: &str,
         model_id: &str,
         expected_revision: Option<i64>,
     ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
         if let Some(expected) = expected_revision {
-            let current = self
-                .provider_revision(provider_id)
-                .await?
-                .ok_or_else(|| PortError::NotFound(format!("模型来源不存在：{provider_id}")))?;
-            if current != expected {
-                return Err(PortError::Conflict(format!(
-                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
-                )));
-            }
+            guard_provider_revision(&mut tx, provider_id, expected, None).await?;
         }
         let affected =
             sqlx::query("DELETE FROM provider_model WHERE provider_id = ? AND model_id = ?")
                 .bind(provider_id)
                 .bind(model_id)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(map_sql)?
                 .rows_affected();
         if affected == 0 {
             return Err(PortError::NotFound(format!("模型不存在：{model_id}")));
         }
+        tx.commit().await.map_err(map_sql)?;
         Ok(())
     }
 
+    /// 写绑定：同样用带版本的守卫，保证两个窗口不会同时写成功。
     pub async fn set_binding_cas(
         &self,
         binding: &ModelBinding,
         expected_revision: Option<i64>,
         now_ms: i64,
     ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
         if let Some(expected) = expected_revision {
-            let current = self
-                .provider_revision(&binding.provider_id)
-                .await?
-                .ok_or_else(|| {
-                    PortError::NotFound(format!("模型来源不存在：{}", binding.provider_id))
-                })?;
-            if current != expected {
-                return Err(PortError::Conflict(format!(
-                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
-                )));
-            }
+            guard_provider_revision(&mut tx, &binding.provider_id, expected, Some(now_ms)).await?;
         }
-        self.set_model_binding(binding, now_ms).await
+        sqlx::query(
+            "INSERT INTO model_binding(task_type, provider_id, model_id, reasoning_effort, updated_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(task_type) DO UPDATE SET
+               provider_id = excluded.provider_id,
+               model_id = excluded.model_id,
+               reasoning_effort = excluded.reasoning_effort,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&binding.task_type)
+        .bind(&binding.provider_id)
+        .bind(&binding.model_id)
+        .bind(&binding.reasoning_effort)
+        .bind(now_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(())
     }
+}
+
+/// 在同一事务里做版本守卫：带 revision 条件的单条 UPDATE，命中才继续。
+async fn guard_provider_revision<'a>(
+    tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    provider_id: &str,
+    expected: i64,
+    now_ms: Option<i64>,
+) -> Result<(), PortError> {
+    let affected = sqlx::query(
+        "UPDATE provider_credential SET revision = revision + 1,
+                updated_at = COALESCE(?, CAST(strftime('%s','now')*1000 AS INTEGER))
+         WHERE id = ? AND revision = ?",
+    )
+    .bind(now_ms)
+    .bind(provider_id)
+    .bind(expected)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sql)?
+    .rows_affected();
+    if affected == 0 {
+        let current: Option<i64> =
+            sqlx::query_scalar("SELECT revision FROM provider_credential WHERE id = ?")
+                .bind(provider_id)
+                .fetch_optional(&mut **tx)
+                .await
+                .map_err(map_sql)?;
+        return Err(match current {
+            Some(actual) => PortError::Conflict(format!(
+                "配置已被修改（期望版本 {expected}，当前 {actual}），请刷新后再试"
+            )),
+            None => PortError::NotFound(format!("模型来源不存在：{provider_id}")),
+        });
+    }
+    Ok(())
 }
