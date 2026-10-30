@@ -13,7 +13,7 @@ import {
   DESKTOP_MODEL_PRESETS,
   presetById,
   presetForEndpoint,
-  requiresLocalhostPermission,
+  needsPlaintextHttpPermission,
   validateModelForm,
 } from "./desktopModelPresets";
 
@@ -74,7 +74,7 @@ export default function DesktopModelSettingsCard() {
       const saved = await saveModelSetup({
         endpoint: endpoint.trim(),
         model: model.trim(),
-        allowLocalhostHttp: requiresLocalhostPermission(endpoint),
+        allowLocalhostHttp: needsPlaintextHttpPermission(endpoint),
         apiKey: apiKey.trim(),
       });
       setLoaded(saved);
@@ -90,7 +90,7 @@ export default function DesktopModelSettingsCard() {
         endpoint: endpoint.trim(),
         model: model.trim(),
         apiKey: "",
-        allowLocalhostHttp: requiresLocalhostPermission(endpoint),
+        allowLocalhostHttp: needsPlaintextHttpPermission(endpoint),
       });
       setPhase(result.ok ? "ok" : "error");
       setMessage(result.ok ? `${result.message}（${result.latencyMs}ms）` : result.message);

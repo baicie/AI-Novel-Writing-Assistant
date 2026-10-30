@@ -78,14 +78,18 @@ pub async fn save_model_setup(
     )
     .await?;
     // 让模型来源列表与导航栏立刻能看到这份配置：同一份信息也登记到来源注册表。
-    let _ = sync_legacy_setup_to_registry(
+    // 注册表同步失败不该拦住用户保存模型，但必须留下痕迹，避免静默丢状态。
+    if let Err(error) = sync_legacy_setup_to_registry(
         state.inner(),
         &request.endpoint,
         &request.model,
         request.allow_localhost_http,
         &request.api_key,
     )
-    .await;
+    .await
+    {
+        tracing::warn!(error = ?error, "把首屏模型配置同步到来源注册表失败");
+    }
     Ok(view)
 }
 

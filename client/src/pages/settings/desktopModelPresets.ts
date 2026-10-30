@@ -58,13 +58,10 @@ export function presetForEndpoint(endpoint: string): DesktopModelPreset {
   return matched ?? DESKTOP_MODEL_PRESETS[DESKTOP_MODEL_PRESETS.length - 1]!;
 }
 
-/**
- * 明文 http 地址需要显式允许，否则内核会拒绝（自建网关常用 http）。
- * 元数据地址仍会被内核拒绝，这个开关不会放开它们。
- */
-export function requiresLocalhostPermission(endpoint: string): boolean {
-  return /^http:\/\//i.test(endpoint.trim());
-}
+export {
+  needsPlaintextHttpPermission,
+  needsPlaintextHttpPermission as requiresLocalhostPermission,
+} from "../../platform/desktopModelRules.ts";
 
 export function validateModelForm(form: { endpoint: string; model: string; apiKey: string; hasSavedKey: boolean }): string | null {
   if (!form.endpoint.trim()) return "请填写接口地址";

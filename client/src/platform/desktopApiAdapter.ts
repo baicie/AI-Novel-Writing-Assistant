@@ -13,6 +13,7 @@ import type { QuickSetupProviderOption, QuickSetupStatus } from "@ai-novel/share
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
 import { providerClient } from "./providerTransport";
+import { needsPlaintextHttpPermission } from "./desktopModelRules";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -202,7 +203,7 @@ async function desktopPreviewModels(payload: JsonRecord): Promise<unknown> {
     protocol: "openai-compatible",
     baseUrl,
     apiKey: typeof payload.key === "string" && payload.key.trim() ? payload.key.trim() : null,
-    allowLocalhostHttp: /^http:\/\//i.test(baseUrl),
+    allowLocalhostHttp: needsPlaintextHttpPermission(baseUrl),
   });
   const models = preview.models.map((item) => item.modelId);
   return { models, defaultModel: models[0] ?? "" };

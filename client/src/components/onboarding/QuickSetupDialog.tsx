@@ -22,8 +22,7 @@ import type {
 import type { LLMProvider } from "@ai-novel/shared/types/llm";
 import { completeQuickSetup, getQuickSetupStatus } from "@/api/onboarding";
 import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
-import { formatDiscoveryError } from "@/pages/settings/providerRegistryModel";
-import { requiresLocalhostPermission } from "@/pages/settings/desktopModelPresets";
+import { formatDiscoveryError, needsPlaintextHttpPermission } from "@/platform/desktopModelRules";
 import { saveModelSetup } from "@/platform/desktopTransport";
 import { providerClient } from "@/platform/providerTransport";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
@@ -147,7 +146,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
       await saveModelSetup({
         endpoint,
         model: payload.model,
-        allowLocalhostHttp: requiresLocalhostPermission(endpoint),
+        allowLocalhostHttp: needsPlaintextHttpPermission(endpoint),
         apiKey: payload.apiKey?.trim() ?? "",
       });
       const statusResponse = await getQuickSetupStatus();
@@ -198,7 +197,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
           protocol: "openai-compatible",
           baseUrl: baseURL,
           apiKey: form.apiKey.trim() || null,
-          allowLocalhostHttp: requiresLocalhostPermission(baseURL),
+          allowLocalhostHttp: needsPlaintextHttpPermission(baseURL),
         });
         const models = preview.models.map((item) => item.modelId);
         return { data: { models, defaultModel: models[0] ?? "" } };

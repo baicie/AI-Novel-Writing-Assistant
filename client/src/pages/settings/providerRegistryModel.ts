@@ -173,11 +173,4 @@ export function canBindForGeneration(protocol: string): boolean {
   return GENERATION_READY_PROTOCOLS.includes(protocol as ProviderProtocol);
 }
 
-/** 把内核返回的错误对象整理成一句用户能看懂的话（带机器码，便于排查）。 */
-export function formatDiscoveryError(error: unknown): string {
-  const record = (error ?? {}) as { code?: string; message?: string };
-  if (record.message && record.code) return `${record.message}（${record.code}）`;
-  if (record.message) return record.message;
-  if (error instanceof Error) return error.message;
-  return "获取模型列表失败，可以手动填写模型名称。";
-}
+export { formatDiscoveryError } from "../../platform/desktopModelRules.ts";
