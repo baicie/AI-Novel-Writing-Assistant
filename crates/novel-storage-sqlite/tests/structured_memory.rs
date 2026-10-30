@@ -328,9 +328,8 @@ async fn aliases_and_relationships_coexist_and_do_not_merge_people() {
             id: "r1".into(),
             entity_id: "lin".into(),
             fact_type: "relationship".into(),
-            value_json: format!(
-                r#"{{"relation":"mentor_of","targetEntityId":"su","targetName":"苏晚"}}"#
-            ),
+            value_json: r#"{"relation":"mentor_of","targetEntityId":"su","targetName":"苏晚"}"#
+                .to_string(),
             ..base.clone()
         })
         .await
@@ -340,9 +339,8 @@ async fn aliases_and_relationships_coexist_and_do_not_merge_people() {
             id: "r2".into(),
             entity_id: "lin".into(),
             fact_type: "relationship".into(),
-            value_json: format!(
-                r#"{{"relation":"ally_of","targetEntityId":"su","targetName":"苏晚"}}"#
-            ),
+            value_json: r#"{"relation":"ally_of","targetEntityId":"su","targetName":"苏晚"}"#
+                .to_string(),
             ..base
         })
         .await
