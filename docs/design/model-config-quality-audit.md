@@ -18,21 +18,21 @@
 | Q9 | `client/src/components/layout/DesktopModelSelector.tsx` | 选了模型未声明的档位时没有任何反馈 | 增加「未声明档位」提示，不阻断保存 |
 | Q10 | `client/src/platform/desktopApiAdapter.ts`（968 行） | 已过 1000 行警戒线，映射与分发混在一处 | 拆出 `desktopShapeAdapters.ts`（221 行）放纯映射，适配层降到 771 行；类型检查、211 条前端测试与真机 E2E 14 条通过 |
 | Q11 | `client/src/pages/settings/ProviderRegistrySection.tsx`（456 行） | 表单、发现、模型与绑定编辑挤在一个组件 | 抽出 `providerRegistry/ProviderModelList.tsx` 与 `ProviderBindingList.tsx`，组件降到 374 行，只保留状态与编排 |
+| Q12 | `crates/novel-platform/src/secrets.rs` | 钥匙库不可用时密钥以明文文件落盘 | 改为 ChaCha20-Poly1305 加密（文件头 + 随机 nonce + 以槽位 id 作 AAD），主密钥优先放钥匙库、否则 0600 文件；旧明文文件读取时自动加密迁移；新增 4 条测试（往返/迁移/篡改/跨槽） |
+| Q13 | `crates/novel-application/src/provider_service/service.rs` | 明文 HTTP 授权后，改地址到别的主机也会被静默放行 | 授权绑定主机：换主机必须显式确认（新方法 `upsert_provider_with_confirmation`，命令层加 `confirmPlaintextHostChange`，设置页加确认勾选），并有针对性测试 |
+| Q14 | 推理强度与协议能力 | Ollama 协议不支持强度时界面没有任何提示 | 导航栏与任务绑定在 Ollama 来源上显示「该协议不支持强度」，仍不阻断保存 |
 
 验证：`cargo fmt --all -- --check` 干净；`cargo clippy -p novel-desktop -p novel-llm --lib -- -D warnings` 通过；`cargo test -p novel-platform --lib` 4 passed、`cargo test -p novel-llm --lib` 24 passed、
 `e2e/provider-selector.e2e.js` 此前已在真实 app 里断言选择器与绑定落库。
 
-## 记录在案但本轮不处理（含原因）
+## 遗留状态
 
-| 编号 | 位置 | 问题 | 为何不做 |
-| --- | --- | --- | --- |
-| D3 | `crates/novel-platform/src/secrets.rs` | 钥匙库不可靠时密钥以 0600 明文文件落盘 | 是已知取舍：本地 ad-hoc 签名环境下钥匙库写入不可读，宁可可用且可见；要换加密存储需引入密钥派生与迁移，另开任务 |
-| D4 | `crates/novel-llm/src/endpoint.rs` | 显式允许后，明文 http 可指向任意主机（含内网） | 与用户自建网关的现实需求一致，元数据与链路本地地址仍然拒绝；若要收紧应做成「按来源记住一次授权」，需要产品决策 |
-| D6 | `crates/novel-llm/src/provider.rs` | Ollama 协议忽略推理强度 | 该协议没有对应字段，显式忽略并在代码注明，不伪造支持 |
+上一轮记录的 D3（密钥明文回退）、D4（明文 HTTP 任意主机）、D6（Ollama 无强度提示）已全部处理，见 Q12–Q14；
+本轮没有新的遗留项。
 
 ## 复核建议
 
 1. 新增映射优先加到 desktopShapeAdapters；新增设置项优先加到 providerRegistry 下的子组件。
-2. 若要收紧 D4，优先做「记住一次授权」而不是回退到 HTTPS-only，否则又会挡住自建网关。
-3. D3 若要改成加密存储，需要同时给出迁移路径与「旧文件仍可读」的兼容期。
+2. 明文授权已绑定主机（Q13）；后续若要收紧，优先增加「按主机记录授权历史」，不要回退到 HTTPS-only。
+3. 密钥已是加密存储（Q12），旧明文文件在首次读取时自动迁移；若要换算法，同样要保留「旧格式仍可读」的兼容期。
 4. 审查规则本体见 `docs/wiki/architecture/code-quality-rules.md`，后续按该清单自查。
