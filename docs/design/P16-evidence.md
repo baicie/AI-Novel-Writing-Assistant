@@ -15,7 +15,8 @@
 | G5 历史迁移进 CI | PASS | `tauri-ci.yml`、`tauri-kernel-check.yml` 新增 `--features test-harness` 步骤；YAML 解析校验通过 |
 | G5 多窗口 CAS | PASS | `concurrent_updates_with_same_revision_conflict`、`concurrent_binding_writes_conflict`、`concurrent_model_delete_conflict`（事务内版本守卫） |
 | G5 密钥不外泄 | PASS（已覆盖面） | `error_messages_never_echo_the_api_key`、`provider_view_serializes_camel_case`、`route_resolves_from_binding_without_secret` |
-| G5 原生 E2E / 故障注入端到端 | 未完成 | — |
+| G5 原生启动与迁移（真机） | PASS | 见第 4 节：当前 HEAD 构建的 `.app` 冷启动无 panic，新库迁移到 0024，`provider_model`/`model_binding`/`credential_intent` 均存在 |
+| G5 原生 UI E2E（webdriver） | 未完成 | 需 wdio 驱动与交互脚本，本轮未做 |
 | G6 最终验收 | 未执行 | — |
 
 ## 2. 关键不变量与对应测试
@@ -41,3 +42,18 @@
 4. **无组件级 UI 测试**：仓库未引入 RTL，本轮未新增依赖；界面验收留给人工。
 5. **既有债务**：`novel-http` 的 fmt/lint 与 `novel-storage-sqlite` 两个测试文件的 clippy 告警仍未处理（非本轮引入）。
 6. **原生 E2E 未运行**：Tauri 端到端（含 wdio）需要构建桌面产物与驱动，本轮未执行，属外部/重量级验证缺口。
+## 4. 原生启动与迁移证据（本轮实测）
+
+构建：`pnpm tauri build --target aarch64-apple-darwin --bundles app --config src-tauri/tauri.updater.conf.json`（含更新签名）。
+
+运行：`BIZ_NOVEL_DATA_DIR=/tmp/p16-native <app>/Contents/MacOS/novel-desktop`，12 秒后结束进程。
+
+结果：
+
+- 启动日志首行为 `webview runtime diagnostics … "mode":"desktop"`，说明 webview 正常起来；
+- 日志中无 `panicked`；
+- 新建数据库 `/tmp/p16-native/novel.sqlite` 里存在 `provider_model`、`model_binding`、`credential_intent` 三张表；
+- `schema_migration` 最后四条版本为 `0021, 0022, 0023, 0024`；
+- 产物二进制中包含 `list_provider_profiles`、`upsert_provider_profile`、`discover_provider_models`、`apply_provider_discovery`、`check_run_route`、`reconcile_credential_intents` 等命令名，证明 13 个 Provider 命令确实编译进了原生包。
+
+**边界**：这是「原生启动 + 迁移 + 命令注册」的证据，**不是** UI 交互 E2E（未驱动 webdriver、未点击界面）。
