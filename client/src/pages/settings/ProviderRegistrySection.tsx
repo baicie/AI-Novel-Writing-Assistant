@@ -43,6 +43,7 @@ export default function ProviderRegistrySection() {
   const [candidates, setCandidates] = useState<ModelView[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [effortDrafts, setEffortDrafts] = useState<Record<string, string>>({});
+  const [confirmPlaintextHost, setConfirmPlaintextHost] = useState(false);
   const [message, setMessage] = useState<string>("");
 
   const run = useCallback(async (label: string, action: () => Promise<void>) => {
@@ -118,6 +119,7 @@ export default function ProviderRegistrySection() {
         protocol: draft.protocol,
         baseUrl: draft.baseUrl.trim(),
         allowLocalhostHttp: draft.allowLocalhostHttp,
+        confirmPlaintextHostChange: confirmPlaintextHost,
         credential:
           draft.credentialKind === "replace"
             ? { kind: "replace", apiKey: draft.apiKey.trim() }
@@ -296,6 +298,17 @@ export default function ProviderRegistrySection() {
             />
           </label>
         </div>
+
+        {draft.allowLocalhostHttp ? (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={confirmPlaintextHost}
+              onChange={(event) => setConfirmPlaintextHost(event.target.checked)}
+            />
+            地址主机变了要重新确认：允许对这个新主机使用明文连接
+          </label>
+        ) : null}
 
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => void save()} disabled={busy !== null}>

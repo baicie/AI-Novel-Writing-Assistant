@@ -84,6 +84,12 @@ export default function DesktopModelSelector() {
   }, [currentModel]);
 
   // 模型声明了档位而用户选了未声明的档位时只做提示，不阻断保存。
+  const protocolSupportsEffort = useMemo(() => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) return true;
+    return provider.protocol !== "ollama";
+  }, [providers, providerId]);
+
   const effortUndeclared = useMemo(() => {
     const declared = currentModel?.capabilities.reasoningEfforts;
     if (!effort || !declared || !declared.length) return false;
@@ -188,7 +194,12 @@ export default function DesktopModelSelector() {
         ))}
       </select>
 
-      {effortUndeclared ? (
+      {!protocolSupportsEffort ? (
+        <span className="text-xs text-muted-foreground" title="该协议没有推理强度参数">
+          该协议不支持强度
+        </span>
+      ) : null}
+      {effortUndeclared && protocolSupportsEffort ? (
         <span className="text-xs text-amber-600" title="模型没有声明这一档，仍会按所选发送">
           未声明档位
         </span>

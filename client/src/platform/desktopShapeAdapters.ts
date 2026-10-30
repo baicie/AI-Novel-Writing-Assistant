@@ -9,36 +9,14 @@ import type { QuickSetupProviderOption, QuickSetupStatus } from "@ai-novel/share
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
 
-type JsonRecord = Record<string, unknown>;
+import { asRecord, iso, taskStatusForRun } from "./desktopPrimitives";
+import type { JsonRecord } from "./desktopPrimitives";
 
-export function iso(timestamp: number): string {
-  return new Date(timestamp).toISOString();
-}
-export function asRecord(value: unknown): JsonRecord {
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      return parsed && typeof parsed === "object" ? parsed as JsonRecord : {};
-    } catch {
-      return {};
-    }
-  }
-  return value && typeof value === "object" ? value as JsonRecord : {};
-}
-
-export function appError(error: unknown): { code: string; message: string; retryable: boolean } {
-  const record = asRecord(error);
-  return {
-    code: typeof record.code === "string" ? record.code : "INTEGRITY_ERROR",
-    message: typeof record.message === "string" ? record.message : "本地创作内核没有完成这次操作。",
-    retryable: record.retryable === true,
-  };
-}
+export { appError, asRecord, iso, ok, taskStatusForRun } from "./desktopPrimitives";
 
 
-export function ok<T>(data: T): ApiResponse<T> {
-  return { success: true, data };
-}
+
+
 // 桌面内核只支持一套「地址 + 模型 + 密钥」配置，这里把内核状态映射成界面需要的形状。
 // 内核返回的字段比 Web 侧精简（没有 providers / routeCoverage），缺字段会让界面直接崩，必须补齐。
 export function toQuickSetupStatus(raw: unknown): QuickSetupStatus {
@@ -165,24 +143,6 @@ export function detailToNovel(
   };
 }
 
-export function taskStatusForRun(state: string): "queued" | "running" | "waiting_approval" | "succeeded" | "failed" | "cancelled" {
-  switch (state) {
-    case "queued":
-      return "queued";
-    case "running":
-      return "running";
-    case "waiting_approval":
-    case "paused_for_approval":
-      return "waiting_approval";
-    case "completed":
-    case "succeeded":
-      return "succeeded";
-    case "cancelled":
-      return "cancelled";
-    default:
-      return "failed";
-  }
-}
 
 export function runToTaskSummary(run: transport.RunSummary) {
   return {

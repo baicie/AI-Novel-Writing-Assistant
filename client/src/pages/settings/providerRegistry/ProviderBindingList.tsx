@@ -18,6 +18,8 @@ export default function ProviderBindingList(props: ProviderBindingListProps) {
       <ul className="space-y-2">
         {BINDING_TASK_TYPES.map((task) => {
           const binding = props.bindings.find((item) => item.taskType === task.value);
+          const provider = props.providers.find((item) => item.id === binding?.providerId);
+          const supportsEffort = provider ? provider.protocol !== "ollama" : true;
           return (
             <li key={task.value} className="flex flex-wrap items-center gap-2 text-sm">
               <span className="w-24 text-muted-foreground">{task.label}</span>
@@ -55,6 +57,9 @@ export default function ProviderBindingList(props: ProviderBindingListProps) {
                   </option>
                 ))}
               </select>
+              {supportsEffort ? null : (
+                <span className="text-xs text-muted-foreground">该协议不支持强度</span>
+              )}
             </li>
           );
         })}

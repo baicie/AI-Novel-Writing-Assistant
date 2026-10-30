@@ -120,6 +120,7 @@ export interface UpsertProviderInput {
   protocol: ProviderProtocol;
   baseUrl: string;
   allowLocalhostHttp?: boolean;
+  confirmPlaintextHostChange?: boolean;
   sortOrder?: number;
   isBuiltin?: boolean;
   credential: CredentialActionDto;
