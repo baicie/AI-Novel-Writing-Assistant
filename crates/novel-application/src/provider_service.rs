@@ -49,6 +49,7 @@ pub enum ProviderErrorCode {
     InUse,
     CredentialMissing,
     CredentialUnavailable,
+    NotSupported,
     Storage,
 }
 
@@ -143,6 +144,11 @@ pub struct CredentialReconcileReport {
     pub completed: usize,
     /// 必须由用户重新输入密钥才能收尾的条数（replace 无法在无明文时重放）。
     pub needs_user_action: Vec<String>,
+}
+
+/// 具备真实生成适配器的协议白名单：新增协议必须先补适配器再放开绑定。
+pub fn protocol_supports_generation(protocol: novel_domain::ProviderProtocol) -> bool {
+    matches!(protocol, novel_domain::ProviderProtocol::OpenAiCompatible)
 }
 
 /// 存储端口：SQLite adapter 实现它。
@@ -487,6 +493,22 @@ impl ProviderService {
                 "模型来源不存在：{}",
                 binding.provider_id
             )));
+        }
+        let providers = self.registry.list_providers().await?;
+        if let Some(provider) = providers
+            .iter()
+            .find(|item| item.id == binding.provider_id)
+            .filter(|provider| !protocol_supports_generation(provider.protocol))
+        {
+            return Err(ProviderError {
+                code: ProviderErrorCode::NotSupported,
+                message: format!(
+                    "{} 协议目前只能读取模型列表，还不能用于创作生成",
+                    provider.protocol.as_str()
+                ),
+                retryable: false,
+                details: None,
+            });
         }
         let models = self.registry.list_models(&binding.provider_id).await?;
         if !models
@@ -1460,6 +1482,48 @@ mod tests {
         assert_eq!(frozen.credential_ref.as_deref(), Some("gw"));
     }
 
+    #[tokio::test]
+    async fn binding_rejects_discovery_only_protocol() {
+        let (service, _registry, _vault) = service();
+        let mut ollama = draft("ollama");
+        ollama.protocol = novel_domain::ProviderProtocol::Ollama;
+        ollama.base_url = "http://127.0.0.1:11434".into();
+        ollama.allow_localhost_http = true;
+        service
+            .upsert_provider(ollama, CredentialAction::Keep, None, 1)
+            .await
+            .unwrap();
+        service
+            .upsert_model(
+                novel_domain::ModelProfile {
+                    provider_id: "ollama".into(),
+                    model_id: "llama3".into(),
+                    display_name: None,
+                    capabilities: Default::default(),
+                    source: novel_domain::ModelSource::Discovered,
+                    overridden: Default::default(),
+                },
+                false,
+                None,
+                2,
+            )
+            .await
+            .unwrap();
+        let error = service
+            .upsert_binding(
+                novel_domain::ModelBinding {
+                    task_type: "writer".into(),
+                    provider_id: "ollama".into(),
+                    model_id: "llama3".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                3,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ProviderErrorCode::NotSupported);
+    }
     #[tokio::test]
     async fn run_without_binding_keeps_legacy_parameters() {
         let (provider, model, endpoint, allow_local, frozen) = apply_route_to_run(

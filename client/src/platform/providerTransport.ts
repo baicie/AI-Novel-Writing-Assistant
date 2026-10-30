@@ -169,6 +169,7 @@ export type ProviderErrorCode =
   | "IN_USE"
   | "CREDENTIAL_MISSING"
   | "CREDENTIAL_UNAVAILABLE"
+  | "NOT_SUPPORTED"
   | "STORAGE";
 
 export interface ProviderError {
