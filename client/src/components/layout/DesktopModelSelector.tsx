@@ -83,6 +83,13 @@ export default function DesktopModelSelector() {
     return declared && declared.length ? declared : FALLBACK_EFFORTS;
   }, [currentModel]);
 
+  // 模型声明了档位而用户选了未声明的档位时只做提示，不阻断保存。
+  const effortUndeclared = useMemo(() => {
+    const declared = currentModel?.capabilities.reasoningEfforts;
+    if (!effort || !declared || !declared.length) return false;
+    return !declared.includes(effort);
+  }, [currentModel, effort]);
+
   const save = async (next: { providerId?: string; modelId?: string; effort?: string }) => {
     const nextProvider = next.providerId ?? providerId;
     const nextModel = next.modelId ?? modelId;
@@ -181,6 +188,11 @@ export default function DesktopModelSelector() {
         ))}
       </select>
 
+      {effortUndeclared ? (
+        <span className="text-xs text-amber-600" title="模型没有声明这一档，仍会按所选发送">
+          未声明档位
+        </span>
+      ) : null}
       {saving ? <span className="text-xs text-muted-foreground">保存中…</span> : null}
       {!saving && message ? (
         <span className="text-xs text-muted-foreground">{message}</span>
