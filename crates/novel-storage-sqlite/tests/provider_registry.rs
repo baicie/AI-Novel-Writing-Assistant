@@ -179,41 +179,29 @@ async fn bindings_are_upserted_per_task() {
     kernel.pool().close().await;
 }
 
-/// 老库升级：0021 之前的库里已有 `provider_credential` 的 default 行，升级后必须仍可读，
-/// 且新列拿到默认值。
+/// 老版本写入的 `default` 行（只有老字段）必须仍能读，且新列取默认值。
+/// 真实的「旧 schema 升级」路径由 `p151_historical_migration`（test-harness）覆盖。
 #[tokio::test]
-async fn legacy_default_row_survives_upgrade() {
+async fn legacy_shaped_default_row_stays_readable() {
     let dir = tempdir().unwrap();
-    let path = dir.path().join("novel.sqlite");
-    {
-        let old = SqliteKernel::open_at_migration(&path, 21).await.unwrap();
-        old.save_model_setup("https://old.example.com/v1", "old-model", false, 1)
-            .await
-            .unwrap();
-        old.pool().close().await;
-    }
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite")).await.unwrap();
+    sqlx::query(
+        "INSERT INTO provider_credential(id, provider, secret_ref, endpoint, model, allow_localhost_http, created_at)
+         VALUES ('default','openai-compatible','openai-compatible','https://old.example.com/v1','old-model',0,1)",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
 
-    let upgraded = SqliteKernel::open(&path).await.unwrap();
-    let legacy = upgraded
-        .load_model_setup()
-        .await
-        .unwrap()
-        .expect("老配置要还在");
+    let legacy = kernel.load_model_setup().await.unwrap().expect("老配置要还能读");
     assert_eq!(legacy.endpoint, "https://old.example.com/v1");
     assert_eq!(legacy.model, "old-model");
 
-    let providers = upgraded.list_providers().await.unwrap();
-    let default = providers
-        .iter()
-        .find(|item| item.id == "default")
-        .expect("default 行仍在");
-    assert_eq!(
-        default.protocol,
-        ProviderProtocol::OpenAiCompatible,
-        "新列取默认值"
-    );
-    assert_eq!(default.base_url, "https://old.example.com/v1");
-    upgraded.pool().close().await;
+    let providers = kernel.list_providers().await.unwrap();
+    let default = providers.iter().find(|item| item.id == "default").expect("default 行仍在");
+    assert_eq!(default.protocol, ProviderProtocol::OpenAiCompatible, "新列取默认值");
+    assert!(!default.is_builtin);
+    kernel.pool().close().await;
 }
 
 #[tokio::test]
