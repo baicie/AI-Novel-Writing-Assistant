@@ -90,24 +90,24 @@ async fn author_edited_candidate_uses_cas_and_does_not_touch_official_until_comm
     let mut approvals = 0;
     let mut detail = None;
     for _ in 0..30 {
-        if let TickOutcome::Advanced { status, run_id } = runtime.worker.tick().await.unwrap() {
-            if status == "waiting_approval" {
-                let current = runtime
+        if let TickOutcome::Advanced { status, run_id } = runtime.worker.tick().await.unwrap()
+            && status == "waiting_approval"
+        {
+            let current = runtime
+                .director
+                .get_run_detail(&novel.id, &run_id)
+                .await
+                .unwrap();
+            if approvals < 2 {
+                runtime
                     .director
-                    .get_run_detail(&novel.id, &run_id)
+                    .approve(&format!("p10-approve-{approvals}"), &run_id)
                     .await
                     .unwrap();
-                if approvals < 2 {
-                    runtime
-                        .director
-                        .approve(&format!("p10-approve-{approvals}"), &run_id)
-                        .await
-                        .unwrap();
-                    approvals += 1;
-                } else {
-                    detail = Some(current);
-                    break;
-                }
+                approvals += 1;
+            } else {
+                detail = Some(current);
+                break;
             }
         }
     }
@@ -156,10 +156,10 @@ async fn author_edited_candidate_uses_cas_and_does_not_touch_official_until_comm
         .await
         .unwrap();
     for _ in 0..10 {
-        if let TickOutcome::Advanced { status, .. } = runtime.worker.tick().await.unwrap() {
-            if status == "succeeded" {
-                break;
-            }
+        if let TickOutcome::Advanced { status, .. } = runtime.worker.tick().await.unwrap()
+            && status == "succeeded"
+        {
+            break;
         }
     }
     let saved = NovelRepository::get_chapter(kernel.as_ref(), &novel.id, &chapter.id)

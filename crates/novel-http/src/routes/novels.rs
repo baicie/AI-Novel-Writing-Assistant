@@ -122,7 +122,7 @@ pub async fn update(
         book_selling_point: payload.book_selling_point.map(Some),
         competing_feel: payload.competing_feel.map(Some),
         first_30_chapter_promise: payload.first_30_chapter_promise.map(Some),
-        commercial_tags: payload.commercial_tags.map(|tags| Some(tags)),
+        commercial_tags: payload.commercial_tags.map(Some),
         genre_id: payload.genre_id.map(Some),
         primary_story_mode_id: payload.primary_story_mode_id.map(Some),
         secondary_story_mode_id: payload.secondary_story_mode_id.map(Some),

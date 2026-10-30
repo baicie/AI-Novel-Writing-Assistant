@@ -708,7 +708,7 @@ async fn test_list_novels() {
             .json(&payload)
             .send()
             .await
-            .expect(&format!("novel {}", i));
+            .unwrap_or_else(|_| panic!("novel {}", i));
     }
 
     let response = client
@@ -859,7 +859,7 @@ async fn test_chapter_count_tracking() {
             .json(&payload)
             .send()
             .await
-            .expect(&format!("chapter {}", i));
+            .unwrap_or_else(|_| panic!("chapter {}", i));
     }
 
     let list_resp = client

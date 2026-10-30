@@ -74,10 +74,10 @@ async fn killed_index_worker_is_recovered_by_fencing_and_reindexed() {
             .unwrap();
         let start = Instant::now();
         while !marker.exists() && start.elapsed() < Duration::from_secs(6) {
-            if let Some(status) = candidate.try_wait().unwrap() {
-                if !status.success() {
-                    break;
-                }
+            if let Some(status) = candidate.try_wait().unwrap()
+                && !status.success()
+            {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

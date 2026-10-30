@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use novel_llm::{
     AnthropicDiscovery, DiscoveryError, DiscoveryRequest, LlmProvider, OllamaDiscovery,
-    OpenAiCompatibleDiscovery, ProtocolRouterProvider, ProviderModelDiscovery,
+    OpenAiCompatibleDiscovery, ProviderModelDiscovery,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
