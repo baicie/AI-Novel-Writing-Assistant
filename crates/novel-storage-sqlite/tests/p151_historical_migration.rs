@@ -58,7 +58,10 @@ async fn database_created_before_structured_facts_upgrades_without_data_loss() {
         .fetch_one(reopened.pool())
         .await
         .unwrap();
-    assert_eq!(version_count, 21);
+    assert_eq!(
+        version_count as usize,
+        novel_storage_sqlite::MIGRATION_COUNT
+    );
     drop(reopened);
     assert!(!original.is_empty());
 }

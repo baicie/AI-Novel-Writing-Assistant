@@ -1,0 +1,231 @@
+//! P16.1：Provider / 模型注册表的真实 SQLite 集成测试。
+
+use std::collections::BTreeSet;
+
+use novel_domain::{
+    CapabilityField, CredentialKind, CredentialReference, Modality, ModelBinding,
+    ModelCapabilities, ModelProfile, ModelSource, ProviderProfile, ProviderProtocol,
+};
+use novel_storage_sqlite::SqliteKernel;
+use tempfile::tempdir;
+
+fn provider(id: &str, base_url: &str) -> ProviderProfile {
+    ProviderProfile {
+        id: id.into(),
+        display_name: Some(format!("{id} 网关")),
+        protocol: ProviderProtocol::OpenAiCompatible,
+        base_url: base_url.into(),
+        credential: CredentialReference {
+            kind: CredentialKind::OsSecret,
+            reference: id.into(),
+        },
+        is_builtin: false,
+        allow_localhost_http: false,
+        sort_order: 1,
+    }
+}
+
+fn model(provider_id: &str, model_id: &str) -> ModelProfile {
+    ModelProfile {
+        provider_id: provider_id.into(),
+        model_id: model_id.into(),
+        display_name: Some(model_id.into()),
+        capabilities: ModelCapabilities {
+            context_window: Some(128_000),
+            max_output_tokens: Some(8_000),
+            supports_tools: Some(true),
+            input_modalities: Some(vec![Modality::Text, Modality::Image]),
+            reasoning_efforts: Some(BTreeSet::from(["low".to_string(), "high".to_string()])),
+            ..Default::default()
+        },
+        source: ModelSource::Discovered,
+        overridden: BTreeSet::new(),
+    }
+}
+
+#[tokio::test]
+async fn provider_registry_roundtrip() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+
+    kernel
+        .upsert_provider(&provider("deepseek", "https://api.deepseek.com/v1"), 1)
+        .await
+        .unwrap();
+    let providers = kernel.list_providers().await.unwrap();
+    assert_eq!(providers.len(), 1, "应当只有一条 provider 记录");
+    assert_eq!(providers[0].id, "deepseek");
+    assert_eq!(providers[0].protocol, ProviderProtocol::OpenAiCompatible);
+    assert_eq!(
+        providers[0].credential.reference, "deepseek",
+        "凭据只存引用"
+    );
+
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 2)
+        .await
+        .unwrap();
+    let ids: Vec<String> = kernel
+        .list_providers()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(ids, vec!["deepseek".to_string(), "gw".to_string()]);
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn models_keep_user_overrides() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("deepseek", "https://api.deepseek.com/v1"), 1)
+        .await
+        .unwrap();
+
+    // 用户显式改了上下文并标记为覆盖
+    let mut user_model = model("deepseek", "deepseek-chat");
+    user_model.source = ModelSource::User;
+    user_model.capabilities.context_window = Some(64_000);
+    user_model.overridden = BTreeSet::from([CapabilityField::ContextWindow]);
+    kernel.upsert_model(&user_model, true, 2).await.unwrap();
+
+    let stored = kernel.list_models("deepseek").await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].capabilities.context_window, Some(64_000));
+    assert!(
+        stored[0]
+            .overridden
+            .contains(&CapabilityField::ContextWindow)
+    );
+    assert_eq!(
+        stored[0]
+            .capabilities
+            .reasoning_efforts
+            .as_ref()
+            .unwrap()
+            .len(),
+        2,
+        "JSON 列需要能往返"
+    );
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn deleting_provider_cascades_models_and_bindings() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("deepseek", "https://api.deepseek.com/v1"), 1)
+        .await
+        .unwrap();
+    kernel
+        .upsert_model(&model("deepseek", "deepseek-chat"), false, 2)
+        .await
+        .unwrap();
+    kernel
+        .set_model_binding(
+            &ModelBinding {
+                task_type: "chapter".into(),
+                provider_id: "deepseek".into(),
+                model_id: "deepseek-chat".into(),
+                reasoning_effort: Some("high".into()),
+            },
+            3,
+        )
+        .await
+        .unwrap();
+
+    kernel.delete_provider("deepseek").await.unwrap();
+    assert!(kernel.list_providers().await.unwrap().is_empty());
+    assert!(kernel.list_models("deepseek").await.unwrap().is_empty());
+    assert!(kernel.list_model_bindings().await.unwrap().is_empty());
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn bindings_are_upserted_per_task() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("deepseek", "https://api.deepseek.com/v1"), 1)
+        .await
+        .unwrap();
+    let mut binding = ModelBinding {
+        task_type: "chapter".into(),
+        provider_id: "deepseek".into(),
+        model_id: "deepseek-chat".into(),
+        reasoning_effort: None,
+    };
+    kernel.set_model_binding(&binding, 2).await.unwrap();
+    binding.model_id = "deepseek-reasoner".into();
+    binding.reasoning_effort = Some("high".into());
+    kernel.set_model_binding(&binding, 3).await.unwrap();
+
+    let bindings = kernel.list_model_bindings().await.unwrap();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].model_id, "deepseek-reasoner");
+    assert_eq!(bindings[0].reasoning_effort.as_deref(), Some("high"));
+    kernel.pool().close().await;
+}
+
+/// 老库升级：0021 之前的库里已有 `provider_credential` 的 default 行，升级后必须仍可读，
+/// 且新列拿到默认值。
+#[tokio::test]
+async fn legacy_default_row_survives_upgrade() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("novel.sqlite");
+    {
+        let old = SqliteKernel::open_at_migration(&path, 21).await.unwrap();
+        old.save_model_setup("https://old.example.com/v1", "old-model", false, 1)
+            .await
+            .unwrap();
+        old.pool().close().await;
+    }
+
+    let upgraded = SqliteKernel::open(&path).await.unwrap();
+    let legacy = upgraded
+        .load_model_setup()
+        .await
+        .unwrap()
+        .expect("老配置要还在");
+    assert_eq!(legacy.endpoint, "https://old.example.com/v1");
+    assert_eq!(legacy.model, "old-model");
+
+    let providers = upgraded.list_providers().await.unwrap();
+    let default = providers
+        .iter()
+        .find(|item| item.id == "default")
+        .expect("default 行仍在");
+    assert_eq!(
+        default.protocol,
+        ProviderProtocol::OpenAiCompatible,
+        "新列取默认值"
+    );
+    assert_eq!(default.base_url, "https://old.example.com/v1");
+    upgraded.pool().close().await;
+}
+
+#[tokio::test]
+async fn migrations_are_idempotent() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("novel.sqlite");
+    {
+        let first = SqliteKernel::open(&path).await.unwrap();
+        first.pool().close().await;
+    }
+    let second = SqliteKernel::open(&path).await.unwrap();
+    let providers = second.list_providers().await.unwrap();
+    assert!(providers.is_empty());
+    second.pool().close().await;
+}

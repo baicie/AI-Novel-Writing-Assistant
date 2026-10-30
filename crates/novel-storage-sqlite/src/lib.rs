@@ -6,6 +6,9 @@ mod legacy_import;
 mod lookups;
 mod memory;
 mod model;
+mod provider;
+
+pub use db::MIGRATION_COUNT;
 mod native_tasks;
 mod novels;
 mod structured_memory;

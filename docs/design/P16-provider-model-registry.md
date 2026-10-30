@@ -1,6 +1,6 @@
 # P16 — AI Provider & Model Registry（审计与设计）
 
-> 状态：P16.0 完成（本文件即产物）。实现按 P16.1 起逐阶段落地。
+> 状态：P16.0 完成（本文件即产物）；P16.1 已落地（见第 11 节）。P16.2–P16.4 未开始。
 > 仓库：`baicie/AI-Novel-Writing-Assistant`　基准：`beta`（`29e8e09e`）
 > 说明：任务书要求的目标分支 `migration/tauri-2-rust` 已在 PR #3 squash 合入后删除，当前唯一在用的集成分支是 `beta`，因此 P16 在 `beta` 上进行，不重建该分支。
 
@@ -112,10 +112,12 @@ OpenAI-compatible / Anthropic / Ollama 各自实现。领域层不写 HTTP。
 Run 继续冻结 `provider_id + model_id + protocol + endpoint` 与 `credential_ref`，**不冻结密钥**；
 恢复时校验 `(provider_id, model_id)` 仍可解析，否则给可恢复错误，绝不静默换模型。
 
-## 5. 数据库迁移（0021）
+## 5. 数据库迁移（0022）
+
+> 说明：原计划占用 0021，实施时发现 0021 已被 `0021_structured_fact_version.sql` 使用，遂顺延为 0022（文件 `migrations/0022_provider_registry.sql`）。
 
 ```sql
--- 0019/0020 已存在，下一个版本号 0021
+-- 0019/0020/0021 已存在（0021 已被 structured_fact_version 占用），本次用 0022
 ALTER TABLE provider_credential ADD COLUMN protocol TEXT NOT NULL DEFAULT 'openai-compatible';
 ALTER TABLE provider_credential ADD COLUMN display_name TEXT;
 ALTER TABLE provider_credential ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0;
@@ -218,3 +220,20 @@ client (React)      （desktopTransport → desktopApiAdapter → UI）
 | P16.2 | `ProviderModelDiscovery` + OpenAI-compatible / 内置 / 手动 + 错误码 | 适配器测试覆盖第 9 节整行 |
 | P16.3 | 桌面 Settings → Models 重做 | 组件测试 + 桌面启动无异常 |
 | P16.4 | 任务绑定接入与 Run 冻结校验 | workspace 测试 + 前端 typecheck + 原生验收 |
+## 11. P16.1 实施记录
+
+落地内容（`crates/novel-domain/src/provider.rs`、`migrations/0022_provider_registry.sql`、`crates/novel-storage-sqlite/src/provider.rs`）：
+
+- 领域类型：`ProviderProfile` / `ProviderProtocol` / `CredentialReference` / `ModelProfile` /
+  `ModelCapabilities`（全三态）/ `ModelBinding` / `ModelDiscoveryOutcome` / `DiscoveryErrorCode`；
+  能力合并 `overlay` 逐字段取 `Some`，合并发现结果时尊重 `overridden`；
+- 存储：`provider_credential` 增列（protocol / display_name / is_builtin / sort_order / updated_at），
+  新增 `provider_model` 与 `model_binding`；提供 upsert/list/delete（级联）与绑定读写；
+  老的 `save_model_setup` / `load_model_setup` 行为不变；
+- 测试证据：`cargo test -p novel-domain` **20 passed**；
+  `cargo test -p novel-storage-sqlite --features test-harness` 全绿，
+  其中新增 `tests/provider_registry.rs` **6 passed**（含「老库升级后 default 行仍可读、新列取默认值」与「重复打开幂等」）；
+  `cargo clippy -p novel-domain -p novel-storage-sqlite --lib -- -D warnings` 通过；`cargo fmt` 通过。
+
+顺带修正：`p151_historical_migration` 里硬编码的迁移条数改为 `novel_storage_sqlite::MIGRATION_COUNT`，
+以后新增迁移不必再改断言。
