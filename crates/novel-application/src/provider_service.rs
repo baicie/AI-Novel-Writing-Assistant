@@ -570,6 +570,71 @@ impl ProviderService {
     }
 }
 
+/// 生成时真正使用的目标：协议、地址、模型与凭据引用，都是可执行字段。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationTarget {
+    pub provider_id: String,
+    pub model_id: String,
+    pub protocol: String,
+    pub endpoint: String,
+    pub allow_localhost_http: bool,
+    pub credential_ref: String,
+    /// `binding` = 任务级绑定；`default` = 既有默认配置。
+    pub source: String,
+}
+
+/// 旧默认配置的解析结果（来自 `load_model_setup`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LegacyModelTarget {
+    pub endpoint: String,
+    pub model: String,
+    pub allow_localhost_http: bool,
+    pub secret_ref: String,
+}
+
+/// 生成目标解析：任务绑定优先，没有绑定沿用默认配置，两者都没有就明确报错。
+///
+/// 这里不改变任何既有行为：没有传入任务类型时，结果与旧路径完全一致。
+pub fn resolve_generation_target(
+    route: Option<ResolvedModelRoute>,
+    legacy: Option<LegacyModelTarget>,
+    requested_model: Option<&str>,
+) -> Result<GenerationTarget, ProviderError> {
+    if let Some(route) = route {
+        let model_id = requested_model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| route.model_id.clone());
+        return Ok(GenerationTarget {
+            provider_id: route.provider_id,
+            model_id,
+            protocol: route.protocol,
+            endpoint: route.endpoint,
+            allow_localhost_http: route.allow_localhost_http,
+            credential_ref: route.credential_ref,
+            source: route.source,
+        });
+    }
+    match legacy {
+        Some(legacy) => Ok(GenerationTarget {
+            provider_id: "default".to_string(),
+            model_id: requested_model
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or(legacy.model),
+            protocol: "openai-compatible".to_string(),
+            endpoint: legacy.endpoint,
+            allow_localhost_http: legacy.allow_localhost_http,
+            credential_ref: legacy.secret_ref,
+            source: "default".to_string(),
+        }),
+        None => Err(ProviderError::validation("还没有配置模型服务。")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1160,5 +1225,58 @@ mod tests {
                 .is_err_and(|error| error.code == ProviderErrorCode::InUse)
         );
         assert!(service.resolve_route("review").await.unwrap().is_some());
+    }
+    #[tokio::test]
+    async fn generation_target_prefers_binding_over_legacy() {
+        let route = ResolvedModelRoute {
+            task_type: "writer".into(),
+            provider_id: "gw".into(),
+            model_id: "bound-model".into(),
+            protocol: "openai-compatible".into(),
+            endpoint: "https://gw.example.com/v1".into(),
+            allow_localhost_http: false,
+            credential_ref: "gw".into(),
+            reasoning_effort: None,
+            source: "binding".into(),
+        };
+        let legacy = LegacyModelTarget {
+            endpoint: "https://legacy/v1".into(),
+            model: "legacy-model".into(),
+            allow_localhost_http: false,
+            secret_ref: "openai-compatible".into(),
+        };
+        let target = resolve_generation_target(Some(route), Some(legacy.clone()), None).unwrap();
+        assert_eq!(target.model_id, "bound-model");
+        assert_eq!(target.credential_ref, "gw");
+        assert_eq!(target.source, "binding");
+
+        // 没有绑定时仍走旧路径，行为不变
+        let target = resolve_generation_target(None, Some(legacy), None).unwrap();
+        assert_eq!(target.model_id, "legacy-model");
+        assert_eq!(target.credential_ref, "openai-compatible");
+        assert_eq!(target.source, "default");
+    }
+
+    #[tokio::test]
+    async fn generation_target_reports_missing_configuration() {
+        let error = resolve_generation_target(None, None, None).unwrap_err();
+        assert_eq!(error.code, ProviderErrorCode::Validation);
+    }
+
+    #[tokio::test]
+    async fn generation_target_honours_explicit_model_override() {
+        let route = ResolvedModelRoute {
+            task_type: "writer".into(),
+            provider_id: "gw".into(),
+            model_id: "bound".into(),
+            protocol: "openai-compatible".into(),
+            endpoint: "https://gw/v1".into(),
+            allow_localhost_http: false,
+            credential_ref: "gw".into(),
+            reasoning_effort: None,
+            source: "binding".into(),
+        };
+        let target = resolve_generation_target(Some(route), None, Some("  explicit  ")).unwrap();
+        assert_eq!(target.model_id, "explicit");
     }
 }

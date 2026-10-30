@@ -24,6 +24,9 @@ pub struct OpenRunRequest {
     pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+    /// 可选：创建 Run 时冻结的协议与凭据引用（旧调用方不传即沿用旧行为）。
+    pub protocol: Option<String>,
+    pub credential_ref: Option<String>,
 }
 
 #[tauri::command]
@@ -101,6 +104,8 @@ pub async fn open_run(
             repair_budget: request.repair_budget,
             endpoint: request.endpoint,
             allow_localhost_http: request.allow_localhost_http,
+            protocol: request.protocol,
+            credential_ref: request.credential_ref,
         })
         .await
 }

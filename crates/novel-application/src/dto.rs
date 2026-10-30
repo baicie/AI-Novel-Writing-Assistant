@@ -391,6 +391,12 @@ pub struct RunContract {
     pub repair_budget: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+    /// 冻结的协议判别字段；旧记录没有该字段，按默认处理。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    /// 冻结的凭据引用（不含密钥正文）；旧记录没有则回退到 `provider`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -80,7 +80,7 @@ fn preview_expired() -> ProviderError {
     error
 }
 
-fn service(state: &AppState) -> ProviderService {
+pub(crate) fn service(state: &AppState) -> ProviderService {
     let vault: std::sync::Arc<dyn novel_application::CredentialVault> =
         std::sync::Arc::new(OsCredentialVault::new(state.secrets.clone()));
     let intents: std::sync::Arc<dyn novel_application::CredentialIntents> = state.kernel.clone();
@@ -457,6 +457,25 @@ pub async fn reconcile_credential_intents(
     service(&state)
         .reconcile_credentials(novel_platform::now_ms())
         .await
+}
+
+/// Provider 错误 → 应用错误：码值映射到既有错误语义，消息保持原样。
+pub(crate) fn to_app_error(error: ProviderError) -> novel_application::AppError {
+    match error.code {
+        novel_application::ProviderErrorCode::Validation => {
+            novel_application::AppError::validation(error.message)
+        }
+        novel_application::ProviderErrorCode::Conflict => {
+            novel_application::AppError::conflict(error.message)
+        }
+        novel_application::ProviderErrorCode::NotFound => {
+            novel_application::AppError::not_found(error.message)
+        }
+        novel_application::ProviderErrorCode::InUse => {
+            novel_application::AppError::conflict(error.message)
+        }
+        _ => novel_application::AppError::integrity(error.message),
+    }
 }
 
 #[cfg(test)]

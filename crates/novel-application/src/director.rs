@@ -37,6 +37,9 @@ pub struct OpenRunInput {
     pub max_automatic_retries: u8,
     pub repair_budget: Option<u8>,
     pub endpoint: String,
+    /// 可选的冻结协议与凭据引用；缺省表示沿用旧行为。
+    pub protocol: Option<String>,
+    pub credential_ref: Option<String>,
     pub allow_localhost_http: bool,
 }
 
@@ -506,6 +509,8 @@ impl DirectorService {
             max_automatic_retries: input.max_automatic_retries,
             repair_budget: input.repair_budget.unwrap_or(0),
             endpoint: input.endpoint.clone(),
+            protocol: input.protocol.clone(),
+            credential_ref: input.credential_ref.clone(),
             allow_localhost_http: input.allow_localhost_http,
         };
         let request_hash = json_hash(&OpenRunHash {

@@ -388,7 +388,13 @@ impl Worker {
         let summary = summarize(&prompt);
         let api_key = self
             .secrets
-            .api_key(&claimed.contract.provider)
+            .api_key(
+                claimed
+                    .contract
+                    .credential_ref
+                    .as_deref()
+                    .unwrap_or(&claimed.contract.provider),
+            )
             .await?
             .unwrap_or_default();
         let cancel = CancellationToken::new();
@@ -612,7 +618,13 @@ impl Worker {
         }
         let api_key = self
             .secrets
-            .api_key(&claimed.contract.provider)
+            .api_key(
+                claimed
+                    .contract
+                    .credential_ref
+                    .as_deref()
+                    .unwrap_or(&claimed.contract.provider),
+            )
             .await?
             .unwrap_or_default();
         let cancel = CancellationToken::new();
@@ -1268,7 +1280,13 @@ async fn execute_structured(
     }
     let api_key = worker
         .secrets
-        .api_key(&claimed.contract.provider)
+        .api_key(
+            claimed
+                .contract
+                .credential_ref
+                .as_deref()
+                .unwrap_or(&claimed.contract.provider),
+        )
         .await?
         .unwrap_or_default();
     let cancel = CancellationToken::new();
