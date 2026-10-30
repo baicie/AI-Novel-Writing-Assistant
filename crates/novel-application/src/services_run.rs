@@ -41,8 +41,6 @@ impl RunUseCases for DirectorService {
             max_automatic_retries: 3,
             repair_budget: None,
             endpoint: String::new(),
-            protocol: None,
-            credential_ref: None,
             allow_localhost_http: false,
         };
 
@@ -140,8 +138,6 @@ mod tests {
             max_automatic_retries: 3,
             repair_budget: None,
             endpoint: String::new(),
-            protocol: None,
-            credential_ref: None,
             allow_localhost_http: false,
         };
 
