@@ -1,6 +1,6 @@
 # 模型配置与推理强度：代码质量审查结论
 
-审查范围：本会话围绕「桌面模型来源 + 推理强度」的 8 个提交（`a827a10e`…`4a335086`，均未推送）。
+审查范围：本会话围绕「桌面模型来源 + 推理强度」的 10 个提交（`a827a10e`…`d1b95e58`，均未推送）。
 审查目标：在不改变产品行为的前提下，找出结构、重复、错误处理、安全、文案与测试缺口，并处理低风险项。
 
 ## 已处理（行为等价，有测试证据）
@@ -13,9 +13,10 @@
 | Q4 | `src-tauri/src/commands/model.rs` | `let _ = sync_legacy_setup_to_registry(...)` 静默吞错，注册表同步失败无痕 | 改为失败时 `tracing::warn`，用户路径行为不变 |
 | Q5 | `client/tests` | 新增的两条纯函数规则没有测试 | 新增 `desktopModelRules.test.js`（明文 http 判定 + 错误文案优先级） |
 | Q6 | 发布说明 / README | 8 个用户可见提交没有更新发布说明，README 还留着两个历史日期块 | 合并到当日条目；README 只保留最新日期块 + 历史链接 |
+| Q7 | `crates/novel-platform/src/secrets.rs` | 启用 `os-keychain` 特征时 clippy 报两处 `collapsible_if`，连带 `-D warnings` 门槛失败 | 改为 `is_ok_and` / `ok().and_then(...)` 等价写法，并补回退文件往返用例（写入可读、0600、删除后读不到） |
 
-验证：`pnpm --filter @ai-novel/client test` 211 passed、`typecheck` 通过、`cargo check -p novel-desktop --lib` 无错、
-`e2e/provider-selector.e2e.js` 在真实 app 里断言选择器与绑定落库。
+验证：`cargo fmt --all -- --check` 干净；`cargo clippy -p novel-desktop -p novel-llm --lib -- -D warnings` 通过；`cargo test -p novel-platform --lib` 4 passed、`cargo test -p novel-llm --lib` 24 passed、
+`e2e/provider-selector.e2e.js` 此前已在真实 app 里断言选择器与绑定落库。
 
 ## 记录在案但本轮不处理（含原因）
 
