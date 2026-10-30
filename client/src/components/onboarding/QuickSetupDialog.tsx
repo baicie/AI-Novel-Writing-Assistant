@@ -23,6 +23,7 @@ import type { LLMProvider } from "@ai-novel/shared/types/llm";
 import { completeQuickSetup, getQuickSetupStatus } from "@/api/onboarding";
 import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
 import { saveModelSetup } from "@/platform/desktopTransport";
+import { providerClient } from "@/platform/providerTransport";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { previewCustomProviderModels } from "@/api/settings";
 import { queryKeys } from "@/api/queryKeys";
@@ -187,10 +188,24 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
   });
 
   const previewMutation = useMutation({
-    mutationFn: () => previewCustomProviderModels({
-      key: form.apiKey.trim() || undefined,
-      baseURL: form.baseURL.trim(),
-    }),
+    mutationFn: async () => {
+      const baseURL = form.baseURL.trim();
+      // 桌面端由本地内核直接请求网关，不经过网页版厂商接口。
+      if (shouldUseDesktopApiAdapter()) {
+        const preview = await providerClient.discover({
+          protocol: "openai-compatible",
+          baseUrl: baseURL,
+          apiKey: form.apiKey.trim() || null,
+          allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(baseURL),
+        });
+        const models = preview.models.map((item) => item.modelId);
+        return { data: { models, defaultModel: models[0] ?? "" } };
+      }
+      return previewCustomProviderModels({
+        key: form.apiKey.trim() || undefined,
+        baseURL,
+      });
+    },
     onSuccess: (response) => {
       const models = response.data?.models ?? [];
       setCustomModels(models);

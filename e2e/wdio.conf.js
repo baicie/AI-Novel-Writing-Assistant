@@ -6,6 +6,7 @@ export const config = {
     "./provider-smoke.e2e.js",
     "./provider-flow.e2e.js",
     "./provider-no-missing-routes.e2e.js",
+    "./quick-setup-models.e2e.js",
   ],
   maxInstances: 1,
   logLevel: "warn",

@@ -193,6 +193,37 @@ async function desktopConnectivity(): Promise<unknown[]> {
   });
 }
 
+
+// 网页版的「预览自定义厂商模型」在桌面端就是本地发现：同样只取候选，不落库。
+async function desktopPreviewModels(payload: JsonRecord): Promise<unknown> {
+  const baseUrl = String(payload.baseURL ?? "").trim();
+  if (!baseUrl) return { models: [], defaultModel: "" };
+  const preview = await providerClient.discover({
+    protocol: "openai-compatible",
+    baseUrl,
+    apiKey: typeof payload.key === "string" && payload.key.trim() ? payload.key.trim() : null,
+    allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(baseUrl),
+  });
+  const models = preview.models.map((item) => item.modelId);
+  return { models, defaultModel: models[0] ?? "" };
+}
+
+// 网页版的「刷新某厂商模型列表」在桌面端用已保存的地址与密钥重新发现。
+async function desktopRefreshModels(providerId: string): Promise<unknown> {
+  const profiles = await providerClient.listProfiles();
+  const profile = profiles.find((item) => item.id === providerId);
+  if (!profile) return { provider: providerId, models: [], currentModel: "" };
+  const preview = await providerClient.discover({
+    providerId: profile.id,
+    protocol: "openai-compatible",
+    baseUrl: profile.baseUrl,
+    apiKey: null,
+    allowLocalhostHttp: profile.allowLocalhostHttp,
+  });
+  const models = preview.models.map((item) => item.modelId);
+  return { provider: providerId, models, currentModel: models[0] ?? "" };
+}
+
 function ok<T>(data: T): ApiResponse<T> {
   return { success: true, data };
 }
@@ -574,6 +605,13 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   if (path === "/settings/llm-selection" && method === "put") return asRecord(config.data);
   if (path === "/onboarding/first-novel" && method === "get") return desktopOnboarding();
   if (path === "/auto-director/follow-ups/overview" && method === "get") return emptyFollowUps();
+  if (path === "/settings/custom-providers/models" && method === "post") {
+    return desktopPreviewModels(asRecord(config.data));
+  }
+  {
+    const refresh = path.match(/^\/settings\/api-keys\/([^/]+)\/refresh-models$/);
+    if (refresh && method === "post") return desktopRefreshModels(decodeURIComponent(refresh[1]!));
+  }
   if (path === "/llm/model-routes" && method === "get") return desktopModelRoutes();
   if (path === "/llm/model-routes/connectivity" && method === "post") return desktopConnectivity();
   if (path === "/tasks/recovery-candidates" && method === "get") return [];
