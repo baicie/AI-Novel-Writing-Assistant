@@ -61,7 +61,11 @@ async fn mock_models(body: &'static str) -> String {
 #[tokio::test]
 async fn provider_flow_create_discover_apply_bind_resolve() {
     let dir = tempfile::tempdir().unwrap();
-    let kernel = Arc::new(SqliteKernel::open(&dir.path().join("novel.sqlite")).await.unwrap());
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
     let vault = Arc::new(MemoryVault::default());
     let service = ProviderService::new(kernel.clone(), vault.clone(), kernel.clone());
 
@@ -87,7 +91,8 @@ async fn provider_flow_create_discover_apply_bind_resolve() {
     assert_eq!(created.revision, 1);
 
     // 2. 取模型（真实适配器打本地 mock 服务）
-    let base = mock_models(r#"{"data":[{"id":"model-a","context_window":32000},{"id":"model-b"}]}"#).await;
+    let base =
+        mock_models(r#"{"data":[{"id":"model-a","context_window":32000},{"id":"model-b"}]}"#).await;
     let outcome = OpenAiCompatibleDiscovery
         .discover(
             &DiscoveryRequest::new(base, "sk-test", true).with_timeout(Duration::from_millis(500)),
@@ -114,18 +119,16 @@ async fn provider_flow_create_discover_apply_bind_resolve() {
         })
         .collect();
     let applied = kernel
-        .apply_discovered_models(
-            "gw",
-            &candidates,
-            &["model-a".to_string()],
-            Some(1),
-            2,
-        )
+        .apply_discovered_models("gw", &candidates, &["model-a".to_string()], Some(1), 2)
         .await
         .unwrap();
     assert_eq!(applied.added, 1);
     assert_eq!(applied.revision, 2);
-    assert_eq!(kernel.list_models("gw").await.unwrap().len(), 1, "只加入被选中的模型");
+    assert_eq!(
+        kernel.list_models("gw").await.unwrap().len(),
+        1,
+        "只加入被选中的模型"
+    );
 
     // 4. 绑定并解析路由
     service
@@ -145,13 +148,22 @@ async fn provider_flow_create_discover_apply_bind_resolve() {
     assert_eq!(route.model_id, "model-a");
     assert_eq!(route.endpoint, "http://127.0.0.1:1/v1");
     assert_eq!(route.credential_ref, "gw");
-    assert!(!serde_json::to_string(&route).unwrap().contains("sk-test"), "路由不含密钥");
+    assert!(
+        !serde_json::to_string(&route).unwrap().contains("sk-test"),
+        "路由不含密钥"
+    );
 
     // 5. 冻结路由校验 + 新库重开后仍在
     assert!(service.validate_frozen_route("gw", "model-a").await.is_ok());
     kernel.pool().close().await;
-    let reopened = SqliteKernel::open(&dir.path().join("novel.sqlite")).await.unwrap();
-    assert_eq!(reopened.list_models("gw").await.unwrap().len(), 1, "重启后配置还在");
+    let reopened = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.list_models("gw").await.unwrap().len(),
+        1,
+        "重启后配置还在"
+    );
     assert_eq!(reopened.list_model_bindings().await.unwrap().len(), 1);
     reopened.pool().close().await;
 }
