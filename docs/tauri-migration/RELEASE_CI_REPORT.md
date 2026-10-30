@@ -221,3 +221,20 @@ UPDATER_SIGNED_VERIFIED（已作为预发布公开发布）
 `releases/latest` 仍然 404，因此预发布版本不会自动推送给现有用户。
 
 仍未执行：安装 / 升级的人工验收（P6），以及把 Draft 真正公开（需要显式授权）。
+
+## 十三、GitHub Actions 被禁用（2026-10-30）
+
+推送新提交与 Tag 后没有任何工作流被创建，手动触发返回：
+
+```text
+HTTP 422: Actions has been disabled for this repository.
+```
+
+同一时间 `gh api repos/.../actions/permissions` 仍返回 `enabled: true`，仓库本身未归档、未禁用、
+可见性仍是 public，因此这不是仓库设置问题，需要到 GitHub 侧（Billing / Status）确认。
+
+影响与当时采取的措施：
+
+- 无法再用流水线产出 Windows / Linux 安装包，也无法产出 Draft。
+- macOS 包在本地用同一套签名与更新包配置构建后手动发布（`tauri-v0.1.1-beta.4`，仅 macOS）。
+- 流水线代码本身没有改动；Actions 恢复后重跑同一 Tag 即可补齐其它平台。
