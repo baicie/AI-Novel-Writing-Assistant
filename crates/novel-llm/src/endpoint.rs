@@ -46,20 +46,44 @@ pub fn authorize_endpoint(endpoint: &str, allow_localhost_http: bool) -> Result<
     }
     let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
     let local = is_loopback(host);
+    // 明文 HTTP：与主流的本地/自建网关一致——只在加密不可用且用户明确允许时放行，
+    // 元数据与链路本地地址始终拒绝，避免把密钥发到云主机元数据服务。
+    let metadata = is_metadata_host(host);
     match url.scheme() {
         "https" if local && allow_localhost_http => Ok(()),
         "https" if local => Err(LlmError::EndpointRejected(
             "本地模型地址需要单独允许".into(),
         )),
         "https" if !is_blocked_host(host) => Ok(()),
-        "http" if local && allow_localhost_http => Ok(()),
-        "http" if local => Err(LlmError::EndpointRejected(
-            "本地模型地址需要单独允许".into(),
+        "http" if metadata => Err(LlmError::EndpointRejected(
+            "不能把密钥发到元数据地址".into(),
+        )),
+        "http" if allow_localhost_http => Ok(()),
+        "http" => Err(LlmError::EndpointRejected(
+            "明文 HTTP 地址需要单独允许".into(),
         )),
         "https" => Err(LlmError::EndpointRejected(
             "不能把密钥发到内网或元数据地址".into(),
         )),
-        _ => Err(LlmError::EndpointRejected("模型地址只接受 HTTPS".into())),
+        _ => Err(LlmError::EndpointRejected(
+            "模型地址只接受 HTTP 或 HTTPS".into(),
+        )),
+    }
+}
+
+fn is_metadata_host(host: &str) -> bool {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => {
+            let octets = ip.octets();
+            // 云主机元数据：169.254.169.254 / 100.100.100.200 所在网段
+            (octets[0] == 169 && octets[1] == 254)
+                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        }
+        Ok(IpAddr::V6(ip)) => ip.is_unicast_link_local(),
+        Err(_) => {
+            host.eq_ignore_ascii_case("metadata")
+                || host.eq_ignore_ascii_case("metadata.google.internal")
+        }
     }
 }
 
@@ -105,5 +129,9 @@ mod tests {
         assert!(authorize_endpoint("https://169.254.169.254/latest", false).is_err());
         assert!(authorize_endpoint("https://user:secret@api.example.com/v1", false).is_err());
         assert!(authorize_endpoint("file:///tmp/model", false).is_err());
+        // 自建/公网明文网关：默认拒绝，显式允许后可用；元数据地址始终拒绝
+        assert!(authorize_endpoint("http://82.156.234.84:7863/v1", false).is_err());
+        assert!(authorize_endpoint("http://82.156.234.84:7863/v1", true).is_ok());
+        assert!(authorize_endpoint("http://169.254.169.254/latest", true).is_err());
     }
 }

@@ -58,9 +58,12 @@ export function presetForEndpoint(endpoint: string): DesktopModelPreset {
   return matched ?? DESKTOP_MODEL_PRESETS[DESKTOP_MODEL_PRESETS.length - 1]!;
 }
 
-/** 本地 http 地址需要显式允许，否则内核会拒绝明文请求。 */
+/**
+ * 明文 http 地址需要显式允许，否则内核会拒绝（自建网关常用 http）。
+ * 元数据地址仍会被内核拒绝，这个开关不会放开它们。
+ */
 export function requiresLocalhostPermission(endpoint: string): boolean {
-  return /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i.test(endpoint.trim());
+  return /^http:\/\//i.test(endpoint.trim());
 }
 
 export function validateModelForm(form: { endpoint: string; model: string; apiKey: string; hasSavedKey: boolean }): string | null {

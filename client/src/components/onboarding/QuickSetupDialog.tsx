@@ -23,6 +23,7 @@ import type { LLMProvider } from "@ai-novel/shared/types/llm";
 import { completeQuickSetup, getQuickSetupStatus } from "@/api/onboarding";
 import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
 import { formatDiscoveryError } from "@/pages/settings/providerRegistryModel";
+import { requiresLocalhostPermission } from "@/pages/settings/desktopModelPresets";
 import { saveModelSetup } from "@/platform/desktopTransport";
 import { providerClient } from "@/platform/providerTransport";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
@@ -146,7 +147,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
       await saveModelSetup({
         endpoint,
         model: payload.model,
-        allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(endpoint),
+        allowLocalhostHttp: requiresLocalhostPermission(endpoint),
         apiKey: payload.apiKey?.trim() ?? "",
       });
       const statusResponse = await getQuickSetupStatus();
@@ -197,7 +198,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
           protocol: "openai-compatible",
           baseUrl: baseURL,
           apiKey: form.apiKey.trim() || null,
-          allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(baseURL),
+          allowLocalhostHttp: requiresLocalhostPermission(baseURL),
         });
         const models = preview.models.map((item) => item.modelId);
         return { data: { models, defaultModel: models[0] ?? "" } };

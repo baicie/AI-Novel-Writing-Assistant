@@ -202,7 +202,7 @@ async function desktopPreviewModels(payload: JsonRecord): Promise<unknown> {
     protocol: "openai-compatible",
     baseUrl,
     apiKey: typeof payload.key === "string" && payload.key.trim() ? payload.key.trim() : null,
-    allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(baseUrl),
+    allowLocalhostHttp: /^http:\/\//i.test(baseUrl),
   });
   const models = preview.models.map((item) => item.modelId);
   return { models, defaultModel: models[0] ?? "" };
