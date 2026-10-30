@@ -144,7 +144,10 @@ async fn deleting_provider_cascades_models_and_bindings() {
         .await
         .unwrap();
 
-    kernel.delete_provider("deepseek").await.unwrap();
+    kernel
+        .delete_provider_guarded("deepseek", true)
+        .await
+        .unwrap();
     assert!(kernel.list_providers().await.unwrap().is_empty());
     assert!(kernel.list_models("deepseek").await.unwrap().is_empty());
     assert!(kernel.list_model_bindings().await.unwrap().is_empty());
@@ -184,7 +187,9 @@ async fn bindings_are_upserted_per_task() {
 #[tokio::test]
 async fn legacy_shaped_default_row_stays_readable() {
     let dir = tempdir().unwrap();
-    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite")).await.unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
     sqlx::query(
         "INSERT INTO provider_credential(id, provider, secret_ref, endpoint, model, allow_localhost_http, created_at)
          VALUES ('default','openai-compatible','openai-compatible','https://old.example.com/v1','old-model',0,1)",
@@ -193,13 +198,24 @@ async fn legacy_shaped_default_row_stays_readable() {
     .await
     .unwrap();
 
-    let legacy = kernel.load_model_setup().await.unwrap().expect("老配置要还能读");
+    let legacy = kernel
+        .load_model_setup()
+        .await
+        .unwrap()
+        .expect("老配置要还能读");
     assert_eq!(legacy.endpoint, "https://old.example.com/v1");
     assert_eq!(legacy.model, "old-model");
 
     let providers = kernel.list_providers().await.unwrap();
-    let default = providers.iter().find(|item| item.id == "default").expect("default 行仍在");
-    assert_eq!(default.protocol, ProviderProtocol::OpenAiCompatible, "新列取默认值");
+    let default = providers
+        .iter()
+        .find(|item| item.id == "default")
+        .expect("default 行仍在");
+    assert_eq!(
+        default.protocol,
+        ProviderProtocol::OpenAiCompatible,
+        "新列取默认值"
+    );
     assert!(!default.is_builtin);
     kernel.pool().close().await;
 }
@@ -216,4 +232,229 @@ async fn migrations_are_idempotent() {
     let providers = second.list_providers().await.unwrap();
     assert!(providers.is_empty());
     second.pool().close().await;
+}
+fn candidate(provider_id: &str, model_id: &str, context: Option<u32>) -> ModelProfile {
+    let mut profile = model(provider_id, model_id);
+    profile.capabilities.context_window = context;
+    profile.source = ModelSource::Discovered;
+    profile
+}
+
+#[tokio::test]
+async fn apply_adds_new_models_without_touching_others() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 1)
+        .await
+        .unwrap();
+    kernel
+        .upsert_model(&model("gw", "a"), false, 2)
+        .await
+        .unwrap();
+
+    let outcome = kernel
+        .apply_discovered_models(
+            "gw",
+            &[
+                candidate("gw", "a", Some(1_000)),
+                candidate("gw", "b", Some(2_000)),
+            ],
+            &["a".to_string(), "b".to_string()],
+            Some(0),
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.added, 1);
+    assert_eq!(outcome.updated, 1);
+    assert_eq!(outcome.revision, 1);
+
+    let models = kernel.list_models("gw").await.unwrap();
+    let ids: Vec<&str> = models.iter().map(|item| item.model_id.as_str()).collect();
+    assert_eq!(ids, vec!["a", "b"], "未选中的模型不能被删");
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn apply_with_empty_selection_is_a_noop() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 1)
+        .await
+        .unwrap();
+    kernel
+        .upsert_model(&model("gw", "a"), false, 2)
+        .await
+        .unwrap();
+
+    let outcome = kernel
+        .apply_discovered_models("gw", &[], &[], None, 3)
+        .await
+        .unwrap();
+    assert_eq!(outcome.added, 0);
+    assert_eq!(outcome.updated, 0);
+    assert_eq!(
+        kernel.list_models("gw").await.unwrap().len(),
+        1,
+        "空选择绝不能清空模型"
+    );
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn apply_keeps_user_overrides() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 1)
+        .await
+        .unwrap();
+    let mut user_model = model("gw", "a");
+    user_model.source = ModelSource::User;
+    user_model.capabilities.context_window = Some(64_000);
+    user_model.overridden = BTreeSet::from([CapabilityField::ContextWindow]);
+    kernel.upsert_model(&user_model, true, 2).await.unwrap();
+
+    let outcome = kernel
+        .apply_discovered_models(
+            "gw",
+            &[candidate("gw", "a", Some(1_000_000))],
+            &["a".to_string()],
+            None,
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.preserved, 1);
+
+    let models = kernel.list_models("gw").await.unwrap();
+    assert_eq!(
+        models[0].capabilities.context_window,
+        Some(64_000),
+        "用户改过的上下文不能被远端覆盖"
+    );
+    assert_eq!(
+        models[0].capabilities.supports_tools,
+        Some(true),
+        "未覆盖字段可以吸收远端值"
+    );
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn stale_discovery_is_rejected() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 1)
+        .await
+        .unwrap();
+    kernel
+        .apply_discovered_models(
+            "gw",
+            &[candidate("gw", "a", None)],
+            &["a".to_string()],
+            None,
+            2,
+        )
+        .await
+        .unwrap();
+
+    let error = kernel
+        .apply_discovered_models(
+            "gw",
+            &[candidate("gw", "b", None)],
+            &["b".to_string()],
+            Some(0),
+            3,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, novel_application::PortError::Conflict(_)),
+        "旧版本号必须冲突"
+    );
+    let ids: Vec<String> = kernel
+        .list_models("gw")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| m.model_id)
+        .collect();
+    assert_eq!(ids, vec!["a".to_string()], "冲突时不能写入任何东西");
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn delete_is_blocked_while_bindings_exist() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .upsert_provider(&provider("gw", "https://gw.example.com/v1"), 1)
+        .await
+        .unwrap();
+    kernel
+        .upsert_model(&model("gw", "a"), false, 2)
+        .await
+        .unwrap();
+    kernel
+        .set_model_binding(
+            &ModelBinding {
+                task_type: "chapter".into(),
+                provider_id: "gw".into(),
+                model_id: "a".into(),
+                reasoning_effort: None,
+            },
+            3,
+        )
+        .await
+        .unwrap();
+
+    let error = kernel
+        .delete_provider_guarded("gw", false)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, novel_application::PortError::Conflict(_)));
+    assert_eq!(
+        kernel.list_providers().await.unwrap().len(),
+        1,
+        "被引用时不能删"
+    );
+
+    kernel.delete_provider_guarded("gw", true).await.unwrap();
+    assert!(kernel.list_providers().await.unwrap().is_empty());
+    kernel.pool().close().await;
+}
+
+#[tokio::test]
+async fn default_provider_delete_needs_confirmation() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .save_model_setup("https://api.deepseek.com/v1", "deepseek-chat", false, 1)
+        .await
+        .unwrap();
+    let error = kernel
+        .delete_provider_guarded("default", false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, novel_application::PortError::Conflict(_)),
+        "默认配置需要有意识确认"
+    );
+    kernel.pool().close().await;
 }

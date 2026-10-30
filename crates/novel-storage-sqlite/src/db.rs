@@ -317,6 +317,10 @@ pub(crate) const MIGRATION_SCRIPTS: &[(&str, &str)] = &[
         "0022",
         include_str!("../../../migrations/0022_provider_registry.sql"),
     ),
+    (
+        "0023",
+        include_str!("../../../migrations/0023_provider_revision.sql"),
+    ),
 ];
 
 async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {

@@ -86,6 +86,7 @@ impl SqliteKernel {
         Ok(providers)
     }
 
+    /// 内部级联删除：业务删除请走 `delete_provider_guarded`。
     pub async fn delete_provider(&self, provider_id: &str) -> Result<(), PortError> {
         let mut tx = self.pool.begin().await.map_err(map_sql)?;
         for statement in [
@@ -323,4 +324,219 @@ fn json_column<T: serde::de::DeserializeOwned>(
             .map_err(|error| PortError::Storage(format!("{column} 反序列化失败：{error}"))),
         None => Ok(None),
     }
+}
+/// 发现结果的确认结果：只统计与候选相关的三种情况，从不删除未出现的模型。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyDiscoveredOutcome {
+    pub added: usize,
+    pub updated: usize,
+    /// 因为用户覆盖而被保留原值的字段数（模型数）。
+    pub preserved: usize,
+    pub revision: i64,
+}
+
+impl SqliteKernel {
+    pub async fn provider_revision(&self, provider_id: &str) -> Result<Option<i64>, PortError> {
+        let row = sqlx::query("SELECT revision FROM provider_credential WHERE id = ?")
+            .bind(provider_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        row.map(|row| row.try_get::<i64, _>("revision").map_err(map_sql))
+            .transpose()
+    }
+
+    /// 确认发现结果：**只做追加与合并**，永不删除、永不清空、永不覆盖用户改过的字段。
+    ///
+    /// - `selected` 为空 → 直接返回（空列表不能当作「清空模型」）；
+    /// - `expected_revision` 与库里不一致 → `PortError::Conflict`（stale discovery 不落库）；
+    /// - 已在库里但这次没被选/没被返回的模型保持原样；
+    /// - 全程一个事务，失败即回滚。
+    pub async fn apply_discovered_models(
+        &self,
+        provider_id: &str,
+        candidates: &[ModelProfile],
+        selected: &[String],
+        expected_revision: Option<i64>,
+        now_ms: i64,
+    ) -> Result<ApplyDiscoveredOutcome, PortError> {
+        let current = self
+            .provider_revision(provider_id)
+            .await?
+            .ok_or_else(|| PortError::NotFound(format!("模型来源不存在：{provider_id}")))?;
+        if expected_revision.is_some_and(|expected| expected != current) {
+            return Err(PortError::Conflict(format!(
+                "配置已被修改（期望版本 {}，当前 {current}），请重新获取模型列表",
+                expected_revision.unwrap_or_default()
+            )));
+        }
+        if selected.is_empty() {
+            return Ok(ApplyDiscoveredOutcome {
+                added: 0,
+                updated: 0,
+                preserved: 0,
+                revision: current,
+            });
+        }
+
+        let existing: std::collections::HashMap<String, ModelProfile> = self
+            .list_models(provider_id)
+            .await?
+            .into_iter()
+            .map(|model| (model.model_id.clone(), model))
+            .collect();
+
+        let mut added = 0usize;
+        let mut updated = 0usize;
+        let mut preserved = 0usize;
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        for model_id in selected {
+            let Some(candidate) = candidates.iter().find(|item| &item.model_id == model_id) else {
+                // 候选已经过期（stale discovery），跳过而不是凭空造一条模型
+                continue;
+            };
+            let merged = match existing.get(model_id) {
+                Some(current_model) => {
+                    let merged = current_model.apply_discovered(candidate);
+                    if !current_model.overridden.is_empty() {
+                        preserved += 1;
+                    }
+                    merged
+                }
+                None => candidate.clone(),
+            };
+            write_model_row(&mut tx, &merged, existing.contains_key(model_id), now_ms).await?;
+            if existing.contains_key(model_id) {
+                updated += 1;
+            } else {
+                added += 1;
+            }
+        }
+        let next_revision = current + 1;
+        sqlx::query("UPDATE provider_credential SET revision = ?, updated_at = ? WHERE id = ?")
+            .bind(next_revision)
+            .bind(now_ms)
+            .bind(provider_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+        Ok(ApplyDiscoveredOutcome {
+            added,
+            updated,
+            preserved,
+            revision: next_revision,
+        })
+    }
+
+    /// 删除 provider：默认拒绝「仍被绑定引用」或「仍是默认模型配置」的删除。
+    pub async fn delete_provider_guarded(
+        &self,
+        provider_id: &str,
+        force: bool,
+    ) -> Result<(), PortError> {
+        let bindings: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM model_binding WHERE provider_id = ?")
+                .bind(provider_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(map_sql)?;
+        if bindings > 0 && !force {
+            return Err(PortError::Conflict(format!(
+                "还有 {bindings} 条任务绑定在使用这个模型来源，先改绑定再删除"
+            )));
+        }
+        if provider_id == DEFAULT_PROVIDER_ID && !force {
+            return Err(PortError::Conflict(
+                "这是桌面版当前使用的默认模型配置，删除后创作会失去模型来源".into(),
+            ));
+        }
+        self.delete_provider(provider_id).await
+    }
+}
+
+async fn write_model_row<'a>(
+    tx: &mut sqlx::Transaction<'a, sqlx::Sqlite>,
+    profile: &ModelProfile,
+    exists: bool,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    let overrides = if profile.overridden.is_empty() {
+        None
+    } else {
+        let fields: Vec<CapabilityField> = profile.overridden.iter().copied().collect();
+        Some(
+            serde_json::to_string(&fields)
+                .map_err(|error| PortError::Storage(format!("覆盖字段序列化失败：{error}")))?,
+        )
+    };
+    let modalities = profile
+        .capabilities
+        .input_modalities
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| PortError::Storage(format!("模态序列化失败：{error}")))?;
+    let efforts = profile
+        .capabilities
+        .reasoning_efforts
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| PortError::Storage(format!("推理档位序列化失败：{error}")))?;
+    sqlx::query(
+        "INSERT INTO provider_model(
+             provider_id, model_id, display_name, context_window, max_output_tokens,
+             supports_streaming, supports_tools, supports_reasoning, input_modalities,
+             reasoning_efforts, source, user_overrides, created_at, updated_at, revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(provider_id, model_id) DO UPDATE SET
+           display_name = excluded.display_name,
+           context_window = excluded.context_window,
+           max_output_tokens = excluded.max_output_tokens,
+           supports_streaming = excluded.supports_streaming,
+           supports_tools = excluded.supports_tools,
+           supports_reasoning = excluded.supports_reasoning,
+           input_modalities = excluded.input_modalities,
+           reasoning_efforts = excluded.reasoning_efforts,
+           source = excluded.source,
+           user_overrides = excluded.user_overrides,
+           updated_at = excluded.updated_at,
+           revision = provider_model.revision + 1",
+    )
+    .bind(&profile.provider_id)
+    .bind(&profile.model_id)
+    .bind(&profile.display_name)
+    .bind(profile.capabilities.context_window.map(i64::from))
+    .bind(profile.capabilities.max_output_tokens.map(i64::from))
+    .bind(
+        profile
+            .capabilities
+            .supports_streaming
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(
+        profile
+            .capabilities
+            .supports_tools
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(
+        profile
+            .capabilities
+            .supports_reasoning
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(modalities)
+    .bind(efforts)
+    .bind(source_str(profile.source))
+    .bind(overrides)
+    .bind(now_ms)
+    .bind(now_ms)
+    .execute(&mut **tx)
+    .await
+    .map_err(map_sql)?;
+    let _ = exists;
+    Ok(())
 }
