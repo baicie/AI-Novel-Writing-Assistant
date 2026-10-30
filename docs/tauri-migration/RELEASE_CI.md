@@ -6,7 +6,6 @@
 | --- | --- | --- |
 | `.github/workflows/tauri-ci.yml` | PR / 推送到 `migration/tauri-2-rust`、`main`（仅 Tauri 路径）/ 可复用调用 | 质量门禁 + 双平台真实 bundle 检查 |
 | `.github/workflows/tauri-release.yml` | Tag `tauri-v*` / 手动（受控） | 正式与预发布：Draft → 校验 → 显式公开 |
-| `.github/workflows/tauri-nightly.yml` | 每日 18:00 UTC / 手动 | 夜间 Prerelease，独立通道 |
 
 既有的 `desktop-release.yml`、`desktop-beta-release.yml`、`desktop-dev-release.yml`（Electron）、`site-pages.yml`、
 `tauri-kernel-check.yml` **均未改动**。Tauri 与 Electron 分属不同 Tag 命名空间，互不覆盖。
@@ -17,7 +16,6 @@
 | --- | --- | --- | --- |
 | 正式版 | `tauri-v1.2.3` | stable | 仅 updater-signed 且显式 `publish=true` |
 | 预发布 | `tauri-v1.2.3-beta.1` | prerelease | 可选 |
-| 夜间版 | `tauri-nightly-YYYYMMDD-<sha7>` | nightly | 独立索引文件 |
 | Electron（既有） | `v1.2.3` / `desktop-v*` | release | 与本流水线无关 |
 
 > `v*` 仍归 Electron。等 Electron 发布线退役后，再单独迁移命名空间。
@@ -73,17 +71,22 @@ pnpm tauri signer generate --ci -p "" -w ~/.config/biz-novel-studio/tauri-update
 
 失败时 Draft 保持不动，stable 索引不会被更新。
 
-## 7. Nightly 操作
+## 7. Nightly 通道已停用
 
-- 定时：每天 18:00 UTC；也可手动触发（`force=true` 可强制重建同一提交）
-- 版本号：`<base>-nightly.YYYYMMDD`，只写进本次构建的 `src-tauri/tauri.nightly.conf.json`，**不改源码版本**
-- 输出：Prerelease + `SHA256SUMS.txt`；配置了私钥时额外产出 `nightly-latest.json`（独立文件名）
-- 断言：nightly 资产里不允许出现 `latest.json`
+夜间流水线 `.github/workflows/tauri-nightly.yml` 已删除。原因：每天定时跑会占用三个平台的
+runner，而 macOS runner 本来就紧张，实际收益远低于占用成本。
+
+保留的兼容性：
+
+- Tag 解析仍能识别历史 `tauri-nightly-YYYYMMDD-<sha7>`（`scripts/tauri-release/versions.mjs`）
+- 更新索引仍支持 `nightly-latest.json` 这个文件名，避免历史发布无法解释
+
+需要夜间构建时，用发布流水线的 `workflow_dispatch` 手动指定 prerelease Tag 即可。
 
 ## 8. 本地等价验证
 
 ```bash
-pnpm run test:release-scripts        # 23 条脚本单测
+pnpm run test:release-scripts        # 31 条脚本单测
 pnpm run tauri:ci:check-workflows    # workflow 自检（禁止 || true / continue-on-error）
 pnpm run tauri:release:check-versions
 cargo clippy --workspace --exclude novel-http --lib -- -D warnings

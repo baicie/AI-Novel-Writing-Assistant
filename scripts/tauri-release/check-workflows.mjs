@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-export const WORKFLOWS = ["tauri-ci.yml", "tauri-release.yml", "tauri-nightly.yml"];
+export const WORKFLOWS = ["tauri-ci.yml", "tauri-release.yml"];
 
 export function checkWorkflowText(name, text) {
   const errors = [];
@@ -33,13 +33,6 @@ export function checkWorkflowText(name, text) {
     require(/gh release create/.test(text) && /--draft/.test(text), "release 必须先建 Draft");
     require(/inputs\.publish == true/.test(text), "正式发布必须显式要求 publish=true");
     require(/create_updater_artifacts/.test(text), "release 必须区分是否生成 updater 产物");
-  }
-
-  if (name === "tauri-nightly.yml") {
-    require(/schedule:/.test(text), "nightly 需要定时触发");
-    require(/--prerelease/.test(text), "nightly 必须发 Prerelease");
-    require(!/--out artifacts\/latest\.json/.test(text), "nightly 不能写 stable 的 latest.json");
-    require(/nightly-latest\.json/.test(text), "nightly 更新索引必须用独立文件名");
   }
 
   return { ok: errors.length === 0, errors };

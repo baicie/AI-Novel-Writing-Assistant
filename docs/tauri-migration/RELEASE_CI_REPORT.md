@@ -14,7 +14,7 @@
 | 现有链路审计与风险清单 | `docs/tauri-migration/RELEASE_CI_AUDIT.md` | 已交付 |
 | CI 流水线 | `.github/workflows/tauri-ci.yml` | 已交付（本地自检通过） |
 | 正式/预发布流水线 | `.github/workflows/tauri-release.yml` | 已交付（本地自检通过） |
-| Nightly 流水线 | `.github/workflows/tauri-nightly.yml` | 已交付（本地自检通过） |
+| Nightly 流水线 | `.github/workflows/tauri-nightly.yml` | 已删除（2026-10-30 停用，见文末第十四节） |
 | 发布脚本（版本/模式/清单/产物/自检） | `scripts/tauri-release/*` | 23 条单测通过 |
 | Updater 接入 | `src-tauri/Cargo.toml`、`src-tauri/src/lib.rs`、`src-tauri/tauri.updater.conf.json` | 本地实测产出 `.sig` |
 | 跨平台图标 | `src-tauri/icons/icon.ico` | 已生成（16–256 七档） |
@@ -238,3 +238,12 @@ HTTP 422: Actions has been disabled for this repository.
 - 无法再用流水线产出 Windows / Linux 安装包，也无法产出 Draft。
 - macOS 包在本地用同一套签名与更新包配置构建后手动发布（`tauri-v0.1.1-beta.4`，仅 macOS）。
 - 流水线代码本身没有改动；Actions 恢复后重跑同一 Tag 即可补齐其它平台。
+
+## 十四、夜间流水线停用（2026-10-30）
+
+删除 `.github/workflows/tauri-nightly.yml`。原因是定时构建每天占用三个平台的 runner，
+而 macOS runner 长期紧张，实际收益低于占用成本；停用后发布链路只保留
+`tauri-ci.yml`（PR/推送检查）与 `tauri-release.yml`（Tag 或手动触发的发布）。
+
+`scripts/tauri-release/check-workflows.mjs` 的 workflow 清单同步收敛为两个文件，
+脚本单测 31 条仍全部通过。
