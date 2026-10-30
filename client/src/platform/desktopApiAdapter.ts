@@ -7,40 +7,25 @@ import type {
 } from "axios";
 import { AxiosError as AxiosErrorClass, AxiosHeaders } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
-import type { Chapter, Novel } from "@ai-novel/shared/types/novel";
-import type { NovelDetailResponse, NovelListItem, NovelListResponse } from "@/api/novel/shared";
-import type { QuickSetupProviderOption, QuickSetupStatus } from "@ai-novel/shared/types/onboarding";
+import type { Chapter } from "@ai-novel/shared/types/novel";
+import type { NovelDetailResponse, NovelListResponse } from "@/api/novel/shared";
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
 import { providerClient } from "./providerTransport";
 import { needsPlaintextHttpPermission } from "./desktopModelRules";
+import {
+  appError,
+  asRecord,
+  detailToNovel,
+  iso,
+  ok,
+  runToTaskSummary,
+  summaryToListItem,
+  taskStatusForRun,
+  toQuickSetupStatus,
+} from "./desktopShapeAdapters";
 
 type JsonRecord = Record<string, unknown>;
-
-function iso(timestamp: number): string {
-  return new Date(timestamp).toISOString();
-}
-
-function asRecord(value: unknown): JsonRecord {
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      return parsed && typeof parsed === "object" ? parsed as JsonRecord : {};
-    } catch {
-      return {};
-    }
-  }
-  return value && typeof value === "object" ? value as JsonRecord : {};
-}
-
-function appError(error: unknown): { code: string; message: string; retryable: boolean } {
-  const record = asRecord(error);
-  return {
-    code: typeof record.code === "string" ? record.code : "INTEGRITY_ERROR",
-    message: typeof record.message === "string" ? record.message : "本地创作内核没有完成这次操作。",
-    retryable: record.retryable === true,
-  };
-}
 
 
 // 未映射的桌面路由会被记进应用日志，方便从用户日志里直接看到缺哪个接口。
@@ -225,40 +210,7 @@ async function desktopRefreshModels(providerId: string): Promise<unknown> {
   return { provider: providerId, models, currentModel: models[0] ?? "" };
 }
 
-function ok<T>(data: T): ApiResponse<T> {
-  return { success: true, data };
-}
 
-// 桌面内核只支持一套「地址 + 模型 + 密钥」配置，这里把内核状态映射成界面需要的形状。
-// 内核返回的字段比 Web 侧精简（没有 providers / routeCoverage），缺字段会让界面直接崩，必须补齐。
-function toQuickSetupStatus(raw: unknown): QuickSetupStatus {
-  const record = asRecord(raw);
-  const ready = record.readyForCreation === true;
-  const endpoint = typeof record.endpoint === "string" ? record.endpoint : "";
-  const model = typeof record.model === "string" ? record.model : "";
-  const provider: QuickSetupProviderOption = {
-    id: "openai-compatible",
-    kind: "custom",
-    name: "自定义接口",
-    requiresApiKey: true,
-    configured: ready,
-    active: ready,
-    currentModel: model,
-    defaultModel: "",
-    currentBaseURL: endpoint,
-    defaultBaseURL: "",
-    models: [],
-  };
-  return {
-    readyForCreation: ready,
-    providers: [provider],
-    selectedProvider: ready ? provider.id : null,
-    selectedModel: ready && model ? model : null,
-    routeCoverage: { configured: 0, total: 0, missingTaskTypes: [] },
-    blockingReasons: ready ? [] : ["先在设置里填好模型地址和 API Key。"],
-    recommendedAction: ready ? "start_creating" : "configure_provider",
-  };
-}
 function pathOf(config: AxiosRequestConfig): string {
   const raw = config.url ?? "";
   try {
@@ -280,102 +232,6 @@ function queryOf(config: AxiosRequestConfig): URLSearchParams {
     }
   });
   return search;
-}
-
-function summaryToListItem(novel: transport.NovelSummary): NovelListItem {
-  const updatedAt = iso(novel.updatedAt);
-  return {
-    id: novel.id,
-    title: novel.title,
-    description: novel.description,
-    commercialTags: [],
-    status: novel.status as NovelListItem["status"],
-    writingMode: novel.writingMode as NovelListItem["writingMode"],
-    creationExperience: novel.creationExperience as NovelListItem["creationExperience"],
-    narrativeForm: novel.narrativeForm as NovelListItem["narrativeForm"],
-    postGenerationStyleReviewEnabled: (novel as transport.NovelSummary & { postGenerationStyleReviewEnabled?: boolean }).postGenerationStyleReviewEnabled ?? false,
-    projectMode: novel.projectMode as NovelListItem["projectMode"],
-    createdAt: updatedAt,
-    updatedAt,
-    _count: { chapters: 0, characters: 0 },
-    latestAutoDirectorTask: null,
-    latestCreationStudioTask: null,
-  };
-}
-
-function detailToNovel(
-  detail: transport.NovelDetail,
-  chapters: transport.ChapterSnapshot[],
-  volumes: transport.VolumeSnapshot[],
-): NovelDetailResponse {
-  const createdAt = iso(detail.createdAt);
-  const updatedAt = iso(detail.updatedAt);
-  const chapterItems: Chapter[] = chapters.map((chapter) => ({
-    id: chapter.id,
-    novelId: chapter.novelId,
-    title: chapter.title,
-    content: chapter.content,
-    order: chapter.sortOrder,
-    officialVersion: chapter.officialVersion,
-    protection: chapter.protection,
-    generationState: chapter.content.trim() ? "drafted" : "planned",
-    chapterStatus: chapter.content.trim() ? "completed" : "unplanned",
-    createdAt: iso(chapter.updatedAt),
-    updatedAt: iso(chapter.updatedAt),
-  }));
-  return {
-    id: detail.id,
-    title: detail.title,
-    description: detail.description,
-    status: detail.status as NovelDetailResponse["status"],
-    writingMode: detail.writingMode as NovelDetailResponse["writingMode"],
-    creationExperience: detail.creationExperience as NovelDetailResponse["creationExperience"],
-    narrativeForm: detail.narrativeForm as NovelDetailResponse["narrativeForm"],
-    commercialTags: detail.commercialTags,
-    projectMode: detail.projectMode as NovelDetailResponse["projectMode"],
-    postGenerationStyleReviewEnabled: detail.postGenerationStyleReviewEnabled,
-    targetAudience: detail.targetAudience,
-    bookSellingPoint: detail.bookSellingPoint,
-    competingFeel: detail.competingFeel,
-    first30ChapterPromise: detail.first30ChapterPromise,
-    genreId: detail.genreId,
-    primaryStoryModeId: detail.primaryStoryModeId,
-    secondaryStoryModeId: detail.secondaryStoryModeId,
-    worldId: detail.worldId,
-    narrativePov: detail.narrativePov as NovelDetailResponse["narrativePov"],
-    pacePreference: detail.pacePreference as NovelDetailResponse["pacePreference"],
-    styleTone: detail.styleTone,
-    emotionIntensity: detail.emotionIntensity as NovelDetailResponse["emotionIntensity"],
-    aiFreedom: detail.aiFreedom as NovelDetailResponse["aiFreedom"],
-    defaultChapterLength: detail.defaultChapterLength,
-    estimatedChapterCount: detail.estimatedChapterCount,
-    projectStatus: detail.projectStatus as NovelDetailResponse["projectStatus"],
-    storylineStatus: detail.storylineStatus as NovelDetailResponse["storylineStatus"],
-    outlineStatus: detail.outlineStatus as NovelDetailResponse["outlineStatus"],
-    resourceReadyScore: detail.resourceReadyScore,
-    createdAt,
-    updatedAt,
-    chapters: chapterItems,
-    characters: [],
-    bible: null,
-    plotBeats: [],
-    genre: null,
-    primaryStoryMode: null,
-    secondaryStoryMode: null,
-    world: null,
-    volumes: volumes.map((volume) => ({
-      id: volume.id,
-      novelId: volume.novelId,
-      sortOrder: volume.sortOrder,
-      title: volume.title,
-      summary: volume.summary,
-      openPayoffs: [],
-      status: "draft",
-      chapters: [],
-      createdAt,
-      updatedAt,
-    })),
-  };
 }
 
 async function loadNovel(id: string): Promise<NovelDetailResponse> {
@@ -438,60 +294,6 @@ async function listNovelPage(config: AxiosRequestConfig): Promise<ApiResponse<No
     total: filtered.length,
     totalPages: Math.max(1, Math.ceil(filtered.length / limit)),
   });
-}
-
-function taskStatusForRun(state: string): "queued" | "running" | "waiting_approval" | "succeeded" | "failed" | "cancelled" {
-  switch (state) {
-    case "queued":
-      return "queued";
-    case "running":
-      return "running";
-    case "waiting_approval":
-    case "paused_for_approval":
-      return "waiting_approval";
-    case "completed":
-    case "succeeded":
-      return "succeeded";
-    case "cancelled":
-      return "cancelled";
-    default:
-      return "failed";
-  }
-}
-
-function runToTaskSummary(run: transport.RunSummary) {
-  return {
-    id: run.id,
-    kind: "novel_workflow",
-    title: run.chapterTitle || "未命名章节",
-    status: taskStatusForRun(run.state),
-    pendingManualRecovery: false,
-    progress: taskStatusForRun(run.state) === "succeeded" ? 100 : 0,
-    currentStage: run.state,
-    currentItemKey: run.chapterId || null,
-    currentItemLabel: run.chapterTitle || null,
-    executionScopeLabel: run.novelId,
-    blockingReason: null,
-    resumeAction: null,
-    lastHealthyStage: null,
-    attemptCount: 0,
-    maxAttempts: 1,
-    lastError: null,
-    createdAt: iso(run.createdAt),
-    updatedAt: iso(run.updatedAt),
-    heartbeatAt: iso(run.updatedAt),
-    ownerId: "desktop",
-    ownerLabel: "本地创作内核",
-    sourceRoute: `/novels/${run.novelId}/chapters/${run.chapterId}`,
-    checkpointType: null,
-    checkpointSummary: null,
-    noticeCode: null,
-    noticeSummary: null,
-    failureCode: null,
-    failureSummary: null,
-    recoveryHint: null,
-    tokenUsage: null,
-  } as const;
 }
 
 async function listTaskRuns(config: InternalAxiosRequestConfig): Promise<ApiResponse<unknown>> {
