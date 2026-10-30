@@ -82,9 +82,7 @@ pub async fn create(
             payload.style_tone.as_deref().unwrap_or(""),
             payload.default_chapter_length,
             payload.estimated_chapter_count,
-            payload
-                .post_generation_style_review_enabled
-                .unwrap_or(true),
+            payload.post_generation_style_review_enabled.unwrap_or(true),
         )
         .await
         .map_err(HttpError::from)?;

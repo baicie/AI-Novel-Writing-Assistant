@@ -171,7 +171,10 @@ async fn test_save_chapter_content_persists() {
     assert_eq!(save_array[0]["content"], content);
 
     // 从数据库验证
-    let db_chapter = ctx.get_chapter_from_db(&novel_id, &chapter_id).await.unwrap();
+    let db_chapter = ctx
+        .get_chapter_from_db(&novel_id, &chapter_id)
+        .await
+        .unwrap();
     assert_eq!(db_chapter["content"], content);
     assert_eq!(db_chapter["official_version"], new_version);
 }
@@ -220,7 +223,10 @@ async fn test_save_chapter_version_increment() {
     }
 
     // 最终版本应该是 3
-    let final_chapter = ctx.get_chapter_from_db(&novel_id, &chapter_id).await.unwrap();
+    let final_chapter = ctx
+        .get_chapter_from_db(&novel_id, &chapter_id)
+        .await
+        .unwrap();
     assert_eq!(final_chapter["official_version"], 3);
 }
 
@@ -352,7 +358,10 @@ async fn test_concurrent_chapter_edits() {
     // 验证：至少有 1 个成功
     assert!(success_count >= 1);
     // 其余可能是冲突或服务暂时不可用（并发限制）
-    assert_eq!(success_count + conflict_count + service_unavailable_count, 5);
+    assert_eq!(
+        success_count + conflict_count + service_unavailable_count,
+        5
+    );
 }
 
 /// 获取完整章节详情

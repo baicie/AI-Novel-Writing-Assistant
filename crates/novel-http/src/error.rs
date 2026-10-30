@@ -13,7 +13,10 @@ pub enum HttpError {
     #[error("请求体不是合法 JSON。")]
     BadRequest(String),
     #[error("接口尚未在内核里实现。")]
-    NotImplemented { message: String, supported: Vec<String> },
+    NotImplemented {
+        message: String,
+        supported: Vec<String>,
+    },
     #[error("内核处理请求时遇到内部错误：{0}")]
     Internal(String),
 }
@@ -44,16 +47,25 @@ impl IntoResponse for HttpError {
                     novel_application::AppErrorCode::Conflict => StatusCode::CONFLICT,
                     novel_application::AppErrorCode::NotFound => StatusCode::NOT_FOUND,
                     novel_application::AppErrorCode::Cancelled => StatusCode::ACCEPTED,
-                    novel_application::AppErrorCode::ModelRateLimit => StatusCode::TOO_MANY_REQUESTS,
-                    novel_application::AppErrorCode::StorageCorrupt => StatusCode::SERVICE_UNAVAILABLE,
-                    novel_application::AppErrorCode::IntegrityError => StatusCode::INTERNAL_SERVER_ERROR,
+                    novel_application::AppErrorCode::ModelRateLimit => {
+                        StatusCode::TOO_MANY_REQUESTS
+                    }
+                    novel_application::AppErrorCode::StorageCorrupt => {
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                    novel_application::AppErrorCode::IntegrityError => {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
                 };
-                (status, json!({
-                    "success": false,
-                    "error": error.message,
-                    "code": error.code,
-                    "retryable": error.retryable,
-                }))
+                (
+                    status,
+                    json!({
+                        "success": false,
+                        "error": error.message,
+                        "code": error.code,
+                        "retryable": error.retryable,
+                    }),
+                )
             }
             HttpError::BadRequest(message) => (
                 StatusCode::BAD_REQUEST,
