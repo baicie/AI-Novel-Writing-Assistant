@@ -148,7 +148,10 @@ pub struct CredentialReconcileReport {
 
 /// 具备真实生成适配器的协议白名单：新增协议必须先补适配器再放开绑定。
 pub fn protocol_supports_generation(protocol: novel_domain::ProviderProtocol) -> bool {
-    matches!(protocol, novel_domain::ProviderProtocol::OpenAiCompatible)
+    matches!(
+        protocol,
+        novel_domain::ProviderProtocol::OpenAiCompatible | novel_domain::ProviderProtocol::Ollama
+    )
 }
 
 /// 存储端口：SQLite adapter 实现它。
@@ -1546,19 +1549,18 @@ mod tests {
     #[tokio::test]
     async fn binding_rejects_discovery_only_protocol() {
         let (service, _registry, _vault) = service();
-        let mut ollama = draft("ollama");
-        ollama.protocol = novel_domain::ProviderProtocol::Ollama;
-        ollama.base_url = "http://127.0.0.1:11434".into();
-        ollama.allow_localhost_http = true;
+        let mut anthropic = draft("anthropic");
+        anthropic.protocol = novel_domain::ProviderProtocol::AnthropicMessages;
+        anthropic.base_url = "https://api.anthropic.com".into();
         service
-            .upsert_provider(ollama, CredentialAction::Keep, None, 1)
+            .upsert_provider(anthropic, CredentialAction::Keep, None, 1)
             .await
             .unwrap();
         service
             .upsert_model(
                 novel_domain::ModelProfile {
-                    provider_id: "ollama".into(),
-                    model_id: "llama3".into(),
+                    provider_id: "anthropic".into(),
+                    model_id: "claude".into(),
                     display_name: None,
                     capabilities: Default::default(),
                     source: novel_domain::ModelSource::Discovered,
@@ -1574,8 +1576,8 @@ mod tests {
             .upsert_binding(
                 novel_domain::ModelBinding {
                     task_type: "writer".into(),
-                    provider_id: "ollama".into(),
-                    model_id: "llama3".into(),
+                    provider_id: "anthropic".into(),
+                    model_id: "claude".into(),
                     reasoning_effort: None,
                 },
                 None,

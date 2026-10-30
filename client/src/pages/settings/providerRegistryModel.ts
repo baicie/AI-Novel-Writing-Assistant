@@ -167,7 +167,7 @@ export function describeProviderError(error: ProviderError): string {
 }
 
 /** 只有具备生成适配器的协议才允许绑定创作任务。 */
-export const GENERATION_READY_PROTOCOLS: ProviderProtocol[] = ["openai-compatible"];
+export const GENERATION_READY_PROTOCOLS: ProviderProtocol[] = ["openai-compatible", "ollama"];
 
 export function canBindForGeneration(protocol: string): boolean {
   return GENERATION_READY_PROTOCOLS.includes(protocol as ProviderProtocol);

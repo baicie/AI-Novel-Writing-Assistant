@@ -16,7 +16,7 @@
 | Keep/Replace/Clear、崩溃补偿、无明文、不跨域借用默认 Key | PASS | 意图表 + reconcile；`credential_failure_never_writes_the_database`；凭据槽 = provider id |
 | 默认模型 / 任务绑定 / 生成 / Director / Review-Repair 路由 | PASS（按 ADR-5 语义） | `resolve_route`、`apply_route_to_run`、`generate_text.taskType`；`review_and_writer_bindings_resolve_independently` |
 | Running Run 冻结模型/端点/凭据引用，恢复不漂移 | PARTIAL | `RunContract.protocol/credentialRef` + worker 优先用引用；**Director 仅对 writer 绑定填冻结值**，review/repair 复用同一 contract（无独立绑定入口） |
-| 「可用于创作」的协议有真实 generation adapter | PARTIAL | `protocol_supports_generation` 仅放行 openai-compatible；Anthropic/Ollama 仍只有发现能力，已禁止绑定 |
+| 「可用于创作」的协议有真实 generation adapter | PASS（openai-compatible + ollama） | `OllamaProvider` /api/chat + `ProtocolRouterProvider` 按协议分发；`ollama_provider_posts_to_chat_and_maps_response`；Anthropic 仍只有发现能力并被禁止绑定 |
 
 ## Gate B — 质量/安全
 
@@ -53,7 +53,7 @@
 状态：**PARTIAL**。未通过项：
 
 1. Gate A「Running Run 冻结」——review/repair 没有独立绑定入口，冻结值只覆盖 writer 路径；
-2. Gate A「可用于创作协议」——Anthropic/Ollama 仍无生成适配器；
+2. Gate A「可用于创作协议」——Ollama 已补生成适配器并放开绑定；**Anthropic 仍只有发现能力**（已禁止绑定）；
 3. Gate B「`cargo fmt --all -- --check`」——未全仓验证，`novel-http` 有历史债务；
 4. Gate B「Tauri Native E2E」——缺 webdriver 交互证据。
 

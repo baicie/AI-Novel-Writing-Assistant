@@ -121,6 +121,6 @@ test("错误码翻译成用户动作", () => {
 
 test("只有具备生成适配器的协议可绑定创作任务", () => {
   assert.equal(canBindForGeneration("openai-compatible"), true);
-  assert.equal(canBindForGeneration("anthropic-messages"), false);
-  assert.equal(canBindForGeneration("ollama"), false);
+  assert.equal(canBindForGeneration("anthropic-messages"), false, "Anthropic 仍只有发现能力");
+  assert.equal(canBindForGeneration("ollama"), true);
 });
