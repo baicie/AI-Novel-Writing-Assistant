@@ -92,6 +92,18 @@ export interface ApplyDiscoveredOutcome {
   revision: number;
 }
 
+export interface ResolvedModelRoute {
+  taskType: string;
+  providerId: string;
+  modelId: string;
+  protocol: string;
+  endpoint: string;
+  allowLocalhostHttp: boolean;
+  credentialRef: string;
+  reasoningEffort: string | null;
+  source: "binding" | "default";
+}
+
 export interface CredentialReconcileReport {
   completed: number;
   /** 需要用户重新输入密钥的 provider id（密钥正文从不落库，无法自动重放）。 */
@@ -193,6 +205,8 @@ export function createProviderClient(call: Invoker) {
       call<void>("upsert_model_binding", { request }),
     reconcileCredentialIntents: () =>
       call<CredentialReconcileReport>("reconcile_credential_intents"),
+    getEffectiveRoute: (taskType: string) =>
+      call<ResolvedModelRoute | null>("get_effective_model_route", { taskType }),
   };
 }
 

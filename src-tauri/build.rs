@@ -84,6 +84,7 @@ fn main() {
         "list_model_bindings",
         "upsert_model_binding",
         "reconcile_credential_intents",
+        "get_effective_model_route",
         "index_knowledge",
         "list_knowledge_documents",
         "search_knowledge",

@@ -443,6 +443,14 @@ pub async fn upsert_model_binding(
 }
 
 #[tauri::command]
+pub async fn get_effective_model_route(
+    state: State<'_, AppState>,
+    task_type: String,
+) -> Result<Option<novel_application::ResolvedModelRoute>, ProviderError> {
+    service(&state).resolve_route(&task_type).await
+}
+
+#[tauri::command]
 pub async fn reconcile_credential_intents(
     state: State<'_, AppState>,
 ) -> Result<novel_application::CredentialReconcileReport, ProviderError> {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-effective-model-route"
+description = "Enables the get_effective_model_route command without any pre-configured scope."
+commands.allow = ["get_effective_model_route"]
+
+[[permission]]
+identifier = "deny-get-effective-model-route"
+description = "Denies the get_effective_model_route command without any pre-configured scope."
+commands.deny = ["get_effective_model_route"]

@@ -82,7 +82,7 @@ pub use ports::{
 pub use provider_service::{
     CredentialAction, CredentialActionKind, CredentialIntents, CredentialReconcileReport,
     CredentialVault, PendingCredentialIntent, ProviderDraft, ProviderError, ProviderErrorCode,
-    ProviderRegistry, ProviderService, ProviderView,
+    ProviderRegistry, ProviderService, ProviderView, ResolvedModelRoute,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

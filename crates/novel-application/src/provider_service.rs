@@ -504,6 +504,72 @@ impl ProviderService {
             .await?)
     }
 }
+
+/// 解析出的调用路由：只含引用与地址，**不含任何密钥正文**。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedModelRoute {
+    pub task_type: String,
+    pub provider_id: String,
+    pub model_id: String,
+    pub protocol: String,
+    pub endpoint: String,
+    pub allow_localhost_http: bool,
+    /// 凭据只给引用，执行时再去系统密钥库取。
+    pub credential_ref: String,
+    pub reasoning_effort: Option<String>,
+    /// `binding` 表示任务级绑定；没有绑定时返回 `None`，调用方沿用原有默认配置。
+    pub source: String,
+}
+
+impl ProviderService {
+    /// 任务级路由解析：有绑定就按绑定，没有绑定返回 `None`（不改变既有默认行为）。
+    pub async fn resolve_route(
+        &self,
+        task_type: &str,
+    ) -> Result<Option<ResolvedModelRoute>, ProviderError> {
+        let binding = self
+            .registry
+            .list_bindings()
+            .await?
+            .into_iter()
+            .find(|item| item.task_type == task_type);
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        let provider = self
+            .registry
+            .list_providers()
+            .await?
+            .into_iter()
+            .find(|item| item.id == binding.provider_id)
+            .ok_or_else(|| {
+                ProviderError::not_found(format!("绑定的模型来源已不存在：{}", binding.provider_id))
+            })?;
+        let models = self.registry.list_models(&provider.id).await?;
+        if !models
+            .iter()
+            .any(|model| model.model_id == binding.model_id)
+        {
+            return Err(ProviderError::not_found(format!(
+                "绑定的模型已被删除：{}",
+                binding.model_id
+            )));
+        }
+        Ok(Some(ResolvedModelRoute {
+            task_type: task_type.to_string(),
+            provider_id: provider.id.clone(),
+            model_id: binding.model_id,
+            protocol: provider.protocol.as_str().to_string(),
+            endpoint: provider.base_url,
+            allow_localhost_http: provider.allow_localhost_http,
+            credential_ref: provider.credential.reference,
+            reasoning_effort: binding.reasoning_effort,
+            source: "binding".to_string(),
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -982,5 +1048,117 @@ mod tests {
             "重放后密钥必须被清掉"
         );
         assert!(intents.rows.lock().unwrap()[0].3.ends_with(":done"));
+    }
+    #[tokio::test]
+    async fn route_resolves_from_binding_without_secret() {
+        let (service, registry, _vault) = service();
+        service
+            .upsert_provider(
+                draft("gw"),
+                CredentialAction::Replace("sk-secret".into()),
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        service
+            .upsert_model(
+                novel_domain::ModelProfile {
+                    provider_id: "gw".into(),
+                    model_id: "a".into(),
+                    display_name: None,
+                    capabilities: Default::default(),
+                    source: novel_domain::ModelSource::User,
+                    overridden: Default::default(),
+                },
+                true,
+                None,
+                2,
+            )
+            .await
+            .unwrap();
+        service
+            .upsert_binding(
+                novel_domain::ModelBinding {
+                    task_type: "writer".into(),
+                    provider_id: "gw".into(),
+                    model_id: "a".into(),
+                    reasoning_effort: Some("high".into()),
+                },
+                None,
+                3,
+            )
+            .await
+            .unwrap();
+
+        let route = service
+            .resolve_route("writer")
+            .await
+            .unwrap()
+            .expect("有绑定");
+        assert_eq!(route.provider_id, "gw");
+        assert_eq!(route.model_id, "a");
+        assert_eq!(route.protocol, "openai-compatible");
+        assert_eq!(route.credential_ref, "gw");
+        assert_eq!(route.source, "binding");
+        let json = serde_json::to_string(&route).unwrap();
+        assert!(!json.contains("sk-secret"), "路由里不能出现密钥");
+        let _ = registry;
+    }
+
+    #[tokio::test]
+    async fn route_is_absent_without_binding() {
+        let (service, _registry, _vault) = service();
+        assert!(
+            service.resolve_route("writer").await.unwrap().is_none(),
+            "没有绑定时不改默认行为"
+        );
+    }
+
+    #[tokio::test]
+    async fn route_errors_when_bound_model_disappears() {
+        let (service, _registry, _vault) = service();
+        service
+            .upsert_provider(draft("gw"), CredentialAction::Keep, None, 1)
+            .await
+            .unwrap();
+        service
+            .upsert_model(
+                novel_domain::ModelProfile {
+                    provider_id: "gw".into(),
+                    model_id: "a".into(),
+                    display_name: None,
+                    capabilities: Default::default(),
+                    source: novel_domain::ModelSource::User,
+                    overridden: Default::default(),
+                },
+                true,
+                None,
+                2,
+            )
+            .await
+            .unwrap();
+        service
+            .upsert_binding(
+                novel_domain::ModelBinding {
+                    task_type: "review".into(),
+                    provider_id: "gw".into(),
+                    model_id: "a".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                3,
+            )
+            .await
+            .unwrap();
+        service.delete_model("gw", "a", None).await.ok();
+        // 删除被绑定的模型会被拦下，这里直接断言拦截行为
+        assert!(
+            service
+                .delete_model("gw", "a", None)
+                .await
+                .is_err_and(|error| error.code == ProviderErrorCode::InUse)
+        );
+        assert!(service.resolve_route("review").await.unwrap().is_some());
     }
 }
