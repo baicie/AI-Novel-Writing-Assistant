@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-provider-profile"
+description = "Enables the upsert_provider_profile command without any pre-configured scope."
+commands.allow = ["upsert_provider_profile"]
+
+[[permission]]
+identifier = "deny-upsert-provider-profile"
+description = "Denies the upsert_provider_profile command without any pre-configured scope."
+commands.deny = ["upsert_provider_profile"]

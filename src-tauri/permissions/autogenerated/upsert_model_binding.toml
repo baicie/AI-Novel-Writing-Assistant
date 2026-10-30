@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-model-binding"
+description = "Enables the upsert_model_binding command without any pre-configured scope."
+commands.allow = ["upsert_model_binding"]
+
+[[permission]]
+identifier = "deny-upsert-model-binding"
+description = "Denies the upsert_model_binding command without any pre-configured scope."
+commands.deny = ["upsert_model_binding"]
