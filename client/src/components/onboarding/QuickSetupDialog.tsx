@@ -15,11 +15,15 @@ import {
 } from "lucide-react";
 import type {
   CompleteQuickSetupRequest,
+  CompleteQuickSetupResult,
   QuickSetupProviderOption,
   QuickSetupStatus,
 } from "@ai-novel/shared/types/onboarding";
 import type { LLMProvider } from "@ai-novel/shared/types/llm";
-import { completeQuickSetup } from "@/api/onboarding";
+import { completeQuickSetup, getQuickSetupStatus } from "@/api/onboarding";
+import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
+import { saveModelSetup } from "@/platform/desktopTransport";
+import type { ApiResponse } from "@ai-novel/shared/types/api";
 import { previewCustomProviderModels } from "@/api/settings";
 import { queryKeys } from "@/api/queryKeys";
 import { AppDialogContent, Dialog } from "@/components/ui/dialog";
@@ -129,7 +133,39 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
   }, [form.provider, form.providerKind, props.open, props.status]);
 
   const completeMutation = useMutation({
-    mutationFn: (payload: CompleteQuickSetupRequest) => completeQuickSetup(payload),
+    // 桌面版没有厂商级配置接口，直接把地址 / 模型 / 密钥写进本地内核，再回读就绪状态。
+    mutationFn: async (payload: CompleteQuickSetupRequest): Promise<ApiResponse<CompleteQuickSetupResult>> => {
+      if (!shouldUseDesktopApiAdapter()) {
+        return completeQuickSetup(payload);
+      }
+      const endpoint = payload.baseURL?.trim() ?? "";
+      await saveModelSetup({
+        endpoint,
+        model: payload.model,
+        allowLocalhostHttp: /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(endpoint),
+        apiKey: payload.apiKey?.trim() ?? "",
+      });
+      const statusResponse = await getQuickSetupStatus();
+      const status: QuickSetupStatus = statusResponse.data ?? {
+        readyForCreation: true,
+        providers: [],
+        selectedProvider: null,
+        selectedModel: payload.model,
+        routeCoverage: { configured: 0, total: 0, missingTaskTypes: [] },
+        blockingReasons: [],
+        recommendedAction: "start_creating",
+      };
+      return {
+        success: true,
+        data: {
+          status,
+          provider: payload.provider ?? "openai-compatible",
+          model: payload.model,
+          plainConnectionReady: true,
+          structuredConnectionReady: true,
+        },
+      };
+    },
     onSuccess: async (response) => {
       if (response.data) {
         llmStore.setSelection({

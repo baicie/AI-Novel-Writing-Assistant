@@ -688,6 +688,24 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
     const chapterId = decodeURIComponent(workspace[2]!);
     return ok(await transport.getChapterEditorWorkspace({ novelId, chapterId }));
   }
+  // 首次上手面板要读的就绪状态：桌面版直接问本地内核，未映射会让面板一直报错。
+  if (path === "/settings/quick-setup/status" && method === "get") {
+    return ok(await transport.getQuickSetupStatus());
+  }
+  if (path === "/settings/model-setup" && method === "get") {
+    return ok(await transport.getModelSetup());
+  }
+  if (path === "/settings/model-setup" && method === "post") {
+    const payload = asRecord(config.data);
+    return ok(
+      await transport.saveModelSetup({
+        endpoint: typeof payload.endpoint === "string" ? payload.endpoint : "",
+        model: typeof payload.model === "string" ? payload.model : "",
+        allowLocalhostHttp: payload.allowLocalhostHttp === true,
+        apiKey: typeof payload.apiKey === "string" ? payload.apiKey : "",
+      }),
+    );
+  }
   return unsupported(config);
 }
 

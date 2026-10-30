@@ -19,7 +19,7 @@ members = [
 edition = "2024"
 license = "AGPL-3.0-only"
 publish = false
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

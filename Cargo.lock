@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "migration-tools"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "novel-platform",
  "novel-storage-sqlite",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "novel-application"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "dashmap",
@@ -2452,14 +2452,14 @@ dependencies = [
 
 [[package]]
 name = "novel-context"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "novel-desktop"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "novel-application",
@@ -2484,7 +2484,7 @@ dependencies = [
 
 [[package]]
 name = "novel-domain"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "novel-http"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2518,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "novel-llm"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "futures",
@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "novel-platform"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "keyring",
@@ -2549,14 +2549,14 @@ dependencies = [
 
 [[package]]
 name = "novel-prompt"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "novel-storage-sqlite"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "hex",
@@ -2576,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "novel-testkit"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "async-trait",
  "novel-application",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "novel-workflow"
-version = "0.1.1-beta.3"
+version = "0.1.1-beta.4"
 dependencies = [
  "novel-domain",
  "serde_json",
