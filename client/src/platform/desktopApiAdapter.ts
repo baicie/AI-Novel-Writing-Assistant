@@ -614,6 +614,13 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
   }
   if (path === "/llm/model-routes" && method === "get") return desktopModelRoutes();
   if (path === "/llm/model-routes/connectivity" && method === "post") return desktopConnectivity();
+  if (path === "/settings/auto-director/issue-policy" && method === "get") {
+    return { policy: "completion_first", updatedAt: null };
+  }
+  if (path === "/settings/auto-director/approval-preferences" && method === "get") {
+    return { mode: "auto", updatedAt: null };
+  }
+  if (path === "/style-profiles" && method === "get") return [];
   if (path === "/tasks/recovery-candidates" && method === "get") return [];
   if (path === "/rag/health" && method === "get") return { ready: false, documents: 0, chunks: 0, embeddingProvider: "none" };
   if (path === "/rag/jobs" && method === "get") return [];

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -8,6 +9,61 @@ use thiserror::Error;
 pub enum SecretError {
     #[error("系统凭据暂时不可用")]
     Unavailable,
+}
+
+/// 系统钥匙库不可用时的回退目录（应用数据目录下 secrets/）。
+static FALLBACK_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// 启动时调用一次：设置回退目录。目录权限设为 0700，文件 0600。
+pub fn configure_secret_fallback(dir: std::path::PathBuf) {
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let _ = FALLBACK_DIR.set(dir);
+}
+
+fn fallback_file(id: &str) -> Option<std::path::PathBuf> {
+    let dir = FALLBACK_DIR.get()?;
+    // 文件名只保留安全字符，避免路径逃逸。
+    let safe: String = id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Some(dir.join(format!("{safe}.secret")))
+}
+
+fn write_fallback(id: &str, secret: &str) -> Result<(), SecretError> {
+    let path = fallback_file(id).ok_or(SecretError::Unavailable)?;
+    std::fs::write(&path, secret.as_bytes()).map_err(|_| SecretError::Unavailable)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn read_fallback(id: &str) -> Option<String> {
+    let path = fallback_file(id)?;
+    std::fs::read_to_string(path)
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+fn delete_fallback(id: &str) -> Result<(), SecretError> {
+    if let Some(path) = fallback_file(id) {
+        let _ = std::fs::remove_file(path);
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -50,31 +106,36 @@ pub struct OsSecretStore;
 #[async_trait]
 impl SecretStore for OsSecretStore {
     async fn put(&self, id: &str, secret: &str) -> Result<(), SecretError> {
-        let entry =
-            keyring::Entry::new("Biz Novel Studio", id).map_err(|_| SecretError::Unavailable)?;
-        entry
-            .set_password(secret)
-            .map_err(|_| SecretError::Unavailable)?;
+        // 先把回退写入落盘：钥匙库在部分签名环境下会「写入成功但读不回来」。
+        if write_fallback(id, secret).is_err() {
+            return Err(SecretError::Unavailable);
+        }
+        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", id) {
+            if entry.set_password(secret).is_ok()
+                && entry.get_password().ok().as_deref() == Some(secret)
+            {
+                // 钥匙库确实可用，回退文件只是保险，保留即可。
+                return Ok(());
+            }
+        }
+        // 钥匙库不可靠时仍算成功：回退文件已写入，读取会走回退。
         Ok(())
     }
 
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError> {
-        let entry =
-            keyring::Entry::new("Biz Novel Studio", id).map_err(|_| SecretError::Unavailable)?;
-        match entry.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err(SecretError::Unavailable),
+        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", id) {
+            if let Ok(secret) = entry.get_password() {
+                return Ok(Some(secret));
+            }
         }
+        Ok(read_fallback(id))
     }
 
     async fn delete(&self, id: &str) -> Result<(), SecretError> {
-        let entry =
-            keyring::Entry::new("Biz Novel Studio", id).map_err(|_| SecretError::Unavailable)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err(SecretError::Unavailable),
+        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", id) {
+            let _ = entry.delete_credential();
         }
+        delete_fallback(id)
     }
 }
 

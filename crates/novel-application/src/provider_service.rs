@@ -661,6 +661,25 @@ pub fn resolve_generation_target(
 }
 
 impl ProviderService {
+    /// 注册表里是否已经有「可创建第一本书」的来源：有密钥且有至少一个模型。
+    pub async fn ready_provider(&self) -> Result<Option<(String, String, bool)>, ProviderError> {
+        for profile in self.registry.list_providers().await? {
+            let present = self.vault.present(&profile.credential.reference).await?;
+            if !present {
+                continue;
+            }
+            let models = self.registry.list_models(&profile.id).await?;
+            if let Some(model) = models.first() {
+                return Ok(Some((
+                    profile.base_url,
+                    model.model_id.clone(),
+                    profile.allow_localhost_http,
+                )));
+            }
+        }
+        Ok(None)
+    }
+
     /// Run 恢复时的路由校验：冻结的 provider/model 仍可解析吗？
     ///
     /// - provider 不在注册表里 → 视为旧的默认配置（`default` 等），保持可恢复，不改旧行为；

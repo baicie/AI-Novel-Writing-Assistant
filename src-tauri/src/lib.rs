@@ -56,7 +56,8 @@ pub fn run() {
                 })?;
             std::fs::create_dir_all(&data_dir)
                 .map_err(|error| format!("无法准备本地资料目录：{error}"))?;
-            std::fs::create_dir_all(data_dir.join("logs"))
+            novel_platform::configure_secret_fallback(data_dir.join("secrets"));
+std::fs::create_dir_all(data_dir.join("logs"))
                 .map_err(|error| format!("无法准备日志目录：{error}"))?;
 
             let db_path = data_dir.join("novel.sqlite");

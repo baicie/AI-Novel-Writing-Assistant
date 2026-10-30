@@ -18,7 +18,27 @@ pub async fn list_story_modes(state: State<'_, AppState>) -> Result<Vec<StoryMod
 pub async fn get_quick_setup_status(
     state: State<'_, AppState>,
 ) -> Result<QuickSetupStatus, AppError> {
-    state.runtime.setup.get_quick_setup_status().await
+    let legacy = state.runtime.setup.get_quick_setup_status().await?;
+    if legacy.ready_for_creation {
+        return Ok(legacy);
+    }
+    // 模型来源注册表里已经有「有密钥 + 有模型」的来源时，同样算配置完成。
+    let ready = crate::commands::provider::service(&state)
+        .ready_provider()
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    Ok(match ready {
+        Some((endpoint, model, allow_localhost_http)) => QuickSetupStatus {
+            ready_for_creation: true,
+            model_configured: true,
+            api_key_present: true,
+            endpoint: Some(endpoint),
+            model: Some(model),
+            allow_localhost_http,
+            next_step: "可以创建第一本书并开始创作。".to_string(),
+        },
+        None => legacy,
+    })
 }
 
 #[tauri::command]
