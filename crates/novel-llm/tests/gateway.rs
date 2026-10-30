@@ -141,3 +141,57 @@ async fn rejects_unbounded_or_zero_output_budget_before_network() {
     assert!(matches!(error, novel_llm::LlmError::BudgetExceeded(_)));
     assert!(!error.retryable_without_new_charge());
 }
+
+/// 选了推理强度就把它放进请求体；没选则不带这个字段。
+#[tokio::test]
+async fn reasoning_effort_is_forwarded_when_selected() {
+    let body = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n";
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let captured = Arc::new(std::sync::Mutex::new(String::new()));
+    let captured_for_task = captured.clone();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buffer = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            let read = stream.read(&mut chunk).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                // 头之后可能还差 body，多读一小会儿
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                break;
+            }
+        }
+        *captured_for_task.lock().unwrap() = String::from_utf8_lossy(&buffer).to_string();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+    });
+
+    let endpoint = format!("http://{address}/v1/chat/completions");
+    let provider = OpenAiCompatibleProvider::new();
+    let (sender, _receiver) = tokio::sync::mpsc::channel(8);
+    provider
+        .generate_with_protocol(
+            request(&endpoint, 100),
+            "openai-compatible",
+            Some("high"),
+            sender,
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+    let raw = captured.lock().unwrap().clone();
+    assert!(
+        raw.contains("\"reasoning_effort\""),
+        "请求体应带 reasoning_effort：{raw}"
+    );
+    assert!(raw.contains("high"), "请求体应带具体档位：{raw}");
+}

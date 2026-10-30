@@ -49,13 +49,18 @@ impl LlmProvider for ProtocolRouterProvider {
         &self,
         request: LlmRequest,
         protocol: &str,
+        reasoning_effort: Option<&str>,
         tokens: Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
         if protocol == "ollama" {
+            // Ollama 没有推理强度字段，忽略该选项。
+            let _ = reasoning_effort;
             self.ollama.generate(request, tokens, cancel).await
         } else {
-            self.openai.generate(request, tokens, cancel).await
+            self.openai
+                .generate_with_protocol(request, protocol, reasoning_effort, tokens, cancel)
+                .await
         }
     }
 }

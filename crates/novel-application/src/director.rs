@@ -520,6 +520,7 @@ impl DirectorService {
             protocol: route.protocol.clone(),
             credential_ref: route.credential_ref.clone(),
             allow_localhost_http: input.allow_localhost_http,
+            reasoning_effort: route.reasoning_effort.clone(),
         };
         let request_hash = json_hash(&OpenRunHash {
             novel_id: &input.novel_id,

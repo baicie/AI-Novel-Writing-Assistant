@@ -391,6 +391,8 @@ pub struct RunContract {
     pub repair_budget: u8,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     /// 冻结的协议判别字段；旧记录没有该字段，按默认处理。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,

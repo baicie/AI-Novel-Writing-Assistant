@@ -68,7 +68,7 @@ pub async fn save_model_setup(
 ) -> Result<ModelSetupView, AppError> {
     let kernel: Arc<SqliteKernel> = state.kernel.clone();
     let secrets: Arc<OsSecretStore> = state.secrets.clone();
-    write_model_setup(
+    let view = write_model_setup(
         kernel.as_ref(),
         secrets.as_ref(),
         &request.endpoint,
@@ -76,7 +76,85 @@ pub async fn save_model_setup(
         request.allow_localhost_http,
         &request.api_key,
     )
-    .await
+    .await?;
+    // 让模型来源列表与导航栏立刻能看到这份配置：同一份信息也登记到来源注册表。
+    let _ = sync_legacy_setup_to_registry(
+        state.inner(),
+        &request.endpoint,
+        &request.model,
+        request.allow_localhost_http,
+        &request.api_key,
+    )
+    .await;
+    Ok(view)
+}
+
+async fn sync_legacy_setup_to_registry(
+    state: &AppState,
+    endpoint: &str,
+    model: &str,
+    allow_localhost_http: bool,
+    api_key: &str,
+) -> Result<(), AppError> {
+    use novel_application::{CredentialAction, ProviderDraft};
+    use novel_domain::{
+        ModelBinding, ModelCapabilities, ModelProfile, ModelSource, ProviderProtocol,
+    };
+
+    let service = crate::commands::provider::service(state);
+    let now = novel_platform::now_ms();
+    let credential = if api_key.trim().is_empty() {
+        CredentialAction::Keep
+    } else {
+        CredentialAction::Replace(api_key.trim().to_string())
+    };
+    service
+        .upsert_provider(
+            ProviderDraft {
+                id: "default".to_string(),
+                display_name: Some("自定义接口".to_string()),
+                protocol: ProviderProtocol::OpenAiCompatible,
+                base_url: endpoint.to_string(),
+                is_builtin: false,
+                allow_localhost_http,
+                sort_order: 0,
+            },
+            credential,
+            None,
+            now,
+        )
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    service
+        .upsert_model(
+            ModelProfile {
+                provider_id: "default".to_string(),
+                model_id: model.to_string(),
+                display_name: None,
+                capabilities: ModelCapabilities::default(),
+                source: ModelSource::User,
+                overridden: Default::default(),
+            },
+            true,
+            None,
+            now,
+        )
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    service
+        .upsert_binding(
+            ModelBinding {
+                task_type: "writer".to_string(),
+                provider_id: "default".to_string(),
+                model_id: model.to_string(),
+                reasoning_effort: None,
+            },
+            None,
+            now,
+        )
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    Ok(())
 }
 
 #[tauri::command]

@@ -607,6 +607,8 @@ pub struct GenerationTarget {
     pub credential_ref: String,
     /// `binding` = 任务级绑定；`default` = 既有默认配置。
     pub source: String,
+    /// 绑定里选定的推理强度；旧默认配置没有这个概念。
+    pub reasoning_effort: Option<String>,
 }
 
 /// 旧默认配置的解析结果（来自 `load_model_setup`）。
@@ -640,6 +642,7 @@ pub fn resolve_generation_target(
             allow_localhost_http: route.allow_localhost_http,
             credential_ref: route.credential_ref,
             source: route.source,
+            reasoning_effort: route.reasoning_effort,
         });
     }
     match legacy {
@@ -655,6 +658,7 @@ pub fn resolve_generation_target(
             allow_localhost_http: legacy.allow_localhost_http,
             credential_ref: legacy.secret_ref,
             source: "default".to_string(),
+            reasoning_effort: None,
         }),
         None => Err(ProviderError::validation("还没有配置模型服务。")),
     }
@@ -726,6 +730,7 @@ pub enum FrozenRouteStatus {
 pub struct FrozenRoute {
     pub protocol: Option<String>,
     pub credential_ref: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 /// 把任务路由套到一次 Run 的模型参数上。
@@ -748,6 +753,7 @@ pub fn apply_route_to_run(
             FrozenRoute {
                 protocol: Some(route.protocol),
                 credential_ref: Some(route.credential_ref),
+                reasoning_effort: route.reasoning_effort,
             },
         ),
         None => (

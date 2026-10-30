@@ -128,6 +128,7 @@ pub async fn generate_text(
                 max_output_tokens: request.max_output_tokens,
             },
             &target.protocol,
+            target.reasoning_effort.as_deref(),
             sender,
             cancel,
         )

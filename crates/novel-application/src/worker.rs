@@ -436,6 +436,7 @@ impl Worker {
                     .protocol
                     .as_deref()
                     .unwrap_or("openai-compatible"),
+                claimed.contract.reasoning_effort.as_deref(),
                 sender,
                 cancel,
             )
@@ -667,6 +668,7 @@ impl Worker {
                     .protocol
                     .as_deref()
                     .unwrap_or("openai-compatible"),
+                claimed.contract.reasoning_effort.as_deref(),
                 sender,
                 cancel,
             )
@@ -1335,6 +1337,7 @@ async fn execute_structured(
                 .protocol
                 .as_deref()
                 .unwrap_or("openai-compatible"),
+            claimed.contract.reasoning_effort.as_deref(),
             sender,
             cancel,
         )
