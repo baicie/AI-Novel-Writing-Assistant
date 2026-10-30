@@ -548,37 +548,74 @@ impl SqliteKernel {
         expected_revision: Option<i64>,
         now_ms: i64,
     ) -> Result<i64, PortError> {
-        let current = self.provider_revision(&profile.id).await?;
-        match (current, expected_revision) {
-            (Some(_), None) => {
-                return Err(PortError::Conflict(format!(
-                    "模型来源已存在，改用更新（需要提供 expectedRevision）：{}",
-                    profile.id
-                )));
+        // 单条条件更新完成 CAS：读后再写会让两个窗口同时成功。
+        match expected_revision {
+            Some(expected) => {
+                let affected = sqlx::query(
+                    "UPDATE provider_credential SET
+                       provider = ?, secret_ref = ?, endpoint = ?, allow_localhost_http = ?,
+                       protocol = ?, display_name = ?, is_builtin = ?, sort_order = ?,
+                       updated_at = ?, revision = revision + 1
+                     WHERE id = ? AND revision = ?",
+                )
+                .bind(profile.protocol.as_str())
+                .bind(&profile.credential.reference)
+                .bind(&profile.base_url)
+                .bind(i64::from(u8::from(profile.allow_localhost_http)))
+                .bind(profile.protocol.as_str())
+                .bind(&profile.display_name)
+                .bind(i64::from(u8::from(profile.is_builtin)))
+                .bind(i64::from(profile.sort_order))
+                .bind(now_ms)
+                .bind(&profile.id)
+                .bind(expected)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?
+                .rows_affected();
+                if affected == 0 {
+                    let current = self.provider_revision(&profile.id).await?;
+                    return Err(match current {
+                        Some(actual) => PortError::Conflict(format!(
+                            "配置已被修改（期望版本 {expected}，当前 {actual}），请刷新后再试"
+                        )),
+                        None => PortError::NotFound(format!("模型来源不存在：{}", profile.id)),
+                    });
+                }
+                Ok(expected + 1)
             }
-            (None, Some(_)) => {
-                return Err(PortError::Conflict(format!(
-                    "模型来源不存在，无法按更新写入：{}",
-                    profile.id
-                )));
+            None => {
+                let inserted = sqlx::query(
+                    "INSERT INTO provider_credential(
+                         id, provider, secret_ref, endpoint, model, allow_localhost_http, created_at,
+                         protocol, display_name, is_builtin, sort_order, updated_at, revision)
+                     VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, 1)
+                     ON CONFLICT(id) DO NOTHING",
+                )
+                .bind(&profile.id)
+                .bind(profile.protocol.as_str())
+                .bind(&profile.credential.reference)
+                .bind(&profile.base_url)
+                .bind(i64::from(u8::from(profile.allow_localhost_http)))
+                .bind(now_ms)
+                .bind(profile.protocol.as_str())
+                .bind(&profile.display_name)
+                .bind(i64::from(u8::from(profile.is_builtin)))
+                .bind(i64::from(profile.sort_order))
+                .bind(now_ms)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?
+                .rows_affected();
+                if inserted == 0 {
+                    return Err(PortError::Conflict(format!(
+                        "模型来源已存在，改用更新（需要提供 expectedRevision）：{}",
+                        profile.id
+                    )));
+                }
+                Ok(1)
             }
-            (Some(actual), Some(expected)) if actual != expected => {
-                return Err(PortError::Conflict(format!(
-                    "配置已被修改（期望版本 {expected}，当前 {actual}），请刷新后再试"
-                )));
-            }
-            _ => {}
         }
-        self.upsert_provider(profile, now_ms).await?;
-        let next = current.unwrap_or(0) + 1;
-        sqlx::query("UPDATE provider_credential SET revision = ?, updated_at = ? WHERE id = ?")
-            .bind(next)
-            .bind(now_ms)
-            .bind(&profile.id)
-            .execute(&self.pool)
-            .await
-            .map_err(map_sql)?;
-        Ok(next)
     }
 
     pub async fn binding_count(&self, provider_id: &str) -> Result<i64, PortError> {

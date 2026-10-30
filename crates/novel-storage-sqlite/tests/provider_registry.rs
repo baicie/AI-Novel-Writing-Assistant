@@ -510,3 +510,46 @@ async fn credential_intents_track_until_done() {
     );
     kernel.pool().close().await;
 }
+/// 多窗口并发：两个客户端拿同一版本号提交，只有一个能成功。
+#[tokio::test]
+async fn concurrent_updates_with_same_revision_conflict() {
+    let dir = tempdir().unwrap();
+    let kernel = std::sync::Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    kernel
+        .upsert_provider_cas(&provider("gw", "https://gw.example.com/v1"), None, 1)
+        .await
+        .unwrap();
+    let revision = kernel.provider_revision("gw").await.unwrap().unwrap();
+    assert_eq!(revision, 1);
+
+    let a = {
+        let kernel = kernel.clone();
+        tokio::spawn(async move {
+            kernel
+                .upsert_provider_cas(&provider("gw", "https://a.example.com/v1"), Some(1), 2)
+                .await
+        })
+    };
+    let b = {
+        let kernel = kernel.clone();
+        tokio::spawn(async move {
+            kernel
+                .upsert_provider_cas(&provider("gw", "https://b.example.com/v1"), Some(1), 2)
+                .await
+        })
+    };
+    let (a, b) = (a.await.unwrap(), b.await.unwrap());
+    let successes = [&a, &b].iter().filter(|result| result.is_ok()).count();
+    let conflicts = [&a, &b]
+        .iter()
+        .filter(|result| matches!(result, Err(novel_application::PortError::Conflict(_))))
+        .count();
+    assert_eq!(successes, 1, "只能有一个写入成功");
+    assert_eq!(conflicts, 1, "另一个必须收到冲突而不是静默覆盖");
+    assert_eq!(kernel.provider_revision("gw").await.unwrap(), Some(2));
+    kernel.pool().close().await;
+}
