@@ -246,41 +246,59 @@ impl ProviderModelDiscovery for OpenAiCompatibleDiscovery {
         cancel: CancellationToken,
     ) -> Result<DiscoveryOutcome, DiscoveryError> {
         validate(request)?;
-        let url = join(&request.base_url, "models");
-        let client = client(request.timeout)?;
-        let mut builder = client.get(&url).header("accept", "application/json");
-        if !request.api_key.trim().is_empty() {
-            builder = builder.header(
-                "authorization",
-                format!("Bearer {}", request.api_key.trim()),
-            );
-        }
-        let send = async {
-            let response = builder.send().await.map_err(|error| {
-                if error.is_timeout() {
-                    DiscoveryError::Timeout
-                } else {
-                    DiscoveryError::Network(error.to_string())
-                }
-            })?;
-            if !response.status().is_success() {
-                return Err(map_status(response.status().as_u16()));
+        match discover_openai_once(request, &join(&request.base_url, "models"), cancel.clone())
+            .await
+        {
+            Ok(outcome) => Ok(outcome),
+            // 有些网关只在 /v1 下暴露模型列表：baseURL 没写 /v1 时补一次再试。
+            Err(DiscoveryError::NotSupported)
+                if !request.base_url.trim_end_matches('/').ends_with("/v1") =>
+            {
+                discover_openai_once(request, &join(&request.base_url, "v1/models"), cancel).await
             }
-            read_body(response).await
-        };
-        let bytes = tokio::select! {
-            _ = cancel.cancelled() => return Err(DiscoveryError::Cancelled),
-            result = tokio::time::timeout(request.timeout, send) => match result {
-                Err(_) => return Err(DiscoveryError::Timeout),
-                Ok(Ok(bytes)) => bytes,
-                Ok(Err(error)) => return Err(error),
-            },
-        };
-        Ok(DiscoveryOutcome {
-            models: parse_openai_payload(&bytes)?,
-            warnings: Vec::new(),
-        })
+            Err(error) => Err(error),
+        }
     }
+}
+
+async fn discover_openai_once(
+    request: &DiscoveryRequest,
+    url: &str,
+    cancel: CancellationToken,
+) -> Result<DiscoveryOutcome, DiscoveryError> {
+    let client = client(request.timeout)?;
+    let mut builder = client.get(url).header("accept", "application/json");
+    if !request.api_key.trim().is_empty() {
+        builder = builder.header(
+            "authorization",
+            format!("Bearer {}", request.api_key.trim()),
+        );
+    }
+    let send = async {
+        let response = builder.send().await.map_err(|error| {
+            if error.is_timeout() {
+                DiscoveryError::Timeout
+            } else {
+                DiscoveryError::Network(error.to_string())
+            }
+        })?;
+        if !response.status().is_success() {
+            return Err(map_status(response.status().as_u16()));
+        }
+        read_body(response).await
+    };
+    let bytes = tokio::select! {
+        _ = cancel.cancelled() => return Err(DiscoveryError::Cancelled),
+        result = tokio::time::timeout(request.timeout, send) => match result {
+            Err(_) => return Err(DiscoveryError::Timeout),
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => return Err(error),
+        },
+    };
+    Ok(DiscoveryOutcome {
+        models: parse_openai_payload(&bytes)?,
+        warnings: Vec::new(),
+    })
 }
 
 /// Anthropic：`GET {baseURL}/v1/models`，x-api-key + anthropic-version，按游标分页。

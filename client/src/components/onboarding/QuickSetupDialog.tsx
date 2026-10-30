@@ -22,6 +22,7 @@ import type {
 import type { LLMProvider } from "@ai-novel/shared/types/llm";
 import { completeQuickSetup, getQuickSetupStatus } from "@/api/onboarding";
 import { shouldUseDesktopApiAdapter } from "@/platform/desktopApiAdapter";
+import { formatDiscoveryError } from "@/pages/settings/providerRegistryModel";
 import { saveModelSetup } from "@/platform/desktopTransport";
 import { providerClient } from "@/platform/providerTransport";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
@@ -214,7 +215,7 @@ export default function QuickSetupDialog(props: QuickSetupDialogProps) {
     },
     onError: (error) => {
       setCustomModels([]);
-      setCustomModelsMessage(error instanceof Error ? error.message : "获取模型列表失败，可以手动填写模型名称。");
+      setCustomModelsMessage(formatDiscoveryError(error));
     },
   });
 

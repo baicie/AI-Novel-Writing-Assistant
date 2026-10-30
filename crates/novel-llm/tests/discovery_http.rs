@@ -401,3 +401,43 @@ async fn ollama_provider_posts_to_chat_and_maps_response() {
         captured[0]
     );
 }
+
+/// baseURL 没写 /v1 时，404 之后再试一次 /v1/models。
+#[tokio::test]
+async fn falls_back_to_v1_models_when_base_has_no_version() {
+    let (base, handle) = mock(vec![
+        reply(404, r#"{"error":"not found"}"#),
+        reply(200, r#"{"data":[{"id":"fallback-model"}]}"#),
+    ])
+    .await;
+    let bare = base.replace("/v1", "");
+    let outcome = OpenAiCompatibleDiscovery
+        .discover(&request(&bare, "k", true), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(outcome.models[0].id, "fallback-model");
+    let captured = handle.await.unwrap();
+    assert!(
+        captured[0].contains("GET /models"),
+        "第一次先按原样请求：{}",
+        captured[0]
+    );
+    assert!(
+        captured[1].contains("GET /v1/models"),
+        "第二次补 /v1：{}",
+        captured[1]
+    );
+}
+
+/// 已经带 /v1 的地址不重复回退。
+#[tokio::test]
+async fn does_not_fall_back_when_base_already_has_version() {
+    let (base, handle) = mock(vec![reply(404, r#"{}"#)]).await;
+    let error = OpenAiCompatibleDiscovery
+        .discover(&request(&base, "k", true), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "NOT_SUPPORTED");
+    let captured = handle.await.unwrap();
+    assert_eq!(captured.len(), 1, "只请求一次");
+}
