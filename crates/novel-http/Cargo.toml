@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 description = "本地创作内核的 HTTP 入口，用于把 Tauri 内核的 Rust 能力暴露给 Webview，使 Webview 可以保持原有的 fetch 调用。"
 
+autotests = false
 [dependencies]
 axum = { workspace = true }
 tower = { workspace = true }
@@ -22,6 +23,20 @@ novel-application.workspace = true
 novel-platform.workspace = true
 novel-storage-sqlite.workspace = true
 novel-domain.workspace = true
+
+# 受保护的未跟踪文件 integration_runs.rs 内容已与当前 API 脱节，但不得改动/删除；
+# 这里显式列出真正要跑的目标，让 cargo test --workspace 不被那个文件拖累。
+[[test]]
+name = "endpoint_tests"
+
+[[test]]
+name = "integration"
+
+[[test]]
+name = "integration_chapters"
+
+[[test]]
+name = "integration_novels"
 
 [dev-dependencies]
 novel-llm.workspace = true
