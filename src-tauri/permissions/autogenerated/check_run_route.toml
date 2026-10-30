@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-run-route"
+description = "Enables the check_run_route command without any pre-configured scope."
+commands.allow = ["check_run_route"]
+
+[[permission]]
+identifier = "deny-check-run-route"
+description = "Denies the check_run_route command without any pre-configured scope."
+commands.deny = ["check_run_route"]

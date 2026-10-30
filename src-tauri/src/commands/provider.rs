@@ -442,6 +442,18 @@ pub async fn upsert_model_binding(
         .await
 }
 
+/// Run 恢复时的路由校验：模型被删掉时返回 NOT_FOUND，旧默认配置保持可恢复。
+#[tauri::command]
+pub async fn check_run_route(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+) -> Result<novel_application::FrozenRouteStatus, ProviderError> {
+    service(&state)
+        .validate_frozen_route(&provider_id, &model_id)
+        .await
+}
+
 #[tauri::command]
 pub async fn get_effective_model_route(
     state: State<'_, AppState>,

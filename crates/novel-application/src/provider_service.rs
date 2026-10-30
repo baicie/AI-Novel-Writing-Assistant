@@ -635,6 +635,48 @@ pub fn resolve_generation_target(
     }
 }
 
+impl ProviderService {
+    /// Run 恢复时的路由校验：冻结的 provider/model 仍可解析吗？
+    ///
+    /// - provider 不在注册表里 → 视为旧的默认配置（`default` 等），保持可恢复，不改旧行为；
+    /// - provider 在注册表里但模型没了 → 明确报错，由调用方给用户「重新绑定」入口，
+    ///   不允许静默换模型继续生成。
+    pub async fn validate_frozen_route(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<FrozenRouteStatus, ProviderError> {
+        let providers = self.registry.list_providers().await?;
+        let Some(provider) = providers.iter().find(|item| item.id == provider_id) else {
+            return Ok(FrozenRouteStatus::Legacy);
+        };
+        let models = self.registry.list_models(&provider.id).await?;
+        if !models.iter().any(|model| model.model_id == model_id) {
+            return Err(ProviderError::not_found(format!(
+                "这次运行使用的模型已被删除：{} / {}",
+                provider.id, model_id
+            )));
+        }
+        Ok(FrozenRouteStatus::Resolved {
+            protocol: provider.protocol.as_str().to_string(),
+            credential_ref: provider.credential.reference.clone(),
+        })
+    }
+}
+
+/// 冻结路由的校验结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum FrozenRouteStatus {
+    /// 仍然可解析：返回当前协议与凭据引用（引用不含密钥）。
+    Resolved {
+        protocol: String,
+        credential_ref: String,
+    },
+    /// 旧的默认配置记录，不属于注册表：保持可恢复。
+    Legacy,
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1278,5 +1320,77 @@ mod tests {
         };
         let target = resolve_generation_target(Some(route), None, Some("  explicit  ")).unwrap();
         assert_eq!(target.model_id, "explicit");
+    }
+    #[tokio::test]
+    async fn frozen_route_validates_and_returns_refs_without_secret() {
+        let (service, _registry, _vault) = service();
+        service
+            .upsert_provider(
+                draft("gw"),
+                CredentialAction::Replace("sk-secret".into()),
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+        service
+            .upsert_model(
+                novel_domain::ModelProfile {
+                    provider_id: "gw".into(),
+                    model_id: "a".into(),
+                    display_name: None,
+                    capabilities: Default::default(),
+                    source: novel_domain::ModelSource::User,
+                    overridden: Default::default(),
+                },
+                true,
+                None,
+                2,
+            )
+            .await
+            .unwrap();
+        let status = service.validate_frozen_route("gw", "a").await.unwrap();
+        match status {
+            FrozenRouteStatus::Resolved {
+                protocol,
+                credential_ref,
+            } => {
+                assert_eq!(protocol, "openai-compatible");
+                assert_eq!(credential_ref, "gw");
+            }
+            other => panic!("期望 Resolved，实际 {other:?}"),
+        }
+        let json = serde_json::to_string(&service.validate_frozen_route("gw", "a").await.unwrap())
+            .unwrap();
+        assert!(!json.contains("sk-secret"), "校验结果不能带密钥");
+    }
+
+    #[tokio::test]
+    async fn frozen_route_reports_deleted_model() {
+        let (service, registry, _vault) = service();
+        service
+            .upsert_provider(draft("gw"), CredentialAction::Keep, None, 1)
+            .await
+            .unwrap();
+        let error = service
+            .validate_frozen_route("gw", "gone")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ProviderErrorCode::NotFound);
+        assert!(registry.models.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn frozen_route_treats_unknown_provider_as_legacy() {
+        let (service, _registry, _vault) = service();
+        let status = service
+            .validate_frozen_route("default", "legacy-model")
+            .await
+            .unwrap();
+        assert_eq!(
+            status,
+            FrozenRouteStatus::Legacy,
+            "旧默认配置必须继续可恢复"
+        );
     }
 }

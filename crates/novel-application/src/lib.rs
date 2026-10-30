@@ -81,9 +81,9 @@ pub use ports::{
 };
 pub use provider_service::{
     CredentialAction, CredentialActionKind, CredentialIntents, CredentialReconcileReport,
-    CredentialVault, GenerationTarget, LegacyModelTarget, PendingCredentialIntent, ProviderDraft,
-    ProviderError, ProviderErrorCode, ProviderRegistry, ProviderService, ProviderView,
-    ResolvedModelRoute, resolve_generation_target,
+    CredentialVault, FrozenRouteStatus, GenerationTarget, LegacyModelTarget,
+    PendingCredentialIntent, ProviderDraft, ProviderError, ProviderErrorCode, ProviderRegistry,
+    ProviderService, ProviderView, ResolvedModelRoute, resolve_generation_target,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;
