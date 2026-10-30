@@ -237,3 +237,22 @@ client (React)      （desktopTransport → desktopApiAdapter → UI）
 
 顺带修正：`p151_historical_migration` 里硬编码的迁移条数改为 `novel_storage_sqlite::MIGRATION_COUNT`，
 以后新增迁移不必再改断言。
+
+## 12. P16.2 实施记录（部分完成）
+
+已落地（`crates/novel-llm/src/discovery.rs`）：
+
+- `ProviderModelDiscovery` 抽象 + `DiscoveryRequest / DiscoveryOutcome / DiscoveredModel`；
+- **OpenAI 兼容**：`GET {base}/models`、`Authorization: Bearer`、`data` 数组与 `models` 对象映射两种写法、去重、原始 id 保留；
+- **Anthropic**：`GET {base}/v1/models`、`x-api-key` + `anthropic-version`、`has_more / last_id` 游标分页（上限 20 页）；
+- 8 个稳定错误码：`AUTH_FAILED / FORBIDDEN / RATE_LIMITED / NOT_SUPPORTED / INVALID_RESPONSE / NETWORK_ERROR / TIMEOUT / CANCELLED`；
+- 安全：复用 `authorize_endpoint`（回环地址必须显式允许）、不跟随重定向、响应体 512 KB 上限、超时与取消、请求全部在 Rust 侧；
+- `discovery_for(protocol)` 只认两个协议，**不猜**（Ollama 返回 `None`，留待独立适配器）。
+
+测试证据：`cargo test -p novel-llm` → **18 单测 + 15 条真实 HTTP 用例**（本地 mock server）全绿，
+覆盖成功、空列表、重复 id、异常 JSON、401/403/404/429/5xx、超时、取消、重定向不跟随、无密钥、
+本地 http 未授权、带路径前缀 URL、Anthropic 分页与 401 归因；
+`cargo clippy -p novel-llm --lib --all-targets -- -D warnings` 通过。
+
+**未完成（P16.2 剩余）**：内置服务商版本化目录、Ollama `/api/tags` 适配器、
+「手动添加不因远端未返回而删除」的编排（依赖 P16.3 的保存路径）。
