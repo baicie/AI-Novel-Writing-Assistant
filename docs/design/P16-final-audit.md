@@ -27,7 +27,7 @@
 | `p151_historical_migration` 进 CI | PASS | 两个工作流新增 `--features test-harness` 步骤；本地同命令绿 |
 | 真实本地 HTTP mock（认证/分页/重定向/取消/超时/无付费） | PASS | `discovery_http.rs` 19 条 |
 | 前端 typecheck / contract | PASS | `pnpm --filter @ai-novel/client typecheck`；209 条前端测试（含 5 条 transport 契约） |
-| Tauri Native E2E | BLOCKED（未实现） | 见 §原生 E2E 现状：wdio 依赖已装，但**无 wdio 配置、无 spec、无 tauri-driver**；替代证据为 `src-tauri/tests/provider_flow.rs` 全链路集成测试 |
+| Tauri Native E2E | PASS | `pnpm e2e`（`e2e/wdio.conf.js` + `e2e/provider-smoke.e2e.js`）真实启动带 `e2e` 特性的桌面产物：webkit/macOS 会话 2 passing（见 §原生 E2E 实测） |
 | 密钥不可见（响应/日志/导出） | PASS（已覆盖面） | 视图/路由/预览快照断言 + 错误消息不回显密钥用例 |
 | 受保护未跟踪文件未触碰 | PASS | `crates/novel-http/tests/integration_runs.rs` 始终 `??` |
 
@@ -96,3 +96,22 @@ package.json : @wdio/cli 9.31.2 / @wdio/tauri-service 1.5.0 等依赖已安装
 —— 真实 SQLite + 真实 OpenAI 兼容发现适配器（打本地 mock 服务）走完
 「建来源 → 取模型 → 确认候选（只追加、CAS 生效）→ 绑定 → 解析路由 → 恢复校验 → 重开数据库仍在」，
 并断言路由序列化不含密钥。
+
+## 附：原生 E2E 实测（本轮跑通）
+
+前置：`pnpm tauri build --target aarch64-apple-darwin --bundles app --features e2e --config src-tauri/tauri.updater.conf.json`
+
+执行：`pnpm e2e`（= `wdio run e2e/wdio.conf.js`）
+
+结果：
+
+```text
+[webkit 605.1.15 macos #0-0] Session ID: 21f0b563-…
+  桌面壳层
+    ✓ 打开后能拿到窗口标题
+    ✓ 页面里有实际渲染的节点
+2 passing (5.6s) / Spec Files: 1 passed
+```
+
+顺带修掉一个**既有缺陷**：`e2e` 特性下 `has_api_key` 是不可变绑定却被二次赋值，
+导致 `--features e2e` 构建一直失败——这也是此前原生 E2E 从未跑起来的原因之一。
