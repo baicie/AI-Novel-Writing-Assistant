@@ -458,3 +458,26 @@ async fn default_provider_delete_needs_confirmation() {
     );
     kernel.pool().close().await;
 }
+/// 硬门 1：旧接口写默认配置也要 bump revision，否则 Registry 的 CAS 挡不住旧写入。
+#[tokio::test]
+async fn legacy_save_bumps_provider_revision() {
+    let dir = tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("novel.sqlite"))
+        .await
+        .unwrap();
+    kernel
+        .save_model_setup("https://api.deepseek.com/v1", "deepseek-chat", false, 1)
+        .await
+        .unwrap();
+    assert_eq!(kernel.provider_revision("default").await.unwrap(), Some(1));
+    kernel
+        .save_model_setup("https://api.deepseek.com/v1", "deepseek-reasoner", false, 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        kernel.provider_revision("default").await.unwrap(),
+        Some(2),
+        "旧接口每次写入都要 bump"
+    );
+    kernel.pool().close().await;
+}

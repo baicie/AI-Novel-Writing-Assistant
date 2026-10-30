@@ -14,6 +14,8 @@ pub enum SecretError {
 pub trait SecretStore: Send + Sync {
     async fn put(&self, id: &str, secret: &str) -> Result<(), SecretError>;
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError>;
+    /// 清除一条凭据；不存在也算成功（幂等）。
+    async fn delete(&self, id: &str) -> Result<(), SecretError>;
 }
 
 #[derive(Default)]
@@ -33,6 +35,11 @@ impl SecretStore for MemorySecretStore {
 
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError> {
         Ok(self.values.lock().expect("secret lock").get(id).cloned())
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), SecretError> {
+        self.values.lock().expect("secret lock").remove(id);
+        Ok(())
     }
 }
 
@@ -57,6 +64,15 @@ impl SecretStore for OsSecretStore {
         match entry.get_password() {
             Ok(secret) => Ok(Some(secret)),
             Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) => Err(SecretError::Unavailable),
+        }
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), SecretError> {
+        let entry =
+            keyring::Entry::new("Biz Novel Studio", id).map_err(|_| SecretError::Unavailable)?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(SecretError::Unavailable),
         }
     }

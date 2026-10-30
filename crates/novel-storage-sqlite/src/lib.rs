@@ -7,6 +7,7 @@ mod lookups;
 mod memory;
 mod model;
 mod provider;
+mod provider_registry_adapter;
 
 pub use db::MIGRATION_COUNT;
 mod native_tasks;

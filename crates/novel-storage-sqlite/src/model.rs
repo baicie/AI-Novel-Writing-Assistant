@@ -24,12 +24,13 @@ impl SqliteKernel {
         now_ms: i64,
     ) -> Result<(), PortError> {
         sqlx::query(
-            "INSERT INTO provider_credential(id, provider, secret_ref, endpoint, model, allow_localhost_http, created_at)
-             VALUES ('default', 'openai-compatible', ?, ?, ?, ?, ?)
+            "INSERT INTO provider_credential(id, provider, secret_ref, endpoint, model, allow_localhost_http, created_at, revision)
+             VALUES ('default', 'openai-compatible', ?, ?, ?, ?, ?, 1)
              ON CONFLICT(id) DO UPDATE SET
                endpoint = excluded.endpoint,
                model = excluded.model,
-               allow_localhost_http = excluded.allow_localhost_http",
+               allow_localhost_http = excluded.allow_localhost_http,
+               revision = provider_credential.revision + 1",
         )
         .bind(MODEL_SECRET_REF)
         .bind(endpoint)

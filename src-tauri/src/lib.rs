@@ -1,4 +1,5 @@
 mod commands;
+mod credential_vault;
 mod state;
 
 use std::sync::Arc;

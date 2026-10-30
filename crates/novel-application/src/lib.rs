@@ -27,6 +27,7 @@ mod memory;
 mod native_tasks;
 #[allow(clippy::too_many_arguments)]
 mod ports;
+mod provider_service;
 mod runtime;
 mod services_chapter;
 mod services_integration_test;
@@ -77,6 +78,10 @@ pub use ports::{
     SearchHit, StoredEvent, StoryFactView, SystemClock, TaskCenterRepository,
     UpdateChapterMetaRecord, UpdateVolumeRecord, UpdateWorldFields, UuidIds, WorkflowRepository,
     WorldRepository,
+};
+pub use provider_service::{
+    CredentialAction, CredentialActionKind, CredentialVault, ProviderDraft, ProviderError,
+    ProviderErrorCode, ProviderRegistry, ProviderService, ProviderView,
 };
 pub use runtime::{Runtime, RuntimeDeps};
 pub use setup::SetupService;

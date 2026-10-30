@@ -540,3 +540,105 @@ async fn write_model_row<'a>(
     let _ = exists;
     Ok(())
 }
+/// CAS 版 Provider 写入：新建必须不存在，更新必须版本一致。
+impl SqliteKernel {
+    pub async fn upsert_provider_cas(
+        &self,
+        profile: &ProviderProfile,
+        expected_revision: Option<i64>,
+        now_ms: i64,
+    ) -> Result<i64, PortError> {
+        let current = self.provider_revision(&profile.id).await?;
+        match (current, expected_revision) {
+            (Some(_), None) => {
+                return Err(PortError::Conflict(format!(
+                    "模型来源已存在，改用更新（需要提供 expectedRevision）：{}",
+                    profile.id
+                )));
+            }
+            (None, Some(_)) => {
+                return Err(PortError::Conflict(format!(
+                    "模型来源不存在，无法按更新写入：{}",
+                    profile.id
+                )));
+            }
+            (Some(actual), Some(expected)) if actual != expected => {
+                return Err(PortError::Conflict(format!(
+                    "配置已被修改（期望版本 {expected}，当前 {actual}），请刷新后再试"
+                )));
+            }
+            _ => {}
+        }
+        self.upsert_provider(profile, now_ms).await?;
+        let next = current.unwrap_or(0) + 1;
+        sqlx::query("UPDATE provider_credential SET revision = ?, updated_at = ? WHERE id = ?")
+            .bind(next)
+            .bind(now_ms)
+            .bind(&profile.id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_sql)?;
+        Ok(next)
+    }
+
+    pub async fn binding_count(&self, provider_id: &str) -> Result<i64, PortError> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM model_binding WHERE provider_id = ?")
+            .bind(provider_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(map_sql)
+    }
+
+    pub async fn delete_model_cas(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+        expected_revision: Option<i64>,
+    ) -> Result<(), PortError> {
+        if let Some(expected) = expected_revision {
+            let current = self
+                .provider_revision(provider_id)
+                .await?
+                .ok_or_else(|| PortError::NotFound(format!("模型来源不存在：{provider_id}")))?;
+            if current != expected {
+                return Err(PortError::Conflict(format!(
+                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
+                )));
+            }
+        }
+        let affected =
+            sqlx::query("DELETE FROM provider_model WHERE provider_id = ? AND model_id = ?")
+                .bind(provider_id)
+                .bind(model_id)
+                .execute(&self.pool)
+                .await
+                .map_err(map_sql)?
+                .rows_affected();
+        if affected == 0 {
+            return Err(PortError::NotFound(format!("模型不存在：{model_id}")));
+        }
+        Ok(())
+    }
+
+    pub async fn set_binding_cas(
+        &self,
+        binding: &ModelBinding,
+        expected_revision: Option<i64>,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        if let Some(expected) = expected_revision {
+            let current = self
+                .provider_revision(&binding.provider_id)
+                .await?
+                .ok_or_else(|| {
+                    PortError::NotFound(format!("模型来源不存在：{}", binding.provider_id))
+                })?;
+            if current != expected {
+                return Err(PortError::Conflict(format!(
+                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
+                )));
+            }
+        }
+        self.set_model_binding(binding, now_ms).await
+    }
+}
