@@ -110,23 +110,25 @@ impl SecretStore for OsSecretStore {
         if write_fallback(id, secret).is_err() {
             return Err(SecretError::Unavailable);
         }
-        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", id) {
-            if entry.set_password(secret).is_ok()
-                && entry.get_password().ok().as_deref() == Some(secret)
-            {
-                // 钥匙库确实可用，回退文件只是保险，保留即可。
-                return Ok(());
-            }
+        let keychain_holds_secret =
+            keyring::Entry::new("Biz Novel Studio", id).is_ok_and(|entry| {
+                entry.set_password(secret).is_ok()
+                    && entry.get_password().ok().as_deref() == Some(secret)
+            });
+        if keychain_holds_secret {
+            // 钥匙库确实可用，回退文件只是保险，保留即可。
+            return Ok(());
         }
         // 钥匙库不可靠时仍算成功：回退文件已写入，读取会走回退。
         Ok(())
     }
 
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError> {
-        if let Ok(entry) = keyring::Entry::new("Biz Novel Studio", id) {
-            if let Ok(secret) = entry.get_password() {
-                return Ok(Some(secret));
-            }
+        let from_keychain = keyring::Entry::new("Biz Novel Studio", id)
+            .ok()
+            .and_then(|entry| entry.get_password().ok());
+        if let Some(secret) = from_keychain {
+            return Ok(Some(secret));
         }
         Ok(read_fallback(id))
     }
@@ -151,5 +153,35 @@ mod tests {
             store.get("openai").await.unwrap().as_deref(),
             Some("sk-test")
         );
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::*;
+
+    /// 钥匙库不可用时，回退文件必须能一写一读，且删除后读不到。
+    #[test]
+    fn fallback_round_trip_works_without_keychain() {
+        let dir = std::env::temp_dir().join(format!("p16-secrets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        configure_secret_fallback(dir.clone());
+
+        write_fallback("probe-id", "sk-probe").unwrap();
+        assert_eq!(read_fallback("probe-id").as_deref(), Some("sk-probe"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join("probe-id.secret"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "回退文件必须是 0600");
+        }
+
+        delete_fallback("probe-id").unwrap();
+        assert_eq!(read_fallback("probe-id"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
