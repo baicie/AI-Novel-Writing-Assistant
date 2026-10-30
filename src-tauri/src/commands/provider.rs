@@ -523,4 +523,118 @@ mod tests {
         assert!(previews.take(&token, "gw", 2_000).is_ok());
         assert!(previews.take(&token, "gw", 2_000).is_err(), "一次性 token");
     }
+
+    fn keys(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// Rust ↔ TS 契约：字段名必须与 `client/src/platform/providerTransport.ts` 完全一致。
+    #[test]
+    fn provider_view_serializes_camel_case() {
+        let view = ProviderView {
+            id: "gw".into(),
+            display_name: Some("网关".into()),
+            protocol: "openai-compatible".into(),
+            base_url: "https://gw.example.com/v1".into(),
+            allow_localhost_http: false,
+            is_builtin: false,
+            sort_order: 0,
+            revision: 3,
+            credential_present: true,
+        };
+        let value = serde_json::to_value(&view).unwrap();
+        assert_eq!(
+            keys(&value),
+            vec![
+                "allowLocalhostHttp",
+                "baseUrl",
+                "credentialPresent",
+                "displayName",
+                "id",
+                "isBuiltin",
+                "protocol",
+                "revision",
+                "sortOrder",
+            ]
+        );
+        assert!(!value.to_string().contains("sk-"), "视图不能含密钥");
+    }
+
+    #[test]
+    fn discovery_preview_serializes_camel_case_without_secret() {
+        let preview = DiscoveryPreview {
+            preview_token: "pv-1".into(),
+            provider_id: "gw".into(),
+            models: Vec::new(),
+            warnings: vec!["部分失败".into()],
+        };
+        let value = serde_json::to_value(&preview).unwrap();
+        assert_eq!(
+            keys(&value),
+            vec!["models", "previewToken", "providerId", "warnings"]
+        );
+        assert!(!value.to_string().contains("apiKey"), "预览不能回显密钥");
+    }
+
+    #[test]
+    fn model_and_capabilities_serialize_camel_case() {
+        let model = ModelProfile {
+            provider_id: "gw".into(),
+            model_id: "a".into(),
+            display_name: None,
+            capabilities: novel_domain::ModelCapabilities {
+                context_window: Some(64_000),
+                ..Default::default()
+            },
+            source: novel_domain::ModelSource::Discovered,
+            overridden: Default::default(),
+        };
+        let value = serde_json::to_value(&model).unwrap();
+        assert_eq!(
+            keys(&value),
+            vec![
+                "capabilities",
+                "displayName",
+                "modelId",
+                "overridden",
+                "providerId",
+                "source"
+            ]
+        );
+        let capabilities = keys(&value["capabilities"]);
+        assert!(capabilities.contains(&"contextWindow".to_string()));
+        assert!(capabilities.contains(&"maxOutputTokens".to_string()));
+        assert_eq!(
+            value["capabilities"]["maxOutputTokens"],
+            serde_json::Value::Null,
+            "未知保持 null"
+        );
+    }
+
+    #[test]
+    fn requests_deserialize_from_camel_case() {
+        let apply: ApplyDiscoveryRequest = serde_json::from_str(
+            r#"{"providerId":"gw","previewToken":"pv-1","selectedModelIds":["a"],"expectedRevision":2}"#,
+        )
+        .unwrap();
+        assert_eq!(apply.provider_id, "gw");
+        assert_eq!(apply.selected_model_ids, vec!["a".to_string()]);
+
+        let upsert: UpsertProviderRequest = serde_json::from_str(
+            r#"{"providerId":"gw","protocol":"openai-compatible","baseUrl":"https://gw/v1",
+                "credential":{"kind":"replace","apiKey":"sk-1"},"expectedRevision":null}"#,
+        )
+        .unwrap();
+        assert_eq!(upsert.credential.kind, CredentialKindDto::Replace);
+        assert_eq!(upsert.expected_revision, None);
+
+        let draft: DiscoveryDraftRequest = serde_json::from_str(
+            r#"{"protocol":"ollama","baseUrl":"http://127.0.0.1:11434","allowLocalhostHttp":true}"#,
+        )
+        .unwrap();
+        assert!(draft.provider_id.is_none(), "草稿允许没有 providerId");
+        assert_eq!(draft.allow_localhost_http, Some(true));
+    }
 }
