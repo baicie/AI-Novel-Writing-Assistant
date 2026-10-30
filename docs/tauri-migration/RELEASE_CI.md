@@ -105,3 +105,15 @@ TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.config/biz-novel-studio/tauri-updater.key)" 
 - 测试目标的 clippy 债务未清零（`--lib` 已严格，测试目标仍有历史告警）
 - macOS 未做 Developer ID 签名与公证（模式 C），用户首次打开仍需手动放行
 - 更新检查 UI 尚未接入：模式 B 只保证产物与索引正确，客户端还没有"检查更新"入口
+
+## 9. 实测踩到的坑（补充）
+
+**手动补跑发布时，`updater-signed` 会被拒绝。** 流水线只允许 Tag 推送走签名模式（避免从任意分支产出正式更新索引），
+`workflow_dispatch` 选 `updater-signed` 会直接失败并提示「只能由 tauri-v* Tag 触发」。要补跑签名构建，删掉并重新推同名 Tag 即可。
+
+**`source_sha` 必须是完整 40 位 SHA。** `actions/checkout` 把 `ref` 当引用解析，短 SHA 会报 `A branch or tag with the name 'xxx' could not be found`。
+
+**删除 Tag 会把对应 Release 变成 Draft。** 重新推同名 Tag 不会自动恢复，需要执行 `gh release edit <tag> --draft=false`；
+并且在 Draft 期间上传的资产，恢复公开后仍可能返回 404，重新上传一次（`--clobber`）即可。
+
+**发布脚本里只有汇总目录的 `SHA256SUMS.txt` 会被上传**，各平台目录里的同名文件不参与，否则会触发 HTTP 422。
