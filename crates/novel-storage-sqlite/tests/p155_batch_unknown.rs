@@ -161,6 +161,7 @@ async fn unknown_remote_is_not_resent_after_worker_sigkill() {
             repair_budget: Some(0),
             endpoint: endpoint.clone(),
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
