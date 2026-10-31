@@ -96,6 +96,7 @@ async fn silent_server() -> (String, Arc<AtomicUsize>) {
 }
 
 struct Harness {
+    #[allow(dead_code)]
     kernel: Arc<SqliteKernel>,
     runtime: Runtime,
     novel_id: String,
