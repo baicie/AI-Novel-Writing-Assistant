@@ -102,6 +102,13 @@ export function buildChapterGroups(chapters: Chapter[], volumes: ChapterNavVolum
     .map(([, group]) => group);
 }
 
+/** 保存快捷键判定：⌘S / Ctrl+S，且不能带其他修饰键。 */
+export function isSaveShortcut(event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean }): boolean {
+  if (event.altKey) return false;
+  if (!event.metaKey && !event.ctrlKey) return false;
+  return event.key.toLowerCase() === "s";
+}
+
 /**
  * 切换章节前的保护判定：有未保存修改时必须得到用户明确同意。
  * 抽成纯函数，便于确定性验证，也保证按钮与快捷键共用同一套规则。

@@ -4,6 +4,7 @@ import {
   buildChapterGroups,
   buildRunAttention,
   filterChapters,
+  isSaveShortcut,
   neighbourOf,
   runAttentionFor,
   shouldBlockChapterSwitch,
@@ -82,4 +83,12 @@ test("latest run per chapter decides the badge", () => {
     { chapterId: "c3", state: "succeeded", updatedAt: 7 },
   ]);
   assert.deepEqual(attention, { c1: "action", c2: "running", c3: "done" });
+});
+
+test("save shortcut only matches cmd/ctrl + s without alt", () => {
+  assert.equal(isSaveShortcut({ key: "s", metaKey: true }), true);
+  assert.equal(isSaveShortcut({ key: "S", ctrlKey: true }), true);
+  assert.equal(isSaveShortcut({ key: "s" }), false);
+  assert.equal(isSaveShortcut({ key: "s", metaKey: true, altKey: true }), false);
+  assert.equal(isSaveShortcut({ key: "k", metaKey: true }), false);
 });

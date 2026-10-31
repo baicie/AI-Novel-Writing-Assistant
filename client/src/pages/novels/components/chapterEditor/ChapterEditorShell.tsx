@@ -23,6 +23,7 @@ import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
 import ChapterRightPanel from "./rightPanel/ChapterRightPanel";
 import { readStoredPanelTab, storePanelTab, type PanelTab } from "./rightPanel/panelModel";
+import { isSaveShortcut } from "./navigation/chapterNavigatorModel";
 import ChapterEditorSidebar from "./ChapterEditorSidebar";
 import ChapterVersionDrawer from "./ChapterVersionDrawer";
 import ChapterTextEditor from "./ChapterTextEditor";
@@ -631,11 +632,27 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const storage = typeof window === "undefined" ? null : window.sessionStorage;
   const [rightTab, setRightTab] = useState<PanelTab>(() => readStoredPanelTab(novelId, storage));
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const saveShortcutRef = useRef<() => void>(() => {});
+  saveShortcutRef.current = () => {
+    if (!chapter || !isDirty || saveMutation.isPending) return;
+    saveMutation.mutate(contentDraft);
+  };
+
   const changeRightTab = (tab: PanelTab) => {
     setRightTab(tab);
     storePanelTab(novelId, tab, storage);
     setRightPanelOpen(true);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isSaveShortcut(event)) return;
+      event.preventDefault();
+      saveShortcutRef.current();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   return (
     <div data-local-draft-status={draft.localDraftStatus} data-local-draft-loaded={String(draft.localDraftLoaded)} data-local-draft-dirty={String(isDirty)} className="flex min-h-0 flex-1 flex-col gap-4">

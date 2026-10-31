@@ -77,6 +77,13 @@ describe("章节工作台导航与统一工作区", () => {
     const hasEmptyHint = bodyText.includes("这本书还没有运行记录");
     expect(hasRunPanel || hasEmptyHint).toBe(true);
 
+    // 有运行面板时，「查看完整运行记录」必须是真实可点的深链。
+    if (hasRunPanel) {
+      const historyLink = await $('[data-testid="run-history-link"]');
+      expect(await historyLink.isExisting()).toBe(true);
+      expect(String(await historyLink.getAttribute("href"))).toContain("/tasks");
+    }
+
     // 键盘导航：Alt+→ 等价于点「下一章」，同样只有一个当前态。
     const beforeHash = await browser.execute(() => window.location.hash);
     await browser.keys(["Alt", "ArrowRight"]);

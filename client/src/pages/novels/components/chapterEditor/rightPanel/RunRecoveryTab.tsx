@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -142,6 +143,14 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
           <span className="text-xs text-muted-foreground">当前没有需要你处理的步骤。</span>
         ) : null}
       </div>
+
+      <Link
+        to="/tasks"
+        data-testid="run-history-link"
+        className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        查看完整运行记录
+      </Link>
     </div>
   );
 }
