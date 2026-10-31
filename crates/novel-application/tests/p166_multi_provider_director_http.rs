@@ -36,7 +36,6 @@ impl Record {
             .unwrap_or_default()
             .to_string()
     }
-
 }
 
 /// 一个可编排的 Mock LLM Server：按 FIFO 返回剧本内容，并记录每次请求。
