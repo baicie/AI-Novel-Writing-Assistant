@@ -22,6 +22,7 @@ import { toast } from "@/components/ui/toast";
 import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
 import ChapterRightPanel from "./rightPanel/ChapterRightPanel";
+import { readStoredPanelTab, storePanelTab, type PanelTab } from "./rightPanel/panelModel";
 import ChapterEditorSidebar from "./ChapterEditorSidebar";
 import ChapterVersionDrawer from "./ChapterVersionDrawer";
 import ChapterTextEditor from "./ChapterTextEditor";
@@ -627,6 +628,14 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const canRunSelectionRevision = Boolean(getSelectionTarget());
   const headerSaveLabel = getSaveStatusLabel(saveStatus, isDirty);
   const gridClassName = "xl:grid-cols-[320px_minmax(0,1fr)_400px]";
+  const storage = typeof window === "undefined" ? null : window.sessionStorage;
+  const [rightTab, setRightTab] = useState<PanelTab>(() => readStoredPanelTab(novelId, storage));
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const changeRightTab = (tab: PanelTab) => {
+    setRightTab(tab);
+    storePanelTab(novelId, tab, storage);
+    setRightPanelOpen(true);
+  };
 
   return (
     <div data-local-draft-status={draft.localDraftStatus} data-local-draft-loaded={String(draft.localDraftLoaded)} data-local-draft-dirty={String(isDirty)} className="flex min-h-0 flex-1 flex-col gap-4">
@@ -666,6 +675,16 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       {isDirty && draft.localDraftStatus === "saved" ? (
         <p data-testid="chapter-local-draft-saved" className="shrink-0 text-xs text-muted-foreground">本地草稿已安全保存；正式正文尚未保存。</p>
       ) : null}
+      <div className="flex shrink-0 items-center justify-end gap-2 xl:hidden">
+        <button
+          type="button"
+          onClick={() => setRightPanelOpen((open) => !open)}
+          data-testid="toggle-right-panel"
+          className="rounded-lg bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          {rightPanelOpen ? "收起 AI 助手" : "展开 AI 助手"}
+        </button>
+      </div>
       <div className={`grid min-h-0 flex-1 gap-4 overflow-hidden ${gridClassName}`}>
         <ChapterEditorSidebar
           chapter={chapter}
@@ -673,6 +692,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           volumes={volumes}
           onSelectChapter={onSelectChapter}
           runAttention={runAttention}
+          onOpenRunTab={() => changeRightTab("run")}
           workspace={workspace}
           workspaceStatus={workspaceStatus}
           wordCount={wordCount}
@@ -745,9 +765,11 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           />
         </div>
 
-        <div className="min-h-0 overflow-hidden">
+        <div className={`min-h-0 overflow-hidden ${rightPanelOpen ? "" : "hidden"} xl:block`}>
           <ChapterRightPanel
             novelId={novelId}
+            activeTab={rightTab}
+            onTabChange={changeRightTab}
             chapterId={chapter?.id ?? ""}
             workspace={workspace}
             selectedDiagnosticId={selectedDiagnosticId}

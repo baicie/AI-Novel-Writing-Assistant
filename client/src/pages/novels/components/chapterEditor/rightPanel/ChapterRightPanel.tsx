@@ -1,11 +1,9 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { ChapterEditorDiagnosticCard, ChapterEditorWorkspaceResponse } from "@ai-novel/shared/types/novel";
 import CastWorldTab from "./CastWorldTab";
-import type { CastItem } from "./panelModel";
+import type { CastItem, PanelTab } from "./panelModel";
 import DiagnosticsTab from "./DiagnosticsTab";
 import RunRecoveryTab from "./RunRecoveryTab";
-
-type PanelTab = "revise" | "review" | "cast" | "run";
 
 const TAB_LABELS: Array<{ key: PanelTab; label: string }> = [
   { key: "revise", label: "AI 修改" },
@@ -16,6 +14,8 @@ const TAB_LABELS: Array<{ key: PanelTab; label: string }> = [
 
 interface ChapterRightPanelProps {
   novelId: string;
+  activeTab: PanelTab;
+  onTabChange: (tab: PanelTab) => void;
   chapterId: string;
   workspace: ChapterEditorWorkspaceResponse | null;
   selectedDiagnosticId: string | null;
@@ -36,6 +36,8 @@ interface ChapterRightPanelProps {
 export default function ChapterRightPanel(props: ChapterRightPanelProps) {
   const {
     novelId,
+    activeTab: tab,
+    onTabChange,
     chapterId,
     workspace,
     selectedDiagnosticId,
@@ -47,7 +49,6 @@ export default function ChapterRightPanel(props: ChapterRightPanelProps) {
     isResolvingDiagnostic = false,
     children,
   } = props;
-  const [tab, setTab] = useState<PanelTab>("revise");
   const issueCount = workspace?.diagnosticCards.length ?? 0;
 
   return (
@@ -57,7 +58,7 @@ export default function ChapterRightPanel(props: ChapterRightPanelProps) {
           <button
             key={item.key}
             type="button"
-            onClick={() => setTab(item.key)}
+            onClick={() => onTabChange(item.key)}
             data-testid={`panel-tab-${item.key}`}
             data-active={String(tab === item.key)}
             className={`flex-1 rounded-lg px-2 py-1.5 text-xs transition-colors ${

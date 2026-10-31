@@ -16,6 +16,7 @@ interface ChapterNavigatorProps {
   currentChapterId: string;
   isDirty?: boolean;
   runAttention?: Record<string, ChapterRunAttention>;
+  onOpenRunTab?: () => void;
   onSelectChapter: (chapterId: string) => void;
 }
 
@@ -24,7 +25,15 @@ interface ChapterNavigatorProps {
  * 只消费已经加载好的章节数据，不自己编造进度。
  */
 export default function ChapterNavigator(props: ChapterNavigatorProps) {
-  const { chapters, volumes = [], currentChapterId, isDirty = false, runAttention = {}, onSelectChapter } = props;
+  const {
+    chapters,
+    volumes = [],
+    currentChapterId,
+    isDirty = false,
+    runAttention = {},
+    onOpenRunTab,
+    onSelectChapter,
+  } = props;
   const [keyword, setKeyword] = useState("");
 
   const visible = useMemo(() => filterChapters(chapters, keyword), [chapters, keyword]);
@@ -119,7 +128,24 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
                     </span>
                     <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
                       {runAttention[chapter.id] === "action" ? (
-                        <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-amber-700 dark:text-amber-300" data-testid="chapter-run-action">
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            switchTo(chapter.id);
+                            onOpenRunTab?.();
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            switchTo(chapter.id);
+                            onOpenRunTab?.();
+                          }}
+                          className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-amber-700 dark:text-amber-300"
+                          data-testid="chapter-run-action"
+                        >
                           待处理
                         </span>
                       ) : runAttention[chapter.id] === "running" ? (

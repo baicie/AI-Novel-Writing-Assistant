@@ -8,6 +8,28 @@ export interface CastItem {
   currentGoal?: string | null;
 }
 
+export type PanelTab = "revise" | "review" | "cast" | "run";
+
+const PANEL_TABS: PanelTab[] = ["revise", "review", "cast", "run"];
+
+/** 页签选择要跨章节保持：同一本书里切章不该把作者丢回默认页签。 */
+export function readStoredPanelTab(novelId: string, storage?: Storage | null): PanelTab {
+  try {
+    const raw = storage?.getItem(`chapter-workbench-tab:${novelId}`);
+    return PANEL_TABS.find((tab) => tab === raw) ?? "revise";
+  } catch {
+    return "revise";
+  }
+}
+
+export function storePanelTab(novelId: string, tab: PanelTab, storage?: Storage | null): void {
+  try {
+    storage?.setItem(`chapter-workbench-tab:${novelId}`, tab);
+  } catch {
+    // 隐私模式或配额满时静默降级：页签偏好丢了不影响编辑。
+  }
+}
+
 export type RunActionKey = "approve" | "resume" | "resume_debt" | "cancel" | "regenerate";
 
 export interface RunActionOption {

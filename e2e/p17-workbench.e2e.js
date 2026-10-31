@@ -99,4 +99,49 @@ describe("章节工作台导航与统一工作区", () => {
     }
   });
 
+
+  it("页签在切章后保持，小窗口下 AI 助手可收起", async () => {
+    await browser.setWindowSize(1100, 900);
+    await browser.execute(
+      (nid, cid) => {
+        window.location.hash = `#/novels/${nid}/chapters/${cid}`;
+      },
+      novelId,
+      firstChapterId
+    );
+    await browser.pause(3000);
+
+    // 选中「人物与世界观」，切到下一章后应保持在同一页签。
+    const castTab = await $('[data-testid="panel-tab-cast"]');
+    await castTab.waitForExist({ timeout: 10000 });
+    await castTab.click();
+    await browser.pause(400);
+    expect(await castTab.getAttribute("data-active")).toBe("true");
+
+    const nextButton = await $('[data-testid="chapter-nav-next"]');
+    if (await nextButton.isExisting()) {
+      await nextButton.click();
+      await browser.pause(2500);
+      const castAfterSwitch = await $('[data-testid="panel-tab-cast"]');
+      expect(await castAfterSwitch.getAttribute("data-active")).toBe("true");
+    }
+
+    // 小窗口下应有收起/展开按钮，并且真的能收起面板。
+    const toggle = await $('[data-testid="toggle-right-panel"]');
+    await toggle.waitForExist({ timeout: 10000 });
+    const panelBefore = await $('[data-testid="chapter-right-panel"]');
+    expect(await panelBefore.isDisplayed()).toBe(true);
+
+    await toggle.click();
+    await browser.pause(400);
+    const panelCollapsed = await $('[data-testid="chapter-right-panel"]');
+    expect(await panelCollapsed.isDisplayed()).toBe(false);
+
+    await toggle.click();
+    await browser.pause(400);
+    const panelRestored = await $('[data-testid="chapter-right-panel"]');
+    expect(await panelRestored.isDisplayed()).toBe(true);
+
+    await browser.setWindowSize(1440, 900);
+  });
 });
