@@ -152,3 +152,15 @@ async fn cancellation_stops_without_extra_requests() {
     assert!(matches!(result, Err(LlmError::Cancelled)), "{result:?}");
     assert_eq!(hits.load(Ordering::SeqCst), 0, "取消后不应再发请求");
 }
+
+/// G2：先返回两个真实 token，然后断流（没有 [DONE]）——必须报错，不能当成功。
+#[tokio::test]
+async fn partial_tokens_then_disconnect_is_an_error() {
+    let (result, hits) = run(Fault {
+        status: StatusCode::OK,
+        body: "data: {\"choices\":[{\"delta\":{\"content\":\"半\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"句\"}}]}\n\n",
+    })
+    .await;
+    assert!(result.is_err(), "部分输出后断流必须失败，实际 {result:?}");
+    assert_eq!(hits, 1, "断流不应触发重试");
+}

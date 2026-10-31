@@ -78,54 +78,13 @@ async fn mock_server() -> (
     (format!("http://{address}/v1/chat/completions"), hits, auth)
 }
 
-#[ignore = "B2 待补：旧合同在当前工作流里先进入 paused 门点（outcome=Advanced/paused，0 次远端请求），需要与旧合同匹配的 artifact fixture 才能继续"]
+#[ignore = "B2 待补：旧合同仍停在门点（0 次远端请求）；需要与旧合同 plan_version 匹配的 artifact fixture 才能推进"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
     let (endpoint, hits, auth) = mock_server().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-run.sqlite");
 
-    // 1. 在真实数据库里写入「旧格式合同」：缺 step_routes / credential_ref / protocol / reasoning_effort。
-    //    schema 迁移本身由 p151 / legacy_model_setup_upgrade 覆盖，这里专测合同兼容。
-    let legacy = SqliteKernel::open(&path).await.unwrap();
-    sqlx::query("INSERT INTO novel(id,title,description,status,created_at,updated_at) VALUES ('n1','旧书','','draft',1,1)")
-        .execute(legacy.pool())
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO chapter(id, novel_id, title, sort_order, protection, created_at, updated_at) VALUES ('c1','n1','第一章',1,'none',1,1)")
-        .execute(legacy.pool())
-        .await
-        .unwrap();
-    // 旧合同：没有 step_routes / credential_ref / protocol / reasoning_effort。
-    let contract = serde_json::json!({
-        "runId": "r-legacy",
-        "novelId": "n1",
-        "planVersion": "v1",
-        "chapterPlanVersion": "v1",
-        "targetChapterId": "c1",
-        "provider": "openai-compatible",
-        "model": "legacy-model",
-        "promptVersions": {"chapter_draft": "chapter-draft-v1"},
-        "tokenBudget": 1024,
-        "contextTokenBudget": 24000,
-        "maxAutomaticRetries": 0,
-        "repairBudget": 0,
-        "endpoint": endpoint,
-        "allowLocalhostHttp": true
-    })
-    .to_string();
-    sqlx::query("INSERT INTO workflow_run(id, novel_id, plan_version, contract_json, created_at) VALUES ('r-legacy','n1','v1',?,1)")
-        .bind(&contract)
-        .execute(legacy.pool())
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO workflow_control(run_id, novel_id, status, version, cursor_step_id) VALUES ('r-legacy','n1','running',0,NULL)")
-        .execute(legacy.pool())
-        .await
-        .unwrap();
-    legacy.pool().close().await;
-
-    // 2. 升级到 HEAD 并继续执行。
     let kernel = Arc::new(SqliteKernel::open(&path).await.unwrap());
     let runtime = Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
@@ -142,6 +101,43 @@ async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
         lease_ms: 60_000,
         concurrency: 1,
     });
+
+    // 用真实 Director 建书与章节：这样工作流需要的前置记录都由正常的业务路径产生，
+    // 然后只把 Run 的合同替换成「旧格式」，专测合同兼容。
+    let novel = runtime.director.create_novel("旧合同书", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let contract = serde_json::json!({
+        "runId": "r-legacy",
+        "novelId": novel.id,
+        "planVersion": "v1",
+        "chapterPlanVersion": "v1",
+        "targetChapterId": chapter.id,
+        "provider": "openai-compatible",
+        "model": "legacy-model",
+        "promptVersions": {"chapter_draft": "chapter-draft-v1"},
+        "tokenBudget": 1024,
+        "contextTokenBudget": 24000,
+        "maxAutomaticRetries": 0,
+        "repairBudget": 0,
+        "endpoint": endpoint,
+        "allowLocalhostHttp": true
+    })
+    .to_string();
+    sqlx::query("INSERT INTO workflow_run(id, novel_id, plan_version, contract_json, created_at) VALUES ('r-legacy', ?, 'v1', ?, 1)")
+        .bind(&novel.id)
+        .bind(&contract)
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO workflow_control(run_id, novel_id, status, version, cursor_step_id) VALUES ('r-legacy', ?, 'running', 0, NULL)")
+        .bind(&novel.id)
+        .execute(kernel.pool())
+        .await
+        .unwrap();
 
     let outcome = runtime.worker.tick().await.unwrap();
     assert!(
