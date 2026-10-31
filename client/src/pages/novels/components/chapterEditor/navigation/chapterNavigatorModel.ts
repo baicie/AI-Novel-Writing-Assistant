@@ -102,6 +102,12 @@ export function buildChapterGroups(chapters: Chapter[], volumes: ChapterNavVolum
     .map(([, group]) => group);
 }
 
+/** 章节字数展示：只统计正文字符数，空章节显示「空」。 */
+export function formatChapterWordCount(content: string | null | undefined): string {
+  const length = (content ?? "").trim().length;
+  return length === 0 ? "空" : `${length} 字`;
+}
+
 /** 保存快捷键判定：⌘S / Ctrl+S，且不能带其他修饰键。 */
 export function isSaveShortcut(event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean }): boolean {
   if (event.altKey) return false;

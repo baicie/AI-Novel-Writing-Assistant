@@ -4,6 +4,7 @@ import {
   buildChapterGroups,
   buildRunAttention,
   filterChapters,
+  formatChapterWordCount,
   isSaveShortcut,
   neighbourOf,
   runAttentionFor,
@@ -91,4 +92,11 @@ test("save shortcut only matches cmd/ctrl + s without alt", () => {
   assert.equal(isSaveShortcut({ key: "s" }), false);
   assert.equal(isSaveShortcut({ key: "s", metaKey: true, altKey: true }), false);
   assert.equal(isSaveShortcut({ key: "k", metaKey: true }), false);
+});
+
+test("chapter word count ignores blank content", () => {
+  assert.equal(formatChapterWordCount(""), "空");
+  assert.equal(formatChapterWordCount(null), "空");
+  assert.equal(formatChapterWordCount("   "), "空");
+  assert.equal(formatChapterWordCount("少年入山"), "4 字");
 });

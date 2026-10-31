@@ -5,6 +5,7 @@ import {
   buildChapterGroups,
   filterChapters,
   neighbourOf,
+  formatChapterWordCount,
   shouldBlockChapterSwitch,
   type ChapterNavVolume,
   type ChapterRunAttention,
@@ -153,7 +154,7 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
                           生成中
                         </span>
                       ) : null}
-                      {item.hasContent ? `v${item.officialVersion ?? 0}` : "空"}
+                      {item.hasContent ? `v${item.officialVersion ?? 0} · ${formatChapterWordCount(chapter.content)}` : "空"}
                     </span>
                   </button>
                 );
