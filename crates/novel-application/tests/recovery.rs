@@ -114,6 +114,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -133,6 +134,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -270,6 +272,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -297,6 +300,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await;
     assert!(conflict.is_err());
@@ -496,6 +500,7 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -576,6 +581,7 @@ async fn mock_draft_stream_reaches_event_subscribers_before_checkpoint() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

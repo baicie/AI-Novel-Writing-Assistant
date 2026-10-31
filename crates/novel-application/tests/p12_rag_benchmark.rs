@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use novel_application::{
     KnowledgeRepository, NewDocument, NewEmbedding, NewNovel, NovelRepository,
 };

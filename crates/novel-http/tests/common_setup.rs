@@ -1,3 +1,9 @@
+//! 共享测试脚手架。
+//!
+//! 注：`tests/integration_runs.rs` 是受保护的陈旧文件、暂不参与编译，
+//! 因此这里少数仅供它使用的辅助方法暂时无人引用，先整体允许 dead_code。
+#![allow(dead_code)]
+
 //! 集成测试的共享设置和工具。
 //!
 //! 为所有 HTTP-DB 集成测试提供：
@@ -338,7 +344,7 @@ mod tests {
         // 验证服务器可达
         let response = ctx
             .http_client
-            .get(&ctx.url("/api/health"))
+            .get(ctx.url("/api/health"))
             .send()
             .await
             .expect("health check");

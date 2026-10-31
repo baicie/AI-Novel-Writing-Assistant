@@ -34,7 +34,7 @@ async fn test_create_novel_persists_to_db() {
 
     let response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&payload)
         .send()
         .await
@@ -78,7 +78,7 @@ async fn test_create_novel_with_minimal_fields() {
 
     let response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&payload)
         .send()
         .await
@@ -113,7 +113,7 @@ async fn test_get_novel_returns_persisted_data() {
 
     let create_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&create_payload)
         .send()
         .await
@@ -125,7 +125,7 @@ async fn test_get_novel_returns_persisted_data() {
     // 通过 HTTP GET 读取小说
     let get_response = ctx
         .http_client
-        .get(&ctx.url(&format!("/api/novels/{}", novel_id)))
+        .get(ctx.url(&format!("/api/novels/{}", novel_id)))
         .send()
         .await
         .expect("get novel");
@@ -153,7 +153,7 @@ async fn test_list_novels_returns_persisted() {
             "description": format!("描述 {}", i),
         });
         ctx.http_client
-            .post(&ctx.url("/api/novels"))
+            .post(ctx.url("/api/novels"))
             .json(&payload)
             .send()
             .await
@@ -165,7 +165,7 @@ async fn test_list_novels_returns_persisted() {
     // 通过 HTTP 列表
     let response = ctx
         .http_client
-        .get(&ctx.url("/api/novels"))
+        .get(ctx.url("/api/novels"))
         .send()
         .await
         .expect("list novels");
@@ -178,7 +178,7 @@ async fn test_list_novels_returns_persisted() {
     assert_eq!(items.len(), 3);
 
     // 验证按 updated_at 倒序排列
-    for (idx, item) in items.iter().enumerate() {
+    for (_idx, item) in items.iter().enumerate() {
         assert!(item["title"].as_str().unwrap().contains("小说"));
     }
 }
@@ -197,7 +197,7 @@ async fn test_update_novel_persists() {
 
     let create_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&create_payload)
         .send()
         .await
@@ -218,7 +218,7 @@ async fn test_update_novel_persists() {
 
     let update_response = ctx
         .http_client
-        .put(&ctx.url(&format!("/api/novels/{}", novel_id)))
+        .put(ctx.url(&format!("/api/novels/{}", novel_id)))
         .json(&update_payload)
         .send()
         .await
@@ -252,7 +252,7 @@ async fn test_delete_novel_removes_from_db() {
 
     let create_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&create_payload)
         .send()
         .await
@@ -266,7 +266,7 @@ async fn test_delete_novel_removes_from_db() {
     // 通过 HTTP DELETE 删除小说
     let delete_response = ctx
         .http_client
-        .delete(&ctx.url(&format!("/api/novels/{}", novel_id)))
+        .delete(ctx.url(&format!("/api/novels/{}", novel_id)))
         .send()
         .await
         .expect("delete");
@@ -285,7 +285,7 @@ async fn test_delete_nonexistent_novel_returns_404() {
 
     let response = ctx
         .http_client
-        .delete(&ctx.url("/api/novels/nonexistent-id"))
+        .delete(ctx.url("/api/novels/nonexistent-id"))
         .send()
         .await
         .expect("delete request");
@@ -301,7 +301,7 @@ async fn test_get_nonexistent_novel_returns_404() {
 
     let response = ctx
         .http_client
-        .get(&ctx.url("/api/novels/nonexistent-id"))
+        .get(ctx.url("/api/novels/nonexistent-id"))
         .send()
         .await
         .expect("get request");
@@ -326,7 +326,7 @@ async fn test_novel_concurrent_creation() {
             });
 
             ctx.http_client
-                .post(&ctx.url("/api/novels"))
+                .post(ctx.url("/api/novels"))
                 .json(&payload)
                 .send()
                 .await
@@ -377,7 +377,7 @@ async fn test_concurrent_update_same_novel() {
 
     let create_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&create_payload)
         .send()
         .await
@@ -400,7 +400,7 @@ async fn test_concurrent_update_same_novel() {
             });
 
             ctx.http_client
-                .put(&ctx.url(&format!("/api/novels/{}", novel_id)))
+                .put(ctx.url(&format!("/api/novels/{}", novel_id)))
                 .json(&payload)
                 .send()
                 .await

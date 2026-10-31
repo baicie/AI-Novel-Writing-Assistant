@@ -9,7 +9,12 @@ use crate::error::{HttpError, HttpResult};
 use crate::state::KernelState;
 
 pub async fn list(State(state): State<KernelState>) -> HttpResult<Json<Value>> {
-    let worlds = state.runtime.setup.list_worlds().await.map_err(HttpError::from)?;
+    let worlds = state
+        .runtime
+        .setup
+        .list_worlds()
+        .await
+        .map_err(HttpError::from)?;
     Ok(Json(json!({
         "success": true,
         "data": worlds,
@@ -44,7 +49,12 @@ pub async fn detail(
     State(state): State<KernelState>,
     Path(id): Path<String>,
 ) -> HttpResult<Json<Value>> {
-    let world = state.runtime.setup.get_world(&id).await.map_err(HttpError::from)?;
+    let world = state
+        .runtime
+        .setup
+        .get_world(&id)
+        .await
+        .map_err(HttpError::from)?;
     Ok(Json(json!({
         "success": true,
         "data": world,

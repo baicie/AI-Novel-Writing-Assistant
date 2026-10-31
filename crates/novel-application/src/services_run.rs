@@ -42,6 +42,7 @@ impl RunUseCases for DirectorService {
             repair_budget: None,
             endpoint: String::new(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         };
 
         // 调用 DirectorService 的 open_run 方法
@@ -139,6 +140,7 @@ mod tests {
             repair_budget: None,
             endpoint: String::new(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         };
 
         assert_eq!(input.max_automatic_retries, 3);

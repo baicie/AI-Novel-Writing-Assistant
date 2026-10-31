@@ -4,6 +4,7 @@
 mod chapter;
 mod entities;
 mod error;
+mod provider;
 mod run;
 mod setup;
 mod workflow;
@@ -14,6 +15,11 @@ pub use entities::{
     WorkflowStep, WorkflowStepType, WorldSetting,
 };
 pub use error::DomainError;
+pub use provider::{
+    CapabilityField, CapabilityValue, CredentialKind, CredentialReference, DiscoveryErrorCode,
+    Modality, ModelBinding, ModelCapabilities, ModelDiscoveryOutcome, ModelProfile, ModelSource,
+    ProviderProfile, ProviderProtocol,
+};
 pub use run::{
     ControlEvent, PauseKind, RunControl, RunGate, RunPause, RunStatus, StopSignalKind, apply_event,
     initial_control, note_lease, parse_status,

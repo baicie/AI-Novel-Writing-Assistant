@@ -386,9 +386,13 @@ impl Worker {
         }
         let prompt = draft_prompt(self, claimed, &chapter.title).await?;
         let summary = summarize(&prompt);
+        let route = claimed.contract.effective_route("writer");
         let api_key = self
             .secrets
-            .api_key(&claimed.contract.provider)
+            .api_key(route.credential_ref(
+                &claimed.contract.provider,
+                claimed.contract.credential_ref.as_deref(),
+            ))
             .await?
             .unwrap_or_default();
         let cancel = CancellationToken::new();
@@ -415,16 +419,19 @@ impl Worker {
         let started = self.clock.now_ms();
         let generated = self
             .llm
-            .generate(
+            .generate_with_protocol(
                 LlmRequest {
                     request_id: request_id.clone(),
-                    model: claimed.contract.model.clone(),
+                    model: route.model_id(&claimed.contract.model).to_string(),
                     prompt,
-                    endpoint: claimed.contract.endpoint.clone(),
+                    endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
                     api_key,
-                    allow_localhost_http: claimed.contract.allow_localhost_http,
+                    allow_localhost_http: route
+                        .allow_localhost_http(claimed.contract.allow_localhost_http),
                     max_output_tokens: claimed.contract.token_budget,
                 },
+                route.protocol(claimed.contract.protocol.as_deref()),
+                route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
                 sender,
                 cancel,
             )
@@ -610,9 +617,13 @@ impl Worker {
                 run_id: claimed.run_id.clone(),
             });
         }
+        let route = claimed.contract.effective_route("repair");
         let api_key = self
             .secrets
-            .api_key(&claimed.contract.provider)
+            .api_key(route.credential_ref(
+                &claimed.contract.provider,
+                claimed.contract.credential_ref.as_deref(),
+            ))
             .await?
             .unwrap_or_default();
         let cancel = CancellationToken::new();
@@ -635,16 +646,19 @@ impl Worker {
         let started = self.clock.now_ms();
         let generated = self
             .llm
-            .generate(
+            .generate_with_protocol(
                 LlmRequest {
                     request_id: request_id.clone(),
-                    model: claimed.contract.model.clone(),
+                    model: route.model_id(&claimed.contract.model).to_string(),
                     prompt,
-                    endpoint: claimed.contract.endpoint.clone(),
+                    endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
                     api_key,
-                    allow_localhost_http: claimed.contract.allow_localhost_http,
+                    allow_localhost_http: route
+                        .allow_localhost_http(claimed.contract.allow_localhost_http),
                     max_output_tokens: claimed.contract.token_budget,
                 },
+                route.protocol(claimed.contract.protocol.as_deref()),
+                route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
                 sender,
                 cancel,
             )
@@ -1266,9 +1280,18 @@ async fn execute_structured(
             run_id: claimed.run_id.clone(),
         });
     }
+    let route = claimed
+        .contract
+        .effective_route(task_type_for_step(step_id));
     let api_key = worker
         .secrets
-        .api_key(&claimed.contract.provider)
+        .api_key(
+            claimed
+                .contract
+                .credential_ref
+                .as_deref()
+                .unwrap_or(&claimed.contract.provider),
+        )
         .await?
         .unwrap_or_default();
     let cancel = CancellationToken::new();
@@ -1292,16 +1315,19 @@ async fn execute_structured(
     let started = worker.clock.now_ms();
     let generated = worker
         .llm
-        .generate(
+        .generate_with_protocol(
             LlmRequest {
                 request_id: request_id.clone(),
-                model: claimed.contract.model.clone(),
+                model: route.model_id(&claimed.contract.model).to_string(),
                 prompt,
-                endpoint: claimed.contract.endpoint.clone(),
+                endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
                 api_key,
-                allow_localhost_http: claimed.contract.allow_localhost_http,
+                allow_localhost_http: route
+                    .allow_localhost_http(claimed.contract.allow_localhost_http),
                 max_output_tokens: claimed.contract.token_budget,
             },
+            route.protocol(claimed.contract.protocol.as_deref()),
+            route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
             sender,
             cancel,
         )
@@ -1685,13 +1711,20 @@ fn invocation(
     started: i64,
     usage: &TokenUsage,
 ) -> NewInvocation {
+    let route = claimed
+        .contract
+        .effective_route(task_type_for_step(step_id));
+    let provider = match route {
+        crate::provider_service::EffectiveRoute::Step(step) => step.provider_id.clone(),
+        crate::provider_service::EffectiveRoute::Contract => claimed.contract.provider.clone(),
+    };
     NewInvocation {
         id: worker.ids.new_id(),
         request_id: request_id.to_string(),
         run_id: claimed.run_id.clone(),
         step_id: step_id.to_string(),
-        provider: claimed.contract.provider.clone(),
-        model: claimed.contract.model.clone(),
+        provider,
+        model: route.model_id(&claimed.contract.model).to_string(),
         input_summary: summary.to_string(),
         started_at: started,
         finished_at: worker.clock.now_ms(),
@@ -1824,5 +1857,23 @@ mod structured_validation_tests {
         assert_eq!(same, same_other_description);
         assert_ne!(same, different_evidence);
         assert_ne!(same, different_source);
+    }
+}
+
+/// 步骤 id 到绑定任务类型的唯一映射：前后端都用这套名字，不另造一套。
+fn task_type_for_step(step_id: &str) -> &'static str {
+    match step_id {
+        "draft" => "writer",
+        "consistency_review" => "review",
+        "bounded_repair" => "repair",
+        "story_macro" => "planner",
+        "character_cast" | "volume_strategy" | "chapter_list" => "planner",
+        "state_resolution" => "state_resolution",
+        "summary" => "summary",
+        "fact_extraction" => "fact_extraction",
+        other => {
+            let _ = other;
+            "writer"
+        }
     }
 }

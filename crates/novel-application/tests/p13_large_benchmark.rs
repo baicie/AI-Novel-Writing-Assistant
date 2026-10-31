@@ -146,7 +146,7 @@ async fn fifty_chapter_fifty_question_annotated_retrieval_benchmark() {
             forbidden: forbidden.clone(),
         });
     }
-    for i in 1..=10usize {
+    for _i in 1..=10usize {
         questions.push(Question {
             category: "no_answer",
             query: "齉齉".into(),
@@ -183,14 +183,14 @@ async fn fifty_chapter_fifty_question_annotated_retrieval_benchmark() {
         } else {
             no_answer_ok += usize::from(hits.is_empty());
         }
-        if let Some(expected) = &question.expected {
-            if let Some(hit) = hits.iter().find(|hit| &hit.chunk_id == expected) {
-                revision_checked += 1;
-                revision_ok += usize::from(
-                    hit.source_revision.as_deref()
-                        == Some(format!("rev-{}", question.target_chapter).as_str()),
-                );
-            }
+        if let Some(expected) = &question.expected
+            && let Some(hit) = hits.iter().find(|hit| &hit.chunk_id == expected)
+        {
+            revision_checked += 1;
+            revision_ok += usize::from(
+                hit.source_revision.as_deref()
+                    == Some(format!("rev-{}", question.target_chapter).as_str()),
+            );
         }
         if hits
             .iter()

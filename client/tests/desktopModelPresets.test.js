@@ -24,11 +24,11 @@ test("已保存的地址能反推厂商，匹配不到归到自定义", () => {
   assert.equal(presetForEndpoint("").id, "custom");
 });
 
-test("本地明文地址需要显式允许", () => {
+test("明文地址需要显式允许（含自建网关）", () => {
   assert.equal(requiresLocalhostPermission("http://localhost:1234/v1"), true);
   assert.equal(requiresLocalhostPermission("http://127.0.0.1:8080/v1"), true);
   assert.equal(requiresLocalhostPermission("https://api.deepseek.com/v1"), false);
-  assert.equal(requiresLocalhostPermission("http://example.com/v1"), false);
+  assert.equal(requiresLocalhostPermission("http://example.com/v1"), true, "公网明文网关也要显式允许");
 });
 
 test("表单校验：地址、模型、密钥都必填", () => {

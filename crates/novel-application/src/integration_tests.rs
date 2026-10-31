@@ -130,7 +130,7 @@ mod tests {
         assert!(HttpHandlers::has("delete_novel"));
 
         // 验证删除是幂等操作
-        let delete_handlers = vec!["delete_novel"];
+        let delete_handlers = ["delete_novel"];
         assert_eq!(delete_handlers.len(), 1);
     }
 
@@ -181,8 +181,8 @@ mod tests {
         assert!(HttpHandlers::has("save_chapter"));
 
         // 验证保存是多次操作
-        let save_ops = vec!["save", "draft", "final"];
-        assert!(save_ops.len() > 0);
+        let save_ops = ["save", "draft", "final"];
+        assert!(!save_ops.is_empty());
     }
 
     #[tokio::test]
@@ -193,7 +193,7 @@ mod tests {
         assert!(HttpHandlers::has("promote_chapter"));
 
         // 验证状态转换
-        let states = vec!["draft", "review", "published"];
+        let states = ["draft", "review", "published"];
         assert_eq!(states.len(), 3);
     }
 
@@ -229,8 +229,8 @@ mod tests {
         assert!(HttpHandlers::has("start_run"));
 
         // 验证运行创建
-        let run_types = vec!["generation", "review", "revision"];
-        assert!(run_types.len() > 0);
+        let run_types = ["generation", "review", "revision"];
+        assert!(!run_types.is_empty());
     }
 
     #[tokio::test]
@@ -241,7 +241,7 @@ mod tests {
         assert!(HttpHandlers::has("approve_run"));
 
         // 验证批准决策
-        let decisions = vec!["approve", "reject", "revise"];
+        let decisions = ["approve", "reject", "revise"];
         assert_eq!(decisions.len(), 3);
     }
 
@@ -250,10 +250,10 @@ mod tests {
         let ctx = create_test_app_context().await;
 
         // 验证运行状态机
-        let _run_states = vec!["pending", "running", "completed", "failed"];
+        let _run_states = ["pending", "running", "completed", "failed"];
 
         // 验证至少两种终止状态
-        let terminal_states = vec!["completed", "failed"];
+        let terminal_states = ["completed", "failed"];
         assert!(terminal_states.len() >= 2);
 
         // 验证上下文能跟踪
@@ -504,7 +504,7 @@ mod tests {
         let status = ctx.status();
 
         assert!(status.contains("running"));
-        assert!(status.len() > 0);
+        assert!(!status.is_empty());
     }
 
     // ============================================================================

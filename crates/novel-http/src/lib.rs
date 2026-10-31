@@ -58,7 +58,10 @@ pub fn router(state: KernelState) -> Router {
             "/api/novels/:id/chapters/:cid/full",
             get(routes::chapters::full_detail),
         )
-        .route("/api/novels/:id/runs", get(routes::runs::list_runs).post(routes::runs::open))
+        .route(
+            "/api/novels/:id/runs",
+            get(routes::runs::list_runs).post(routes::runs::open),
+        )
         .route("/api/runs/:rid/approve", post(routes::runs::approve))
         .route("/api/runs/:rid/cancel", post(routes::runs::cancel))
         .route("/api/runs/:rid/resume", post(routes::runs::resume))
@@ -77,10 +80,7 @@ pub fn router(state: KernelState) -> Router {
             "/api/worlds/:id",
             axum::routing::put(routes::worlds::update).delete(routes::worlds::delete),
         )
-        .route(
-            "/api/genres",
-            get(routes::onboarding::list_genres),
-        )
+        .route("/api/genres", get(routes::onboarding::list_genres))
         .route(
             "/api/story-modes",
             get(routes::onboarding::list_story_modes),
@@ -97,10 +97,7 @@ pub fn router(state: KernelState) -> Router {
             "/api/setup/model",
             get(routes::model_setup::get).post(routes::model_setup::save),
         )
-        .route(
-            "/api/tasks/overview",
-            get(routes::tasks::overview),
-        )
+        .route("/api/tasks/overview", get(routes::tasks::overview))
         .route(
             "/api/tasks/recovery-candidates",
             get(routes::tasks::recovery_candidates),
@@ -151,4 +148,3 @@ pub fn build_state(
 ) -> KernelState {
     KernelState::new(runtime, secrets, kernel)
 }
-

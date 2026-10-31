@@ -121,6 +121,7 @@ async fn tauri_runtime_uses_real_openai_compatible_http_provider_for_story_macro
                 prompts.insert("chapter_draft".into(), "chapter-draft-v1".into());
                 prompts
             },
+            step_routes: Default::default(),
             token_budget: Some(1024),
             context_token_budget: None,
             max_automatic_retries: 0,

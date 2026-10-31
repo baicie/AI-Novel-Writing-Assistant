@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use novel_application::{
-    ContextAssembly, NewChapter, NewNovel, NewWorld, NovelRepository, WorldRepository,
-    assemble_director_context,
+    NewChapter, NewNovel, NewWorld, NovelRepository, WorldRepository, assemble_director_context,
 };
 use novel_domain::{ArtifactStatus, ArtifactView};
 use novel_storage_sqlite::SqliteKernel;
-use novel_workflow::{book_scope, chapter_scope};
+use novel_workflow::book_scope;
 
 fn artifact(ty: &str, version: i64, scope: &str, payload: serde_json::Value) -> ArtifactView {
     ArtifactView {

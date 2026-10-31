@@ -1,4 +1,5 @@
 mod commands;
+mod credential_vault;
 mod state;
 
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use novel_application::{
     BatchService, IndexJobRepository, NativeTaskService, Runtime, RuntimeDeps,
     StructuredMemoryService, SystemClock, TickOutcome, UuidIds,
 };
-use novel_llm::OpenAiCompatibleProvider;
+use novel_llm::ProtocolRouterProvider;
 
 #[cfg(feature = "e2e")]
 struct E2eModelSecrets;
@@ -25,7 +26,7 @@ impl novel_application::ModelSecrets for E2eModelSecrets {
 
 /// The Release composition root uses the real OpenAI-compatible HTTP/SSE provider.
 pub fn llm_provider() -> Arc<dyn novel_llm::LlmProvider> {
-    Arc::new(OpenAiCompatibleProvider::new())
+    Arc::new(ProtocolRouterProvider::new())
 }
 use novel_platform::OsSecretStore;
 use novel_storage_sqlite::SqliteKernel;
@@ -55,7 +56,8 @@ pub fn run() {
                 })?;
             std::fs::create_dir_all(&data_dir)
                 .map_err(|error| format!("无法准备本地资料目录：{error}"))?;
-            std::fs::create_dir_all(data_dir.join("logs"))
+            novel_platform::configure_secret_fallback(data_dir.join("secrets"));
+std::fs::create_dir_all(data_dir.join("logs"))
                 .map_err(|error| format!("无法准备日志目录：{error}"))?;
 
             let db_path = data_dir.join("novel.sqlite");
@@ -123,6 +125,7 @@ pub fn run() {
                 secrets,
                 llm,
                 cancellations: std::sync::Mutex::new(std::collections::HashMap::new()),
+                provider_previews: Default::default(),
             });
 
             // 性能采样用：数据库迁移与运行时就绪后写出时间戳，供外部进程测量冷启动。
@@ -345,6 +348,21 @@ commands::run::list_review_occurrences,
             commands::model::save_model_setup,
             commands::model::has_api_key,
             commands::model::test_model_setup,
+            commands::provider::list_provider_templates,
+            commands::provider::list_provider_profiles,
+            commands::provider::get_provider_profile,
+            commands::provider::upsert_provider_profile,
+            commands::provider::delete_provider_profile,
+            commands::provider::list_provider_models,
+            commands::provider::upsert_provider_model,
+            commands::provider::delete_provider_model,
+            commands::provider::discover_provider_models,
+            commands::provider::apply_provider_discovery,
+            commands::provider::list_model_bindings,
+            commands::provider::upsert_model_binding,
+            commands::provider::reconcile_credential_intents,
+            commands::provider::get_effective_model_route,
+            commands::provider::check_run_route,
             commands::knowledge::index_knowledge,
             commands::knowledge::list_knowledge_documents,
             commands::knowledge::search_knowledge,

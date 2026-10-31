@@ -23,6 +23,7 @@ use crate::ports::{
     SaveChapterDraftRecord, SaveChapterRecord, UpdateChapterMetaRecord, UpdateVolumeRecord,
     WorkflowRepository,
 };
+use crate::provider_service::FrozenRoute;
 
 #[derive(Debug, Clone)]
 pub struct OpenRunInput {
@@ -38,6 +39,9 @@ pub struct OpenRunInput {
     pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+    /// 按环节冻结的路由；空表示只有合同里的单一路由。
+    #[allow(dead_code)]
+    pub step_routes: BTreeMap<String, crate::provider_service::FrozenStepRoute>,
 }
 
 /// 事件流内存缓存，用于减少数据库查询
@@ -461,6 +465,16 @@ impl DirectorService {
     }
 
     pub async fn open_run(&self, input: OpenRunInput) -> Result<CommandOutcome, AppError> {
+        self.open_run_with_route(input, FrozenRoute::default())
+            .await
+    }
+
+    /// 与 open_run 相同，但把任务路由冻结进 Run 记录（旧调用方不传即保持原行为）。
+    pub async fn open_run_with_route(
+        &self,
+        input: OpenRunInput,
+        route: FrozenRoute,
+    ) -> Result<CommandOutcome, AppError> {
         if input.command_id.trim().is_empty() {
             return Err(AppError::validation("这次操作缺少编号，请重新发起。"));
         }
@@ -506,7 +520,11 @@ impl DirectorService {
             max_automatic_retries: input.max_automatic_retries,
             repair_budget: input.repair_budget.unwrap_or(0),
             endpoint: input.endpoint.clone(),
+            protocol: route.protocol.clone(),
+            credential_ref: route.credential_ref.clone(),
             allow_localhost_http: input.allow_localhost_http,
+            reasoning_effort: route.reasoning_effort.clone(),
+            step_routes: input.step_routes.clone(),
         };
         let request_hash = json_hash(&OpenRunHash {
             novel_id: &input.novel_id,

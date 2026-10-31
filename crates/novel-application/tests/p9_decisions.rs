@@ -70,14 +70,15 @@ async fn reject_regenerates_and_confirm_after_edit_protects_author_artifact() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
     for _ in 0..6 {
-        if let TickOutcome::Advanced { status, .. } = runtime.worker.tick().await.unwrap() {
-            if status == "waiting_approval" {
-                break;
-            }
+        if let TickOutcome::Advanced { status, .. } = runtime.worker.tick().await.unwrap()
+            && status == "waiting_approval"
+        {
+            break;
         }
     }
     let first = runtime

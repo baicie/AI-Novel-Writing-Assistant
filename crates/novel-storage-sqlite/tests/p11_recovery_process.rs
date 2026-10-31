@@ -154,6 +154,7 @@ async fn seed(path: &std::path::Path, endpoint: &str) -> (String, String) {
             repair_budget: Some(1),
             endpoint: endpoint.into(),
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

@@ -23,6 +23,10 @@ fn contract() -> RunContract {
         repair_budget: 0,
         endpoint: "https://api.example.com/v1/chat/completions".into(),
         allow_localhost_http: false,
+        reasoning_effort: None,
+        step_routes: Default::default(),
+        protocol: None,
+        credential_ref: None,
     }
 }
 
