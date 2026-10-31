@@ -1111,7 +1111,7 @@ async fn candidate_confirmation_is_idempotent_and_conflicting() {
     let http_before = provider.records().len();
 
     // G5.1 同一命令重复执行 → 第二次幂等，正文只提交一次。
-    let first = runtime
+    let _first = runtime
         .director
         .confirm_candidate_after_edit(
             "g5-confirm-1",
