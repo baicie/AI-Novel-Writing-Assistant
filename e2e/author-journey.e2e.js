@@ -48,7 +48,13 @@ const script = [
   JSON.stringify({
     chapters: [{ chapterOrder: 1, title: "第一章", volumeTitle: "山门卷", summary: "入山", characterNames: ["林动"] }],
   }),
-  "E2E 生成出来的正文：少年入山，风雪扑面。",
+  "E2E 候选正文：少年入山。",
+  // 审校第一轮必须返回真实问题，才会触发 bounded repair。
+  JSON.stringify({
+    issues: [{ type: "timeline", severity: "high", evidence: "时间线冲突", suggestion: "修正时间" }],
+  }),
+  "E2E 修复后的正文：少年入山，风雪扑面。",
+  JSON.stringify({ issues: [] }),
 ];
 
 describe("新用户闭环（本地 Mock 生成）", () => {
@@ -154,20 +160,78 @@ describe("新用户闭环（本地 Mock 生成）", () => {
     const { novelId, chapterId, runId } = result;
     console.log("发起生成:", JSON.stringify(result));
 
-    // 6. 等待后台 worker 把生成请求发出去（不强行确认，避免误判业务语义）。
+    // 6. 状态驱动推进：规划门点用 approve；候选稿门点（gate.id = approval）用编辑后确认。
+    const stamp = Date.now();
     let status = "unknown";
-    for (let i = 0; i < 20; i += 1) {
-      await browser.pause(800);
+    let confirmed = false;
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
       const detail = await browser.execute(
         (nid, rid) => window.__TAURI_INTERNALS__.invoke("get_run_detail", { novelId: nid, runId: rid }),
         novelId,
         runId
       );
       status = detail.status;
-      if (status === "waiting_approval" || status === "paused" || status === "succeeded") {
+      if (status === "succeeded" || status === "failed") {
         break;
       }
+      const actions = detail.legalActions ?? [];
+      const candidate = detail.latestCandidate ?? null;
+      const gateId = detail.gate?.id ?? "";
+      const canConfirm =
+        status === "waiting_approval" &&
+        gateId === "approval" &&
+        (actions.includes("confirm") || actions.includes("confirm_after_edit")) &&
+        candidate &&
+        candidate.id &&
+        candidate.contentSha256 &&
+        typeof candidate.content === "string" &&
+        candidate.content.length > 0;
+      if (canConfirm) {
+        const outcome = await browser.execute(
+          async (rid, cand, cmd, version) => {
+            try {
+              await window.__TAURI_INTERNALS__.invoke("confirm_candidate_after_edit_run", {
+                commandId: cmd,
+                runId: rid,
+                expectedVersion: version,
+                baseCandidateId: cand.id,
+                baseContentSha256: cand.contentSha256,
+                content: cand.content,
+              });
+              return "ok";
+            } catch (error) {
+              return JSON.stringify(error);
+            }
+          },
+          runId,
+          candidate,
+          "e2e-confirm-" + stamp,
+          detail.controlVersion ?? null
+        );
+        console.log("确认候选稿:", outcome);
+        confirmed = true;
+        await browser.pause(600);
+        continue;
+      }
+      if (status === "waiting_approval" && (actions.includes("approve") || actions.includes("confirm"))) {
+        const outcome = await browser.execute(
+          async (rid, cmd) => {
+            try {
+              await window.__TAURI_INTERNALS__.invoke("approve_run", { commandId: cmd, runId: rid });
+              return "ok";
+            } catch (error) {
+              return JSON.stringify(error);
+            }
+          },
+          runId,
+          "e2e-approve-" + stamp + "-" + Date.now()
+        );
+        console.log("推进门点", gateId, JSON.stringify(actions), outcome);
+      }
+      await browser.pause(500);
     }
+    console.log("是否已确认候选:", confirmed);
     console.log("最终状态:", status, "远端请求数:", calls);
     // 生成必须真的打到本地 Mock：这是「AI 功能真的跑了」的硬证据。
     if (calls < 2) {
@@ -178,16 +242,18 @@ describe("新用户闭环（本地 Mock 生成）", () => {
       throw new Error("Run 状态异常：" + status);
     }
 
-    // 章节正文在作者确认前保持为空，这是产品语义（先预览后落笔），不是缺陷。
     const chapter = await browser.execute(
       (nid, cid) => window.__TAURI_INTERNALS__.invoke("get_chapter", { novelId: nid, chapterId: cid }),
       novelId,
       chapterId
     );
     const content = chapter?.content ?? "";
-    console.log("确认前正文长度:", String(content).length);
-    if (String(content).length !== 0) {
-      throw new Error("未确认前不应直接写入正式正文：" + JSON.stringify(chapter));
+    console.log("最终正文长度:", String(content).length, "状态:", status);
+    if (status !== "succeeded") {
+      throw new Error("确认后 Run 未成功结束，状态：" + status + " 请求数：" + calls);
+    }
+    if (String(content).length === 0) {
+      throw new Error("确认后正文仍为空");
     }
   });
 });
