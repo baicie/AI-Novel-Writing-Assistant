@@ -1,8 +1,12 @@
 import type { Chapter, ChapterEditorDiagnosticCard, ChapterEditorWorkspaceResponse } from "@ai-novel/shared/types/novel";
 import { Button } from "@/components/ui/button";
+import ChapterNavigator from "./navigation/ChapterNavigator";
 
 interface ChapterEditorSidebarProps {
   chapter: Chapter;
+  chapters?: Chapter[];
+  volumes?: { id: string; title: string }[];
+  onSelectChapter?: (chapterId: string) => void;
   workspace: ChapterEditorWorkspaceResponse | null;
   workspaceStatus: "loading" | "ready" | "error";
   wordCount: number;
@@ -39,6 +43,9 @@ function LoadingBar(props: { widthClassName?: string }) {
 export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
   const {
     chapter,
+    chapters = [],
+    volumes = [],
+    onSelectChapter,
     workspace,
     workspaceStatus,
     wordCount,
@@ -66,6 +73,17 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
   return (
     <div className="min-h-0 overflow-hidden">
       <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+        {chapters.length > 0 ? (
+          <div className="shrink-0 rounded-2xl bg-muted/20 p-3">
+            <ChapterNavigator
+              chapters={chapters}
+              volumes={volumes}
+              currentChapterId={chapter.id}
+              isDirty={isDirty}
+              onSelectChapter={(nextId) => onSelectChapter?.(nextId)}
+            />
+          </div>
+        ) : null}
         <div className="shrink-0 rounded-3xl border border-border/70 bg-background p-4 shadow-sm">
           <div className="flex flex-col gap-4">
             {onBack ? (

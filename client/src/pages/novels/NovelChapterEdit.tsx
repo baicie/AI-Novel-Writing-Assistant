@@ -121,6 +121,9 @@ export default function NovelChapterEdit() {
         key={chapter.id}
         novelId={id}
         chapter={chapter}
+        chapters={detail?.chapters ?? []}
+        volumes={(detail?.volumes ?? []).map((volume) => ({ id: volume.id, title: volume.title }))}
+        onSelectChapter={(nextChapterId) => navigate(`/novels/${id}/chapters/${nextChapterId}`)}
         workspace={chapterEditorWorkspaceQuery.data?.data ?? null}
         workspaceStatus={chapterEditorWorkspaceQuery.isLoading
           ? "loading"

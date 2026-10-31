@@ -98,6 +98,9 @@ function toSelectionFromRange(
 
 export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const {
+    chapters = [],
+    volumes = [],
+    onSelectChapter,
     novelId,
     chapter,
     workspace,
@@ -662,6 +665,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       <div className={`grid min-h-0 flex-1 gap-4 overflow-hidden ${gridClassName}`}>
         <ChapterEditorSidebar
           chapter={chapter}
+          chapters={chapters}
+          volumes={volumes}
+          onSelectChapter={onSelectChapter}
           workspace={workspace}
           workspaceStatus={workspaceStatus}
           wordCount={wordCount}

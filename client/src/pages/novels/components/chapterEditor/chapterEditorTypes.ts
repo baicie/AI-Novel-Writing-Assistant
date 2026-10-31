@@ -45,6 +45,10 @@ export interface ChapterEditorCursorRequestBuilderInput {
 export interface ChapterEditorShellProps {
   novelId: string;
   chapter: Chapter | undefined;
+  /** 整本小说的章节列表，用于章节导航；缺省时不显示导航。 */
+  chapters?: Chapter[];
+  volumes?: { id: string; title: string }[];
+  onSelectChapter?: (chapterId: string) => void;
   workspace: ChapterEditorWorkspaceResponse | null;
   workspaceStatus: "loading" | "ready" | "error";
   onBack?: () => void;

@@ -1,0 +1,104 @@
+import { useMemo, useState } from "react";
+import type { Chapter } from "@ai-novel/shared/types/novel";
+import { Button } from "@/components/ui/button";
+import { buildChapterGroups, filterChapters, neighbourOf, type ChapterNavVolume } from "./chapterNavigatorModel";
+
+interface ChapterNavigatorProps {
+  chapters: Chapter[];
+  volumes?: ChapterNavVolume[];
+  currentChapterId: string;
+  isDirty?: boolean;
+  onSelectChapter: (chapterId: string) => void;
+}
+
+/**
+ * 整本小说范围内的章节导航：卷/章分组、搜索、上一章/下一章。
+ * 只消费已经加载好的章节数据，不自己编造进度。
+ */
+export default function ChapterNavigator(props: ChapterNavigatorProps) {
+  const { chapters, volumes = [], currentChapterId, isDirty = false, onSelectChapter } = props;
+  const [keyword, setKeyword] = useState("");
+
+  const visible = useMemo(() => filterChapters(chapters, keyword), [chapters, keyword]);
+  const groups = useMemo(() => buildChapterGroups(visible, volumes), [visible, volumes]);
+  const { previous, next } = useMemo(() => neighbourOf(chapters, currentChapterId), [chapters, currentChapterId]);
+
+  const switchTo = (chapterId: string) => {
+    if (chapterId === currentChapterId) return;
+    if (isDirty && !window.confirm("本章还有未保存的修改。切换后未保存的内容仍可从本地草稿恢复，确定切换吗？")) {
+      return;
+    }
+    onSelectChapter(chapterId);
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="chapter-navigator">
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!previous}
+          onClick={() => previous && switchTo(previous.id)}
+          data-testid="chapter-nav-previous"
+        >
+          上一章
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          共 {chapters.length} 章
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!next}
+          onClick={() => next && switchTo(next.id)}
+          data-testid="chapter-nav-next"
+        >
+          下一章
+        </Button>
+      </div>
+
+      <input
+        className="w-full rounded-xl bg-muted/50 px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        placeholder="搜索章节标题或序号"
+        value={keyword}
+        onChange={(event) => setKeyword(event.target.value)}
+        data-testid="chapter-nav-search"
+      />
+
+      <div className="max-h-[280px] space-y-3 overflow-y-auto pr-1">
+        {groups.length === 0 ? (
+          <div className="px-2 py-3 text-xs text-muted-foreground">没有匹配的章节</div>
+        ) : (
+          groups.map((group) => (
+            <div key={group.key} className="space-y-1">
+              <div className="px-1 text-xs font-medium text-muted-foreground">{group.label}</div>
+              {group.chapters.map((chapter) => {
+                const item = chapter as Chapter & { hasContent?: boolean; officialVersion?: number };
+                const isCurrent = chapter.id === currentChapterId;
+                return (
+                  <button
+                    key={chapter.id}
+                    type="button"
+                    onClick={() => switchTo(chapter.id)}
+                    data-testid="chapter-nav-item"
+                    data-current={String(isCurrent)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors ${
+                      isCurrent ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60"
+                    }`}
+                  >
+                    <span className="truncate">
+                      第 {chapter.order} 章 · {chapter.title?.trim() || "未命名章节"}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {item.hasContent ? `v${item.officialVersion ?? 0}` : "空"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
