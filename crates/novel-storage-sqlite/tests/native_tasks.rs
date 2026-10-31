@@ -1,6 +1,6 @@
 use novel_application::{
-    BatchRepository, NativeTaskQuery, NativeTaskRepository, NewBatchRun, NewChapter, NewIndexJob,
-    NewNovel, NovelRepository,
+    BatchRepository, NativeTaskQuery, NativeTaskRepository, NewBatchRun, NewChapter, NewNovel,
+    NovelRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 

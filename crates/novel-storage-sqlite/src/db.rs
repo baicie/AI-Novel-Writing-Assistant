@@ -228,6 +228,9 @@ pub fn map_sql(error: sqlx::Error) -> PortError {
     }
 }
 
+/// 迁移总数：测试用它校验「重复打开不会重复执行」，避免每加一条迁移就要改断言里的硬编码数字。
+pub const MIGRATION_COUNT: usize = MIGRATION_SCRIPTS.len();
+
 pub(crate) const MIGRATION_SCRIPTS: &[(&str, &str)] = &[
     ("0001", include_str!("../../../migrations/0001_init.sql")),
     (
@@ -309,6 +312,18 @@ pub(crate) const MIGRATION_SCRIPTS: &[(&str, &str)] = &[
     (
         "0021",
         include_str!("../../../migrations/0021_structured_fact_version.sql"),
+    ),
+    (
+        "0022",
+        include_str!("../../../migrations/0022_provider_registry.sql"),
+    ),
+    (
+        "0023",
+        include_str!("../../../migrations/0023_provider_revision.sql"),
+    ),
+    (
+        "0024",
+        include_str!("../../../migrations/0024_credential_intent.sql"),
     ),
 ];
 

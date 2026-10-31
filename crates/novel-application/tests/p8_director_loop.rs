@@ -109,6 +109,7 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -280,6 +281,7 @@ async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -380,6 +382,7 @@ async fn consistency_issues_fail_closed_without_fake_repair_or_commit() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

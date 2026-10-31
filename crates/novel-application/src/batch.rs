@@ -456,6 +456,7 @@ impl BatchService {
             repair_budget: request.repair_budget,
             endpoint: request.endpoint,
             allow_localhost_http: request.allow_localhost_http,
+            step_routes: Default::default(),
         };
         let outcome = director.open_run(input).await?;
         #[cfg(debug_assertions)]

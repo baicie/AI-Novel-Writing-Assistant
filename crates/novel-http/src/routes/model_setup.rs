@@ -7,9 +7,7 @@ use crate::error::{HttpError, HttpResult};
 use crate::state::KernelState;
 
 pub async fn get(State(state): State<KernelState>) -> HttpResult<Json<Value>> {
-    let view = read_view(&state)
-        .await
-        .map_err(|error| HttpError::internal(error))?;
+    let view = read_view(&state).await.map_err(HttpError::internal)?;
     Ok(Json(json!({
         "success": true,
         "data": view,
@@ -38,9 +36,7 @@ pub async fn save(
         .save_model_setup(endpoint, model, payload.allow_localhost_http, now)
         .await
         .map_err(|error| HttpError::internal(format!("无法保存模型配置：{error}")))?;
-    let view = read_view(&state)
-        .await
-        .map_err(|error| HttpError::internal(error))?;
+    let view = read_view(&state).await.map_err(HttpError::internal)?;
     Ok(Json(json!({
         "success": true,
         "data": view,

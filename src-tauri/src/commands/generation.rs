@@ -15,6 +15,8 @@ pub struct GenerateTextRequest {
     pub prompt: String,
     pub max_output_tokens: Option<u64>,
     pub model: Option<String>,
+    /// 可选任务类型（planner/writer/review/...）：有任务级绑定就按绑定选模型。
+    pub task_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -46,15 +48,35 @@ pub async fn generate_text(
     if request.prompt.trim().is_empty() {
         return Err(AppError::validation("生成内容不能为空。"));
     }
-    let setup = state
+    let route = match request
+        .task_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(task_type) => crate::commands::provider::service(&state)
+            .resolve_route(task_type)
+            .await
+            .map_err(crate::commands::provider::to_app_error)?,
+        None => None,
+    };
+    let legacy = state
         .kernel
         .load_model_setup()
         .await
         .map_err(AppError::from)?
-        .ok_or_else(|| AppError::validation("还没有配置模型服务。"))?;
+        .map(|setup| novel_application::LegacyModelTarget {
+            endpoint: setup.endpoint,
+            model: setup.model,
+            allow_localhost_http: setup.allow_localhost_http,
+            secret_ref: setup.secret_ref,
+        });
+    let target =
+        novel_application::resolve_generation_target(route, legacy, request.model.as_deref())
+            .map_err(crate::commands::provider::to_app_error)?;
     let api_key = state
         .secrets
-        .get(&setup.secret_ref)
+        .get(&target.credential_ref)
         .await
         .map_err(|_| {
             AppError::from(novel_application::PortError::Storage(
@@ -77,10 +99,7 @@ pub async fn generate_text(
         cancellations.insert(request_id.clone(), cancel.clone());
     }
     let llm = state.llm.clone();
-    let model = request
-        .model
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or(setup.model);
+    let model = target.model_id.clone();
     let (sender, mut receiver) = tokio::sync::mpsc::channel(64);
     let event_request_id = request_id.clone();
     let forward_channel = channel.clone();
@@ -98,16 +117,18 @@ pub async fn generate_text(
         }
     });
     let result = llm
-        .generate(
+        .generate_with_protocol(
             LlmRequest {
                 request_id: request_id.clone(),
                 model,
                 prompt: request.prompt,
-                endpoint: setup.endpoint,
+                endpoint: target.endpoint.clone(),
                 api_key,
-                allow_localhost_http: setup.allow_localhost_http,
+                allow_localhost_http: target.allow_localhost_http,
                 max_output_tokens: request.max_output_tokens,
             },
+            &target.protocol,
+            target.reasoning_effort.as_deref(),
             sender,
             cancel,
         )

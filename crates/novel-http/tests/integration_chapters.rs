@@ -26,7 +26,7 @@ async fn test_create_chapter_persists() {
 
     let novel_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&novel_payload)
         .send()
         .await
@@ -43,7 +43,7 @@ async fn test_create_chapter_persists() {
 
     let chapter_response = ctx
         .http_client
-        .post(&ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
+        .post(ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
         .json(&chapter_payload)
         .send()
         .await
@@ -81,7 +81,7 @@ async fn test_create_multiple_chapters_preserve_order() {
     let novel_payload = json!({"title": "测试小说"});
     let novel_response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&novel_payload)
         .send()
         .await
@@ -99,7 +99,7 @@ async fn test_create_multiple_chapters_preserve_order() {
 
         let response = ctx
             .http_client
-            .post(&ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
+            .post(ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
             .json(&payload)
             .send()
             .await
@@ -133,7 +133,7 @@ async fn test_save_chapter_content_persists() {
     // 获取章节以获得初始版本
     let get_response = ctx
         .http_client
-        .get(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+        .get(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
         .send()
         .await
         .expect("get chapter");
@@ -153,7 +153,7 @@ async fn test_save_chapter_content_persists() {
 
     let save_response = ctx
         .http_client
-        .put(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+        .put(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
         .json(&save_payload)
         .send()
         .await
@@ -171,7 +171,10 @@ async fn test_save_chapter_content_persists() {
     assert_eq!(save_array[0]["content"], content);
 
     // 从数据库验证
-    let db_chapter = ctx.get_chapter_from_db(&novel_id, &chapter_id).await.unwrap();
+    let db_chapter = ctx
+        .get_chapter_from_db(&novel_id, &chapter_id)
+        .await
+        .unwrap();
     assert_eq!(db_chapter["content"], content);
     assert_eq!(db_chapter["official_version"], new_version);
 }
@@ -189,7 +192,7 @@ async fn test_save_chapter_version_increment() {
     for round in 0..3 {
         let get_response = ctx
             .http_client
-            .get(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+            .get(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
             .send()
             .await
             .expect("get");
@@ -206,7 +209,7 @@ async fn test_save_chapter_version_increment() {
 
         let save_response = ctx
             .http_client
-            .put(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+            .put(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
             .json(&save_payload)
             .send()
             .await
@@ -220,7 +223,10 @@ async fn test_save_chapter_version_increment() {
     }
 
     // 最终版本应该是 3
-    let final_chapter = ctx.get_chapter_from_db(&novel_id, &chapter_id).await.unwrap();
+    let final_chapter = ctx
+        .get_chapter_from_db(&novel_id, &chapter_id)
+        .await
+        .unwrap();
     assert_eq!(final_chapter["official_version"], 3);
 }
 
@@ -236,7 +242,7 @@ async fn test_chapter_version_conflict_detection() {
     // 先保存一次
     let get1 = ctx
         .http_client
-        .get(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+        .get(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
         .send()
         .await
         .expect("get");
@@ -251,7 +257,7 @@ async fn test_chapter_version_conflict_detection() {
     });
 
     ctx.http_client
-        .put(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+        .put(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
         .json(&save1)
         .send()
         .await
@@ -266,7 +272,7 @@ async fn test_chapter_version_conflict_detection() {
 
     let conflict_response = ctx
         .http_client
-        .put(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+        .put(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
         .json(&conflicting_save)
         .send()
         .await
@@ -297,7 +303,7 @@ async fn test_concurrent_chapter_edits() {
             // 每个并发任务都先获取当前版本
             let get_response = ctx
                 .http_client
-                .get(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+                .get(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
                 .send()
                 .await
                 .expect("get");
@@ -314,7 +320,7 @@ async fn test_concurrent_chapter_edits() {
             });
 
             ctx.http_client
-                .put(&ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
+                .put(ctx.url(&format!("/api/novels/{}/chapters/{}", novel_id, chapter_id)))
                 .json(&save_payload)
                 .send()
                 .await
@@ -324,8 +330,8 @@ async fn test_concurrent_chapter_edits() {
     }
 
     // 等待所有请求完成
-    let mut success_count = 0;
-    let mut conflict_count = 0;
+    let _success_count = 0;
+    let _conflict_count = 0;
 
     // 等待所有请求完成
     let mut success_count = 0;
@@ -334,25 +340,25 @@ async fn test_concurrent_chapter_edits() {
 
     for handle in handles {
         let result = handle.await.expect("join");
-        match result {
-            Ok(response) => {
-                let status = response.status();
-                if status.is_success() {
-                    success_count += 1;
-                } else if status.as_u16() == 409 {
-                    conflict_count += 1;
-                } else if status.as_u16() == 503 {
-                    service_unavailable_count += 1;
-                }
+        if let Ok(response) = result {
+            let status = response.status();
+            if status.is_success() {
+                success_count += 1;
+            } else if status.as_u16() == 409 {
+                conflict_count += 1;
+            } else if status.as_u16() == 503 {
+                service_unavailable_count += 1;
             }
-            Err(_) => {}
         }
     }
 
     // 验证：至少有 1 个成功
     assert!(success_count >= 1);
     // 其余可能是冲突或服务暂时不可用（并发限制）
-    assert_eq!(success_count + conflict_count + service_unavailable_count, 5);
+    assert_eq!(
+        success_count + conflict_count + service_unavailable_count,
+        5
+    );
 }
 
 /// 获取完整章节详情
@@ -367,7 +373,7 @@ async fn test_get_chapter_full_detail() {
     // 获取完整章节信息
     let response = ctx
         .http_client
-        .get(&ctx.url(&format!(
+        .get(ctx.url(&format!(
             "/api/novels/{}/chapters/{}/full",
             novel_id, chapter_id
         )))
@@ -389,7 +395,7 @@ async fn create_test_novel(ctx: &TestContext) -> String {
     let payload = json!({"title": "测试小说"});
     let response = ctx
         .http_client
-        .post(&ctx.url("/api/novels"))
+        .post(ctx.url("/api/novels"))
         .json(&payload)
         .send()
         .await
@@ -412,7 +418,7 @@ async fn create_test_chapter(
 
     let response = ctx
         .http_client
-        .post(&ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
+        .post(ctx.url(&format!("/api/novels/{}/chapters", novel_id)))
         .json(&payload)
         .send()
         .await

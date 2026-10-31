@@ -44,9 +44,10 @@ impl TestServer {
         let db_path = temp_dir.path().join("kernel.sqlite");
         let kernel = Arc::new(SqliteKernel::open(&db_path).await.expect("open kernel"));
         let secrets: Arc<dyn novel_platform::SecretStore> = Arc::new(MemorySecretStore::default());
-        let model_secrets: Arc<dyn novel_application::ModelSecrets> = Arc::new(SecretStoreAdapter {
-            inner: secrets.clone(),
-        });
+        let model_secrets: Arc<dyn novel_application::ModelSecrets> =
+            Arc::new(SecretStoreAdapter {
+                inner: secrets.clone(),
+            });
         let runtime = Arc::new(Runtime::new(RuntimeDeps {
             novels: kernel.clone(),
             runs: kernel.clone(),
@@ -99,9 +100,7 @@ async fn health_returns_ok_and_supported_paths() {
     let body: serde_json::Value = response.json().await.expect("json");
     assert_eq!(body["success"], true);
     assert_eq!(body["data"]["status"], "ok");
-    let supported = body["data"]["supportedPaths"]
-        .as_array()
-        .expect("array");
+    let supported = body["data"]["supportedPaths"].as_array().expect("array");
     assert!(!supported.is_empty(), "supported paths should not be empty");
     server.stop().await;
 }
@@ -139,10 +138,7 @@ async fn novel_crud_round_trip() {
         .expect("create");
     assert_eq!(response.status(), 200);
     let body: serde_json::Value = response.json().await.expect("json");
-    let novel_id = body["data"]["id"]
-        .as_str()
-        .expect("id")
-        .to_string();
+    let novel_id = body["data"]["id"].as_str().expect("id").to_string();
     assert_eq!(body["data"]["title"], "Rust 化的第一本书");
 
     // 创建一章
@@ -222,7 +218,10 @@ async fn unimplemented_route_returns_501() {
     assert_eq!(body["success"], false);
     assert_eq!(body["migration"], "pending");
     let error = body["error"].as_str().expect("error string");
-    assert!(error.contains("knowledge"), "error should mention path: {error}");
+    assert!(
+        error.contains("knowledge"),
+        "error should mention path: {error}"
+    );
     server.stop().await;
 }
 
@@ -250,10 +249,7 @@ async fn tasks_overview_and_recovery_empty_when_no_runs() {
 
     // recovery-candidates
     let response = client
-        .get(format!(
-            "{}/api/tasks/recovery-candidates",
-            server.base_url
-        ))
+        .get(format!("{}/api/tasks/recovery-candidates", server.base_url))
         .send()
         .await
         .expect("recovery");
@@ -302,10 +298,7 @@ async fn tasks_write_routes_still_return_501() {
 
     // GET /api/tasks/:kind/:id 还没实现
     let response = client
-        .get(format!(
-            "{}/api/tasks/novel_workflow/abc",
-            server.base_url
-        ))
+        .get(format!("{}/api/tasks/novel_workflow/abc", server.base_url))
         .send()
         .await
         .expect("detail");
@@ -485,7 +478,10 @@ async fn json_replay_mode_works() {
 
     // 查询事件（JSON 模式，不指定 stream 参数或 stream=false）
     let response = client
-        .get(format!("{}/api/runs/{}/events?afterSeq=0", server.base_url, run_id))
+        .get(format!(
+            "{}/api/runs/{}/events?afterSeq=0",
+            server.base_url, run_id
+        ))
         .send()
         .await
         .expect("replay");

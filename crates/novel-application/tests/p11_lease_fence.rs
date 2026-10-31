@@ -180,6 +180,7 @@ async fn stale_worker_cannot_write_after_lease_takeover() {
             repair_budget: Some(1),
             endpoint,
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -410,6 +411,7 @@ async fn auto_renewal_keeps_long_model_request_owned() {
             repair_budget: Some(0),
             endpoint,
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -470,6 +472,7 @@ async fn persistent_cancel_wins_over_late_repair_result() {
             repair_budget: Some(1),
             endpoint,
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

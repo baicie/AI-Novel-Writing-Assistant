@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use novel_application::{
-    BatchRepository, BatchRunRequest, BatchService, DirectorService, NewChapter, NewNovel,
-    OpenRunInput, Runtime, RuntimeDeps, UuidIds, WorkflowRepository,
+    BatchRepository, BatchRunRequest, BatchService, NewChapter, NewNovel, OpenRunInput, Runtime,
+    RuntimeDeps, UuidIds,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm};
@@ -105,6 +105,7 @@ async fn committed_open_run_before_binding_is_replayed_after_reopen() {
             repair_budget: Some(0),
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

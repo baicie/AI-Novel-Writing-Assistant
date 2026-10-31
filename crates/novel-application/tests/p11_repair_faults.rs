@@ -187,6 +187,7 @@ async fn runtime_for(
             repair_budget: Some(1),
             endpoint: format!("http://{address}/v1/chat/completions"),
             allow_localhost_http: true,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

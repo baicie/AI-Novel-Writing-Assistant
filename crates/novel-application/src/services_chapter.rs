@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_content_too_large() {
-        let large_content = "a".repeat(100_001);
+        let _large_content = "a".repeat(100_001);
         let error = AppError::validation("Chapter content is too large (max 100KB)");
         assert_eq!(error.message, "Chapter content is too large (max 100KB)");
     }

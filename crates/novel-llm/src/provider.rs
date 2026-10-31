@@ -63,6 +63,20 @@ pub trait LlmProvider: Send + Sync {
         tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError>;
+
+    /// 带协议上下文的生成入口：默认忽略协议，等价于 \`generate\`；
+    /// 只有真正要按协议分发的实现才覆盖它。
+    async fn generate_with_protocol(
+        &self,
+        request: LlmRequest,
+        protocol: &str,
+        reasoning_effort: Option<&str>,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let _ = (protocol, reasoning_effort);
+        self.generate(request, tokens, cancel).await
+    }
 }
 
 pub struct UnconfiguredProvider;
@@ -160,6 +174,30 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tokens: tokio::sync::mpsc::Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
+        self.generate_inner(request, None, tokens, cancel).await
+    }
+
+    async fn generate_with_protocol(
+        &self,
+        request: LlmRequest,
+        _protocol: &str,
+        reasoning_effort: Option<&str>,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        self.generate_inner(request, reasoning_effort, tokens, cancel)
+            .await
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    async fn generate_inner(
+        &self,
+        request: LlmRequest,
+        reasoning_effort: Option<&str>,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
         if request.api_key.trim().is_empty() {
             return Err(LlmError::Unavailable {
                 billed: false,
@@ -176,12 +214,19 @@ impl LlmProvider for OpenAiCompatibleProvider {
         }
         authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
         authorize_resolved_endpoint(&request.endpoint, request.allow_localhost_http).await?;
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": request.model,
             "stream": true,
             "max_tokens": requested_tokens,
             "messages": [{"role": "user", "content": request.prompt}]
         });
+        // 只有用户显式选了推理强度且模型支持时才带上，避免不支持的服务端报错。
+        if let Some(effort) = reasoning_effort
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            body["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+        }
         let mut last_error = None;
         for attempt in 0..self.policy.max_attempts.max(1) {
             if cancel.is_cancelled() {

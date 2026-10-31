@@ -85,23 +85,45 @@ pub async fn open_run(
     state: State<'_, AppState>,
     request: OpenRunRequest,
 ) -> Result<CommandOutcome, AppError> {
+    // 有任务绑定就按绑定跑，并把协议与凭据引用冻结进 Run；没有绑定完全是旧行为。
+    let route = crate::commands::provider::service(&state)
+        .resolve_route("writer")
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    // 按环节冻结：正文以外的审校/修复等环节各用各的绑定，缺绑定就回落到单一路由。
+    let step_routes = crate::commands::provider::service(&state)
+        .frozen_step_routes()
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
+    let (provider, model, endpoint, allow_localhost_http, frozen) =
+        novel_application::apply_route_to_run(
+            request.provider,
+            request.model,
+            request.endpoint,
+            request.allow_localhost_http,
+            route,
+        );
     state
         .runtime
         .director
-        .open_run(OpenRunInput {
-            command_id: request.command_id,
-            novel_id: request.novel_id,
-            target_chapter_id: request.target_chapter_id,
-            provider: request.provider,
-            model: request.model,
-            prompt_versions: request.prompt_versions,
-            token_budget: request.token_budget,
-            context_token_budget: request.context_token_budget,
-            max_automatic_retries: request.max_automatic_retries,
-            repair_budget: request.repair_budget,
-            endpoint: request.endpoint,
-            allow_localhost_http: request.allow_localhost_http,
-        })
+        .open_run_with_route(
+            OpenRunInput {
+                command_id: request.command_id,
+                novel_id: request.novel_id,
+                target_chapter_id: request.target_chapter_id,
+                provider,
+                model,
+                prompt_versions: request.prompt_versions,
+                token_budget: request.token_budget,
+                context_token_budget: request.context_token_budget,
+                max_automatic_retries: request.max_automatic_retries,
+                repair_budget: request.repair_budget,
+                endpoint,
+                allow_localhost_http,
+                step_routes,
+            },
+            frozen,
+        )
         .await
 }
 
