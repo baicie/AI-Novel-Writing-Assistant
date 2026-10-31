@@ -590,7 +590,7 @@ async fn crash_before_commit_leaves_content_untouched_and_recoverable() {
             &run_id,
             None,
             &candidate.id,
-            &info["sha"].as_str().unwrap(),
+            info["sha"].as_str().unwrap(),
             &content,
         )
         .await;
