@@ -190,3 +190,216 @@ async fn concurrent_saves_with_same_revision_only_change_one_slot() {
         .unwrap();
     assert_eq!(integrity, "ok");
 }
+
+// ============================================================
+// R6-H（进程级）：两个独立进程用同一 revision 并发保存同一 Provider。
+// 子进程复用本测试二进制，通过环境变量传入数据库、密钥文件与统一起跑时刻。
+// ============================================================
+
+/// 文件版密钥库：跨进程共享，写入用「临时文件 + rename」保证原子。
+struct FileVault {
+    path: std::path::PathBuf,
+}
+
+impl FileVault {
+    fn load(&self) -> std::collections::HashMap<String, String> {
+        std::fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    fn store(&self, values: &std::collections::HashMap<String, String>) -> std::io::Result<()> {
+        let tmp = self.path.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_string(values).unwrap())?;
+        std::fs::rename(&tmp, &self.path)
+    }
+}
+
+#[async_trait]
+impl CredentialVault for FileVault {
+    async fn write(&self, reference: &str, secret: &str) -> Result<(), PortError> {
+        let mut values = self.load();
+        values.insert(reference.to_string(), secret.to_string());
+        self.store(&values)
+            .map_err(|error| PortError::Storage(format!("写入测试密钥文件失败：{error}")))
+    }
+    async fn delete(&self, reference: &str) -> Result<(), PortError> {
+        let mut values = self.load();
+        values.remove(reference);
+        let _ = self.store(&values);
+        Ok(())
+    }
+    async fn present(&self, reference: &str) -> Result<bool, PortError> {
+        Ok(self.load().contains_key(reference))
+    }
+}
+
+fn h_env() -> Option<(String, String, String, String, i64, i64)> {
+    let db = std::env::var("P166_H_DB").ok()?;
+    let vault = std::env::var("P166_H_VAULT").ok()?;
+    let key = std::env::var("P166_H_KEY").ok()?;
+    let url = std::env::var("P166_H_URL").ok()?;
+    let expected: i64 = std::env::var("P166_H_EXPECTED").ok()?.parse().ok()?;
+    let start_ms: i64 = std::env::var("P166_H_START_MS").ok()?.parse().ok()?;
+    Some((db, vault, key, url, expected, start_ms))
+}
+
+/// 子进程主体：只有环境变量存在时才真正执行。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn h_child_process() {
+    let Some((db, vault_path, key, url, expected, start_ms)) = h_env() else {
+        return;
+    };
+    let kernel = Arc::new(SqliteKernel::open(std::path::Path::new(&db)).await.unwrap());
+    let vault = Arc::new(FileVault {
+        path: std::path::PathBuf::from(vault_path),
+    });
+    let service = ProviderService::new(
+        kernel as Arc<dyn ProviderRegistry>,
+        vault as Arc<dyn CredentialVault>,
+        Arc::new(TestIntents),
+    );
+
+    // 两个进程等到同一个时刻再提交，制造真实竞争。
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    if start_ms > now {
+        tokio::time::sleep(std::time::Duration::from_millis((start_ms - now) as u64)).await;
+    }
+
+    match service
+        .upsert_provider(
+            draft(&url),
+            CredentialAction::Replace(key),
+            Some(expected),
+            2,
+        )
+        .await
+    {
+        Ok(_) => std::process::exit(0),
+        Err(error) if error.code == novel_application::ProviderErrorCode::Conflict => {
+            std::process::exit(2)
+        }
+        Err(_) => std::process::exit(1),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_processes_racing_on_the_same_revision_keep_one_key() {
+    let directory = tempfile::tempdir().unwrap();
+    let db_path = directory.path().join("race.sqlite");
+    let vault_path = directory.path().join("vault.json");
+    let db = db_path.to_string_lossy().to_string();
+    let vault_arg = vault_path.to_string_lossy().to_string();
+
+    // 初始配置：revision 1，密钥 key-old（直接写库与文件，避免依赖子进程）。
+    let kernel = Arc::new(SqliteKernel::open(&db_path).await.unwrap());
+    let vault = Arc::new(FileVault {
+        path: vault_path.clone(),
+    });
+    let service = ProviderService::new(
+        kernel.clone() as Arc<dyn ProviderRegistry>,
+        vault as Arc<dyn CredentialVault>,
+        Arc::new(TestIntents),
+    );
+    service
+        .upsert_provider(
+            draft("https://gw.example.com/v1"),
+            CredentialAction::Replace("key-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    drop(service);
+    drop(kernel);
+
+    let start_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        + 1200;
+    let exe = std::env::current_exe().unwrap();
+    let mut children = Vec::new();
+    for (key, url) in [
+        ("key-alpha", "https://alpha.example.com/v1"),
+        ("key-beta", "https://beta.example.com/v1"),
+    ] {
+        children.push(
+            std::process::Command::new(&exe)
+                .args(["--exact", "h_child_process", "--nocapture"])
+                .env("P166_H_DB", &db)
+                .env("P166_H_VAULT", &vault_arg)
+                .env("P166_H_KEY", key)
+                .env("P166_H_URL", url)
+                .env("P166_H_EXPECTED", "1")
+                .env("P166_H_START_MS", start_ms.to_string())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+    }
+
+    let mut codes = Vec::new();
+    for mut child in children {
+        codes.push(child.wait().unwrap().code().unwrap_or(-1));
+    }
+    codes.sort_unstable();
+    assert_eq!(
+        codes,
+        vec![0, 2],
+        "同时用同一 revision 保存：必须一个成功、一个冲突，实际 {codes:?}"
+    );
+
+    // 密钥文件：赢家的密钥在 gw#2，失败者的密钥没有出现在任何槽位。
+    let values: std::collections::HashMap<String, String> =
+        serde_json::from_str(&std::fs::read_to_string(&vault_path).unwrap()).unwrap();
+    let stored = values.get("gw#2").cloned().expect("赢家必须写入 gw#2");
+    assert!(
+        stored == "key-alpha" || stored == "key-beta",
+        "gw#2 必须是某个赢家的密钥：{values:?}"
+    );
+    let loser = if stored == "key-alpha" {
+        "key-beta"
+    } else {
+        "key-alpha"
+    };
+    assert!(
+        !values.values().any(|value| value == loser),
+        "失败者的密钥不得写入任何槽位：{values:?}"
+    );
+    assert_eq!(
+        values.get("gw#1").cloned(),
+        Some("key-old".to_string()),
+        "旧槽不能被覆盖"
+    );
+
+    // 数据库：一条配置、指向赢家槽位、结构完好。
+    let kernel = Arc::new(SqliteKernel::open(&db_path).await.unwrap());
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_credential WHERE id = 'gw'")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+    let reference: String =
+        sqlx::query_scalar("SELECT secret_ref FROM provider_credential WHERE id = 'gw'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(reference, "gw#2");
+    let revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM provider_credential WHERE id = 'gw'")
+            .fetch_one(kernel.pool())
+            .await
+            .unwrap();
+    assert_eq!(revision, 2);
+    let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap();
+    assert_eq!(integrity, "ok");
+}
