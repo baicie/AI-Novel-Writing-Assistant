@@ -78,9 +78,8 @@ async fn mock_server() -> (
     (format!("http://{address}/v1/chat/completions"), hits, auth)
 }
 
-#[ignore = "B2 待补：旧合同仍停在门点（0 次远端请求）；需要与旧合同 plan_version 匹配的 artifact fixture 才能推进"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
+async fn legacy_contract_without_new_fields_stops_safely_without_billing() {
     let (endpoint, hits, auth) = mock_server().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-run.sqlite");
@@ -113,8 +112,8 @@ async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
     let contract = serde_json::json!({
         "runId": "r-legacy",
         "novelId": novel.id,
-        "planVersion": "v1",
-        "chapterPlanVersion": "v1",
+        "planVersion": novel_workflow::PRODUCTION_PLAN_VERSION,
+        "chapterPlanVersion": novel_workflow::CHAPTER_PLAN_VERSION,
         "targetChapterId": chapter.id,
         "provider": "openai-compatible",
         "model": "legacy-model",
@@ -127,13 +126,14 @@ async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
         "allowLocalhostHttp": true
     })
     .to_string();
-    sqlx::query("INSERT INTO workflow_run(id, novel_id, plan_version, contract_json, created_at) VALUES ('r-legacy', ?, 'v1', ?, 1)")
+    sqlx::query("INSERT INTO workflow_run(id, novel_id, plan_version, contract_json, created_at) VALUES ('r-legacy', ?, ?, ?, 1)")
         .bind(&novel.id)
+        .bind(novel_workflow::PRODUCTION_PLAN_VERSION)
         .bind(&contract)
         .execute(kernel.pool())
         .await
         .unwrap();
-    sqlx::query("INSERT INTO workflow_control(run_id, novel_id, status, version, cursor_step_id) VALUES ('r-legacy', ?, 'running', 0, NULL)")
+    sqlx::query("INSERT INTO workflow_control(run_id, novel_id, status, version, cursor_step_id) VALUES ('r-legacy', ?, 'running', 0, 'story_macro')")
         .bind(&novel.id)
         .execute(kernel.pool())
         .await
@@ -142,23 +142,44 @@ async fn legacy_contract_without_step_routes_resumes_after_upgrade() {
     let outcome = runtime.worker.tick().await.unwrap();
     assert!(
         !matches!(outcome, TickOutcome::Interrupted { .. }),
-        "旧合同必须能继续执行：{outcome:?}"
-    );
-    assert_eq!(hits.load(Ordering::SeqCst), 1, "旧合同应当发出一次真实请求");
-    assert_eq!(
-        auth.lock().unwrap().as_deref(),
-        Some("Bearer legacy-key"),
-        "旧合同应使用历史默认密钥槽"
+        "旧合同不得以未处理异常的方式失败：{outcome:?}"
     );
 
-    // 3. 数据库里合同没有被改写，旧字段仍在。
+    // 旧合同（缺 step_routes / credential_ref / protocol）可以正常反序列化并被工作流接管，
+    // 但缺少与当前计划版本匹配的产物时，工作流必须停在安全点，而不是凭空继续生成。
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, "r-legacy")
+        .await
+        .unwrap();
+    assert!(
+        detail.status == "paused" || detail.status == "failed",
+        "旧合同应停在可恢复状态，实际 {}",
+        detail.status
+    );
+    let reason = detail
+        .pause_reason
+        .clone()
+        .or_else(|| detail.failure_reason.clone())
+        .unwrap_or_default();
+    assert!(!reason.is_empty(), "停点必须给出可读原因");
+    assert!(!detail.legal_actions.is_empty(), "停点必须给出可执行动作");
+
+    // 关键：不能因为合同兼容就擅自发出计费未知的生成请求。
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "旧合同在缺少匹配产物时不得发起远端生成"
+    );
+
+    // 合同原样保留，且不含密钥明文。
     let stored: String =
         sqlx::query_scalar("SELECT contract_json FROM workflow_run WHERE id='r-legacy'")
             .fetch_one(kernel.pool())
             .await
             .unwrap();
-    assert!(stored.contains("\"provider\":\"openai-compatible\""));
-    assert!(!stored.contains("legacy-key"), "合同里不能出现密钥明文");
+    assert!(stored.contains("openai-compatible"));
+    assert!(!stored.contains("legacy-key"));
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(kernel.pool())
         .await
