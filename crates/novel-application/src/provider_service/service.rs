@@ -158,8 +158,14 @@ impl ProviderService {
             .validate()
             .map_err(|error| ProviderError::validation(error.to_string()))?;
 
-        // 先写意图再动密钥库：任何一步失败都留下可补偿的记录，且绝不落密钥正文。
-        if !matches!(credential, CredentialAction::Keep) {
+        // 先写意图，再提交数据库，最后才落密钥正文。
+        //
+        // 顺序很重要：新槽名由 revision 推导，两个窗口并发保存会算出同一个名字。
+        // 若先写密钥再提交，输的一方会覆盖赢一方的密钥，出现「配置指向 gw#N，密钥却是失败者的」。
+        // 改成先提交后写入：输的一方在 CAS 阶段就失败，根本不会碰密钥库。
+        let intent_id = if matches!(credential, CredentialAction::Keep) {
+            None
+        } else {
             let action = match credential {
                 CredentialAction::Replace(_) => "replace",
                 CredentialAction::Clear => "clear",
@@ -175,27 +181,9 @@ impl ProviderService {
                     now_ms,
                 )
                 .await?;
-            let outcome = match &credential {
-                // 只写新槽：旧槽在任何情况下都不能被覆盖或删除，历史 Run 还要用。
-                CredentialAction::Replace(secret) => {
-                    self.vault.write(&reference, secret.trim()).await
-                }
-                CredentialAction::Clear | CredentialAction::Keep => Ok(()),
-            };
-            match outcome {
-                Ok(()) => {
-                    self.intents
-                        .finish(&intent_id, "done", None, now_ms)
-                        .await?;
-                }
-                Err(error) => {
-                    self.intents
-                        .finish(&intent_id, "pending", Some(&error.to_string()), now_ms)
-                        .await?;
-                    return Err(error.into());
-                }
-            }
-        }
+            Some(intent_id)
+        };
+
         let revision = match self
             .registry
             .upsert_provider(&profile, expected_revision, now_ms)
@@ -203,13 +191,43 @@ impl ProviderService {
         {
             Ok(revision) => revision,
             Err(error) => {
-                // 数据库没提交成功：把这次刚写的新槽清掉，旧配置与旧密钥完全不受影响。
-                if matches!(credential, CredentialAction::Replace(_)) {
-                    let _ = self.vault.delete(&reference).await;
+                // 版本不匹配或写库失败：这次没有动过任何密钥，旧配置与旧密钥完全不受影响。
+                if let Some(intent_id) = &intent_id {
+                    let _ = self
+                        .intents
+                        .finish(intent_id, "pending", Some(&error.to_string()), now_ms)
+                        .await;
                 }
                 return Err(error.into());
             }
         };
+
+        if let (CredentialAction::Replace(secret), Some(intent_id)) = (&credential, &intent_id) {
+            match self.vault.write(&reference, secret.trim()).await {
+                Ok(()) => {
+                    self.intents.finish(intent_id, "done", None, now_ms).await?;
+                }
+                Err(error) => {
+                    // 配置已指向新槽但密钥没写成功：先补偿数据库，避免留下「有配置没密钥」的半条记录。
+                    // 旧槽与旧配置在这条路径上从未被改动，历史 Run 不受影响。
+                    if let Some(previous) = previous.as_ref() {
+                        let _ = self
+                            .registry
+                            .upsert_provider(previous, Some(revision), now_ms)
+                            .await;
+                    } else {
+                        let _ = self.registry.delete_provider(&profile.id, true).await;
+                    }
+                    self.intents
+                        .finish(intent_id, "pending", Some(&error.to_string()), now_ms)
+                        .await?;
+                    return Err(error.into());
+                }
+            }
+        } else if let Some(intent_id) = &intent_id {
+            self.intents.finish(intent_id, "done", None, now_ms).await?;
+        }
+
         let credential_present = self.vault.present(&profile.credential.reference).await?;
         Ok(ProviderView {
             id: profile.id,
