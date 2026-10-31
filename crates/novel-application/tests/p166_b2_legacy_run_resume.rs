@@ -80,7 +80,7 @@ async fn mock_server() -> (
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_contract_without_new_fields_stops_safely_without_billing() {
-    let (endpoint, hits, auth) = mock_server().await;
+    let (endpoint, hits, _auth) = mock_server().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy-run.sqlite");
 
