@@ -203,6 +203,13 @@ impl SqliteKernel {
 
 pub fn map_sql(error: sqlx::Error) -> PortError {
     let text = error.to_string();
+    // 连接池等待超时是并发竞争，不是数据损坏：并发测试与多窗口写入都可能触发。
+    if matches!(error, sqlx::Error::PoolTimedOut) || text.contains("pool timed out") {
+        return PortError::Conflict("本地数据库正在被占用，请稍后重试。".into());
+    }
+    if text.contains("database is locked") {
+        return PortError::Conflict("本地数据库正在写入，请稍后重试。".into());
+    }
     if let Some(database) = error.as_database_error() {
         match database.code().as_deref() {
             // SQLITE_BUSY / SQLITE_LOCKED are normal contention, not corruption.
@@ -434,4 +441,28 @@ pub async fn insert_event(
         .await
         .map_err(map_sql)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod map_sql_tests {
+    use super::*;
+
+    /// 连接池等待超时属于并发竞争，不能报成「数据损坏」。
+    #[test]
+    fn pool_timeout_is_contention_not_corruption() {
+        match map_sql(sqlx::Error::PoolTimedOut) {
+            PortError::Conflict(_) => {}
+            other => panic!("池超时应当映射为竞争，实际 {other:?}"),
+        }
+    }
+
+    /// 真正的完整性错误仍要保留「完整性」字样，便于区分损坏与竞争。
+    #[test]
+    fn integrity_error_is_marked() {
+        let error = map_sql(sqlx::Error::Protocol("SQLite 完整性错误：x".into()));
+        match error {
+            PortError::Storage(message) => assert!(message.contains("完整性")),
+            other => panic!("普通存储错误应当保持 Storage，实际 {other:?}"),
+        }
+    }
 }

@@ -36,5 +36,11 @@
     "targets": [
       "app"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
   }
 }
