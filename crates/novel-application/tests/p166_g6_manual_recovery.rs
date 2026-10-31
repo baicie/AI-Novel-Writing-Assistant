@@ -96,6 +96,8 @@ async fn silent_server() -> (String, Arc<AtomicUsize>) {
 }
 
 struct Harness {
+    // 必须持有临时目录：它一旦被删，SQLite 会在下一次操作时打不开文件。
+    _dir: tempfile::TempDir,
     #[allow(dead_code)]
     kernel: Arc<SqliteKernel>,
     runtime: Runtime,
@@ -209,6 +211,7 @@ async fn harness(base_url: &str, now_ms: i64) -> Harness {
         .await
         .unwrap();
     Harness {
+        _dir: directory,
         kernel,
         runtime,
         novel_id: novel.id,
