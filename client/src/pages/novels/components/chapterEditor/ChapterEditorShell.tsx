@@ -102,6 +102,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     chapters = [],
     volumes = [],
     onSelectChapter,
+    runAttention = {},
     world = null,
     characters = [],
     novelId,
@@ -671,6 +672,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           chapters={chapters}
           volumes={volumes}
           onSelectChapter={onSelectChapter}
+          runAttention={runAttention}
           workspace={workspace}
           workspaceStatus={workspaceStatus}
           wordCount={wordCount}

@@ -6,7 +6,8 @@ import { getChapterEditorWorkspace, getNovelDetail } from "@/api/novel";
 import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
-import { exportChapters } from "@/platform/desktopTransport";
+import { buildRunAttention } from "./components/chapterEditor/navigation/chapterNavigatorModel";
+import { exportChapters, listRuns } from "@/platform/desktopTransport";
 import { stripLegacyTaskUrlParams } from "@/lib/legacyTaskUrlParams";
 import ChapterEditorShell from "./components/chapterEditor/ChapterEditorShell";
 import NativeChapterHistoryDialog from "./components/NativeChapterHistoryDialog";
@@ -54,7 +55,15 @@ export default function NovelChapterEdit() {
     refetchOnReconnect: false,
   });
 
+  const runsQuery = useQuery({
+    queryKey: ["authoring-runs", id],
+    queryFn: () => listRuns(id),
+    enabled: Boolean(id),
+    refetchInterval: 8000,
+  });
+
   const detail = novelDetailQuery.data?.data;
+  const runAttention = useMemo(() => buildRunAttention(runsQuery.data ?? []), [runsQuery.data]);
   const chapter = useMemo(
     () => detail?.chapters.find((item) => item.id === chapterId),
     [chapterId, detail?.chapters],
@@ -124,6 +133,7 @@ export default function NovelChapterEdit() {
         chapters={detail?.chapters ?? []}
         volumes={(detail?.volumes ?? []).map((volume) => ({ id: volume.id, title: volume.title }))}
         onSelectChapter={(nextChapterId) => navigate(`/novels/${id}/chapters/${nextChapterId}`)}
+        runAttention={runAttention}
         world={detail?.world ? { name: detail.world.name, summary: detail.world.overviewSummary ?? null } : null}
         characters={(detail?.characters ?? []).map((character) => ({
           id: character.id,

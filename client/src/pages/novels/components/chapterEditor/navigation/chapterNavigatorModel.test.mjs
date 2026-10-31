@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildChapterGroups, filterChapters, neighbourOf, shouldBlockChapterSwitch } from "./chapterNavigatorModel.ts";
+import {
+  buildChapterGroups,
+  buildRunAttention,
+  filterChapters,
+  neighbourOf,
+  runAttentionFor,
+  shouldBlockChapterSwitch,
+} from "./chapterNavigatorModel.ts";
 
 const chapters = [
   { id: "c3", title: "第三章", order: 3, content: "有正文", officialVersion: 2, volumeId: "v2" },
@@ -55,4 +62,24 @@ test("dirty chapter switch requires explicit confirmation", () => {
   });
   assert.equal(clean, false);
   assert.equal(asked, false, "没有未保存修改时不应打扰用户");
+});
+
+test("run attention maps backend states to actionable levels", () => {
+  assert.equal(runAttentionFor("waiting_approval"), "action");
+  assert.equal(runAttentionFor("paused"), "action");
+  assert.equal(runAttentionFor("failed"), "action");
+  assert.equal(runAttentionFor("running"), "running");
+  assert.equal(runAttentionFor("succeeded"), "done");
+  assert.equal(runAttentionFor(null), null);
+  assert.equal(runAttentionFor("something_new"), null);
+});
+
+test("latest run per chapter decides the badge", () => {
+  const attention = buildRunAttention([
+    { chapterId: "c1", state: "succeeded", updatedAt: 10 },
+    { chapterId: "c1", state: "paused", updatedAt: 20 },
+    { chapterId: "c2", state: "running", updatedAt: 5 },
+    { chapterId: "c3", state: "succeeded", updatedAt: 7 },
+  ]);
+  assert.deepEqual(attention, { c1: "action", c2: "running", c3: "done" });
 });

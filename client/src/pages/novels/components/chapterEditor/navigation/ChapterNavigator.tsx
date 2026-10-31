@@ -7,6 +7,7 @@ import {
   neighbourOf,
   shouldBlockChapterSwitch,
   type ChapterNavVolume,
+  type ChapterRunAttention,
 } from "./chapterNavigatorModel";
 
 interface ChapterNavigatorProps {
@@ -14,6 +15,7 @@ interface ChapterNavigatorProps {
   volumes?: ChapterNavVolume[];
   currentChapterId: string;
   isDirty?: boolean;
+  runAttention?: Record<string, ChapterRunAttention>;
   onSelectChapter: (chapterId: string) => void;
 }
 
@@ -22,7 +24,7 @@ interface ChapterNavigatorProps {
  * 只消费已经加载好的章节数据，不自己编造进度。
  */
 export default function ChapterNavigator(props: ChapterNavigatorProps) {
-  const { chapters, volumes = [], currentChapterId, isDirty = false, onSelectChapter } = props;
+  const { chapters, volumes = [], currentChapterId, isDirty = false, runAttention = {}, onSelectChapter } = props;
   const [keyword, setKeyword] = useState("");
 
   const visible = useMemo(() => filterChapters(chapters, keyword), [chapters, keyword]);
@@ -115,7 +117,16 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
                     <span className="truncate">
                       第 {chapter.order} 章 · {chapter.title?.trim() || "未命名章节"}
                     </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                    <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                      {runAttention[chapter.id] === "action" ? (
+                        <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 text-amber-700 dark:text-amber-300" data-testid="chapter-run-action">
+                          待处理
+                        </span>
+                      ) : runAttention[chapter.id] === "running" ? (
+                        <span className="rounded-full bg-muted px-1.5 py-0.5" data-testid="chapter-run-running">
+                          生成中
+                        </span>
+                      ) : null}
                       {item.hasContent ? `v${item.officialVersion ?? 0}` : "空"}
                     </span>
                   </button>

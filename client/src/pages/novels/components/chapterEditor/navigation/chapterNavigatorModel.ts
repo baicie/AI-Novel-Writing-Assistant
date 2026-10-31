@@ -20,6 +20,36 @@ export interface ChapterNavVolume {
   title: string;
 }
 
+/** 章节的 Run 关注等级：u=需要用户处理，running=正在跑，done=已结束但不打扰。 */
+export type ChapterRunAttention = "action" | "running" | "done" | null;
+
+export function runAttentionFor(status: string | null | undefined): ChapterRunAttention {
+  if (!status) return null;
+  if (status === "waiting_approval" || status === "paused" || status === "failed") return "action";
+  if (status === "running" || status === "queued") return "running";
+  if (status === "succeeded" || status === "cancelled") return "done";
+  return null;
+}
+
+/** 把「章节 → 最近一次 Run 状态」压成关注等级表，供导航渲染小标记。 */
+export function buildRunAttention(
+  runs: Array<{ chapterId: string; state: string; updatedAt: number }>,
+): Record<string, ChapterRunAttention> {
+  const latest = new Map<string, { state: string; updatedAt: number }>();
+  for (const run of runs) {
+    const current = latest.get(run.chapterId);
+    if (!current || run.updatedAt > current.updatedAt) {
+      latest.set(run.chapterId, { state: run.state, updatedAt: run.updatedAt });
+    }
+  }
+  const attention: Record<string, ChapterRunAttention> = {};
+  for (const [chapterId, run] of latest.entries()) {
+    const level = runAttentionFor(run.state);
+    if (level) attention[chapterId] = level;
+  }
+  return attention;
+}
+
 function toItem(chapter: Chapter): ChapterNavItem {
   const raw = chapter as Chapter & { volumeId?: string | null };
   return {

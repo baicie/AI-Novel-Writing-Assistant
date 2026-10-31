@@ -49,6 +49,7 @@ export interface ChapterEditorShellProps {
   chapters?: Chapter[];
   volumes?: { id: string; title: string }[];
   onSelectChapter?: (chapterId: string) => void;
+  runAttention?: Record<string, import("./navigation/chapterNavigatorModel").ChapterRunAttention>;
   world?: { name: string; summary: string | null } | null;
   characters?: import("./rightPanel/panelModel").CastItem[];
   workspace: ChapterEditorWorkspaceResponse | null;
