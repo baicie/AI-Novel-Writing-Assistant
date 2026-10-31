@@ -53,14 +53,22 @@ impl LlmProvider for ProtocolRouterProvider {
         tokens: Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
-        if protocol == "ollama" {
-            // Ollama 没有推理强度字段，忽略该选项。
-            let _ = reasoning_effort;
-            self.ollama.generate(request, tokens, cancel).await
-        } else {
-            self.openai
-                .generate_with_protocol(request, protocol, reasoning_effort, tokens, cancel)
-                .await
+        match protocol {
+            "ollama" => {
+                // Ollama 没有推理强度字段，忽略该选项。
+                let _ = reasoning_effort;
+                self.ollama.generate(request, tokens, cancel).await
+            }
+            "openai-compatible" => {
+                self.openai
+                    .generate_with_protocol(request, protocol, reasoning_effort, tokens, cancel)
+                    .await
+            }
+            // 只读协议的适配器（例如 Anthropic）不能自动当成 OpenAI 兼容协议发送。
+            other => Err(LlmError::Unavailable {
+                billed: false,
+                reason: format!("协议 {other} 目前只能读取模型列表，还不能用于创作生成"),
+            }),
         }
     }
 }

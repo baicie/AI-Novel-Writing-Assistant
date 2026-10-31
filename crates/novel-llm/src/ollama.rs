@@ -58,7 +58,8 @@ impl LlmProvider for OllamaProvider {
         tokens: Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
-        authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
+        let request_url = crate::request_url::generation_url(&request.endpoint, "ollama")?;
+        authorize_endpoint(&request_url, request.allow_localhost_http)?;
         if request.api_key.trim().is_empty() && !request.allow_localhost_http {
             return Err(LlmError::Unauthorized);
         }
@@ -75,7 +76,7 @@ impl LlmProvider for OllamaProvider {
         });
         let response = self
             .client
-            .post(Self::chat_endpoint(&request.endpoint))
+            .post(&request_url)
             .json(&body)
             .send()
             .await

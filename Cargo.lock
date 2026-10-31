@@ -2576,6 +2576,7 @@ name = "novel-llm"
 version = "0.1.1-beta.6"
 dependencies = [
  "async-trait",
+ "axum 0.7.9",
  "futures",
  "reqwest 0.12.28",
  "serde",
