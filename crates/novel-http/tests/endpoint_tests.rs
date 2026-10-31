@@ -37,12 +37,15 @@ impl ModelSecrets for SecretStoreAdapter {
     }
 }
 
+// 测试辅助服务器：shutdown 用于保活，stop 供个别用例提前关闭。
+#[allow(dead_code)]
 struct TestServer {
     base_url: String,
     shutdown: Option<oneshot::Sender<()>>,
     _temp_dir: TempDir,
 }
 
+#[allow(dead_code)]
 impl TestServer {
     async fn start() -> Self {
         let temp_dir = tempfile::tempdir().expect("temp dir");

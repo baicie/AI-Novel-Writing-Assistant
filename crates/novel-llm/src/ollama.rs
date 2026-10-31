@@ -122,6 +122,4 @@ impl LlmProvider for OllamaProvider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use novel_application::{
-    ModelSecrets, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository,
-};
+use novel_application::{ModelSecrets, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome};
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
 

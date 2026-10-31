@@ -1820,6 +1820,24 @@ impl Drop for GateGuard {
     }
 }
 
+/// 步骤 id 到绑定任务类型的唯一映射：前后端都用这套名字，不另造一套。
+fn task_type_for_step(step_id: &str) -> &'static str {
+    match step_id {
+        "draft" => "writer",
+        "consistency_review" => "review",
+        "bounded_repair" => "repair",
+        "story_macro" => "planner",
+        "character_cast" | "volume_strategy" | "chapter_list" => "planner",
+        "state_resolution" => "state_resolution",
+        "summary" => "summary",
+        "fact_extraction" => "fact_extraction",
+        other => {
+            let _ = other;
+            "writer"
+        }
+    }
+}
+
 #[cfg(test)]
 mod structured_validation_tests {
     use super::validate_structured_output;
@@ -1854,6 +1872,7 @@ mod structured_validation_tests {
         assert!(validate_structured_output("consistency_review", conflicting).is_err());
     }
 
+    #[test]
     fn consistency_empty_is_clean_but_malformed_is_not_clean() {
         let clean = validate_structured_output("consistency_review", r#"{"issues":[]}"#).unwrap();
         assert!(clean.contains("\"issues\":0"));
@@ -1883,23 +1902,5 @@ mod structured_validation_tests {
         assert_eq!(same, same_other_description);
         assert_ne!(same, different_evidence);
         assert_ne!(same, different_source);
-    }
-}
-
-/// 步骤 id 到绑定任务类型的唯一映射：前后端都用这套名字，不另造一套。
-fn task_type_for_step(step_id: &str) -> &'static str {
-    match step_id {
-        "draft" => "writer",
-        "consistency_review" => "review",
-        "bounded_repair" => "repair",
-        "story_macro" => "planner",
-        "character_cast" | "volume_strategy" | "chapter_list" => "planner",
-        "state_resolution" => "state_resolution",
-        "summary" => "summary",
-        "fact_extraction" => "fact_extraction",
-        other => {
-            let _ = other;
-            "writer"
-        }
     }
 }

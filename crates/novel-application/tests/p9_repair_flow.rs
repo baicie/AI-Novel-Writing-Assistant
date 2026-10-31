@@ -98,24 +98,21 @@ async fn run_with(
         })
         .await
         .unwrap();
-    let mut approvals = 0;
-    let mut status = "queued".to_string();
+
     for tick in 0..60 {
         match runtime.worker.tick().await.unwrap() {
             TickOutcome::Advanced {
                 status: next,
                 run_id,
             } => {
-                status = next;
-                if status == "waiting_approval" {
+                if next == "waiting_approval" {
                     runtime
                         .director
                         .approve(&format!("p9-repair-approve-{tick}"), &run_id)
                         .await
                         .unwrap();
-                    approvals += 1;
                 }
-                if status == "succeeded" || status == "paused" {
+                if next == "succeeded" || next == "paused" {
                     break;
                 }
             }
