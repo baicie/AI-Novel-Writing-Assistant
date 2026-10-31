@@ -1,10 +1,21 @@
+use async_trait::async_trait;
 use std::sync::Arc;
 
 use novel_application::{
-    NovelRepository, OpenRunInput, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository,
+    ModelSecrets, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome,
+    WorkflowRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+
+struct TestSecrets;
+#[async_trait]
+impl ModelSecrets for TestSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这个套件只验证候选稿确认流程，密钥只要存在即可。
+        Ok(Some("local-test-key".into()))
+    }
+}
 
 fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
@@ -54,7 +65,7 @@ async fn author_edited_candidate_uses_cas_and_does_not_touch_official_until_comm
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(TestSecrets),
         owner: "p10-confirm".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -76,6 +87,7 @@ async fn author_edited_candidate_uses_cas_and_does_not_touch_official_until_comm
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),

@@ -13,11 +13,14 @@ struct FakeRegistry {
     providers: Mutex<HashMap<String, (novel_domain::ProviderProfile, i64)>>,
     models: Mutex<HashMap<String, Vec<novel_domain::ModelProfile>>>,
     bindings: Mutex<Vec<novel_domain::ModelBinding>>,
+    provider_reads: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait]
 impl ProviderRegistry for FakeRegistry {
     async fn list_providers(&self) -> Result<Vec<novel_domain::ProviderProfile>, PortError> {
+        self.provider_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(self
             .providers
             .lock()
@@ -250,7 +253,10 @@ async fn replace_writes_secret_and_hides_it() {
     assert!(view.credential_present);
     let json = serde_json::to_string(&view).unwrap();
     assert!(!json.contains("sk-secret"), "视图里不能出现密钥：{json}");
-    assert!(vault.values.lock().unwrap().contains_key("gw"));
+    assert!(
+        vault.values.lock().unwrap().contains_key("gw#1"),
+        "首次保存应写入带版本的密钥槽"
+    );
 }
 
 #[tokio::test]
@@ -271,8 +277,9 @@ async fn keep_never_touches_the_vault() {
         .unwrap();
     assert_eq!(view.revision, 2);
     assert_eq!(
-        vault.values.lock().unwrap().get("gw").map(String::as_str),
-        Some("sk-1")
+        vault.values.lock().unwrap().get("gw#1").map(String::as_str),
+        Some("sk-1"),
+        "保留密钥时不应改动已存槽位"
     );
 }
 
@@ -530,7 +537,7 @@ async fn route_resolves_from_binding_without_secret() {
     assert_eq!(route.provider_id, "gw");
     assert_eq!(route.model_id, "a");
     assert_eq!(route.protocol, "openai-compatible");
-    assert_eq!(route.credential_ref, "gw");
+    assert_eq!(route.credential_ref, "gw#1");
     assert_eq!(route.source, "binding");
     let json = serde_json::to_string(&route).unwrap();
     assert!(!json.contains("sk-secret"), "路由里不能出现密钥");
@@ -680,7 +687,7 @@ async fn frozen_route_validates_and_returns_refs_without_secret() {
             credential_ref,
         } => {
             assert_eq!(protocol, "openai-compatible");
-            assert_eq!(credential_ref, "gw");
+            assert_eq!(credential_ref, "gw#1");
         }
         other => panic!("期望 Resolved，实际 {other:?}"),
     }
@@ -984,4 +991,241 @@ fn contract_with_route() -> crate::dto::RunContract {
         credential_ref: Some("main-gw".into()),
         step_routes: Default::default(),
     }
+}
+
+/// P16.6 P1：冻结所有环节路由只读取一次配置快照，避免并发保存拼出混合版本。
+#[tokio::test]
+async fn frozen_step_routes_reads_one_configuration_snapshot() {
+    let (service, registry, _vault) = service();
+    service
+        .upsert_provider(
+            draft("alpha"),
+            CredentialAction::Replace("sk-alpha".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    service
+        .upsert_provider(
+            draft("beta"),
+            CredentialAction::Replace("sk-beta".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    let alpha = novel_domain::ModelProfile {
+        provider_id: "alpha".into(),
+        model_id: "alpha-chat".into(),
+        display_name: Some("alpha-chat".into()),
+        capabilities: novel_domain::ModelCapabilities::default(),
+        source: novel_domain::ModelSource::User,
+        overridden: Default::default(),
+    };
+    let beta = novel_domain::ModelProfile {
+        provider_id: "beta".into(),
+        model_id: "beta-chat".into(),
+        display_name: Some("beta-chat".into()),
+        capabilities: novel_domain::ModelCapabilities::default(),
+        source: novel_domain::ModelSource::User,
+        overridden: Default::default(),
+    };
+    service.upsert_model(alpha, false, None, 1).await.unwrap();
+    service.upsert_model(beta, false, None, 1).await.unwrap();
+    registry
+        .bindings
+        .lock()
+        .unwrap()
+        .push(novel_domain::ModelBinding {
+            task_type: "writer".into(),
+            provider_id: "alpha".into(),
+            model_id: "alpha-chat".into(),
+            reasoning_effort: None,
+        });
+    registry
+        .bindings
+        .lock()
+        .unwrap()
+        .push(novel_domain::ModelBinding {
+            task_type: "review".into(),
+            provider_id: "beta".into(),
+            model_id: "beta-chat".into(),
+            reasoning_effort: None,
+        });
+
+    let before = registry
+        .provider_reads
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let routes = service.frozen_step_routes().await.unwrap();
+    let reads = registry
+        .provider_reads
+        .load(std::sync::atomic::Ordering::SeqCst)
+        - before;
+
+    assert_eq!(routes.len(), 2, "两个绑定都应被冻结");
+    assert_eq!(routes["writer"].provider_id, "alpha");
+    assert_eq!(routes["review"].provider_id, "beta");
+    assert_eq!(
+        reads, 1,
+        "冻结多个环节只应读取一次配置快照，实际 {reads} 次"
+    );
+}
+
+/// P16.6 P0：CAS 失败时，旧配置与旧密钥必须完全不受影响。
+#[tokio::test]
+async fn cas_failure_keeps_old_secret_and_profile() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+
+    let blocked = service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-new".into()),
+            Some(99),
+            2,
+        )
+        .await;
+    assert!(blocked.is_err(), "版本不匹配必须失败");
+
+    // 数据库里的当前槽位没变
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert_eq!(profile.credential.reference, "gw#1");
+
+    // 旧密钥还在，且没有把新密钥残留成孤儿
+    let values = vault.values.lock().unwrap();
+    assert_eq!(values.get("gw#1").map(String::as_str), Some("sk-old"));
+    assert_eq!(values.get("gw#2"), None, "失败的新槽必须被清理");
+}
+
+/// 换密钥后：新槽成为当前配置，旧槽仍然可读，历史 Run 不会读到新密钥。
+#[tokio::test]
+async fn replace_moves_to_new_slot_and_keeps_old_for_runs() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    // 模拟一个已提交的 Run 冻结了旧槽位
+    let frozen_for_old_run = "gw#1".to_string();
+
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-new".into()),
+            Some(1),
+            2,
+        )
+        .await
+        .unwrap();
+
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert_eq!(profile.credential.reference, "gw#2", "新配置指向新槽");
+
+    let values = vault.values.lock().unwrap();
+    assert_eq!(values.get("gw#2").map(String::as_str), Some("sk-new"));
+    assert_eq!(
+        values.get(&frozen_for_old_run).map(String::as_str),
+        Some("sk-old"),
+        "历史 Run 的旧槽不能被覆盖"
+    );
+}
+
+/// 清除密钥：新请求不再带密钥，但历史 Run 的旧槽仍然可用。
+#[tokio::test]
+async fn clear_marks_new_slot_absent_but_keeps_history() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+
+    let view = service
+        .upsert_provider(draft("gw"), CredentialAction::Clear, Some(1), 2)
+        .await
+        .unwrap();
+    assert!(!view.credential_present, "清除后当前配置应无密钥");
+
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert!(
+        profile.credential.reference.ends_with("#cleared"),
+        "清除应指向明确作废的槽位：{}",
+        profile.credential.reference
+    );
+    let values = vault.values.lock().unwrap();
+    assert_eq!(
+        values.get("gw#1").map(String::as_str),
+        Some("sk-old"),
+        "历史 Run 的旧槽必须保留"
+    );
+}
+
+/// P16.6 P1：历史合同的密钥回退只对白名单来源生效。
+#[test]
+fn legacy_credential_fallback_is_whitelisted() {
+    use crate::provider_service::model_route::resolve_contract_credential_ref;
+    assert_eq!(
+        resolve_contract_credential_ref("anything", Some("gw#2")).unwrap(),
+        "gw#2",
+        "有精确引用时永远用引用"
+    );
+    assert_eq!(
+        resolve_contract_credential_ref("openai-compatible", None).unwrap(),
+        "openai-compatible"
+    );
+    assert_eq!(
+        resolve_contract_credential_ref("default", None).unwrap(),
+        "default"
+    );
+    assert!(
+        resolve_contract_credential_ref("some-new-provider", None).is_err(),
+        "非白名单来源缺引用必须失败，不能悄悄读别人的槽位"
+    );
+}
+
+/// P16.6 P1：没有密钥时只允许本机 Ollama，远程来源一律拒绝。
+#[test]
+fn keyless_calls_are_only_allowed_for_local_ollama() {
+    use crate::provider_service::model_route::{allow_keyless, ensure_credential};
+
+    assert!(allow_keyless("ollama", "http://127.0.0.1:11434"));
+    assert!(allow_keyless("ollama", "http://localhost:11434/v1"));
+    assert!(allow_keyless("ollama", "http://[::1]:11434"));
+    assert!(!allow_keyless("ollama", "https://ollama.example.com"));
+    assert!(!allow_keyless(
+        "openai-compatible",
+        "http://127.0.0.1:8080/v1"
+    ));
+
+    assert!(ensure_credential("openai-compatible", "https://api.deepseek.com/v1", "sk-x").is_ok());
+    assert!(ensure_credential("ollama", "http://127.0.0.1:11434", "").is_ok());
+    assert!(
+        ensure_credential("openai-compatible", "https://api.deepseek.com/v1", "  ").is_err(),
+        "远程来源缺密钥必须拒绝"
+    );
+    assert!(
+        ensure_credential("ollama", "https://ollama.example.com", "").is_err(),
+        "远程 Ollama 缺密钥同样必须拒绝"
+    );
 }

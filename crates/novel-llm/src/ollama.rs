@@ -34,10 +34,6 @@ impl OllamaProvider {
                 .unwrap_or_default(),
         }
     }
-
-    fn chat_endpoint(base: &str) -> String {
-        format!("{}/api/chat", base.trim_end_matches('/'))
-    }
 }
 
 #[async_trait]
@@ -58,7 +54,8 @@ impl LlmProvider for OllamaProvider {
         tokens: Sender<String>,
         cancel: CancellationToken,
     ) -> Result<LlmResponse, LlmError> {
-        authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
+        let request_url = crate::request_url::generation_url(&request.endpoint, "ollama")?;
+        authorize_endpoint(&request_url, request.allow_localhost_http)?;
         if request.api_key.trim().is_empty() && !request.allow_localhost_http {
             return Err(LlmError::Unauthorized);
         }
@@ -75,7 +72,7 @@ impl LlmProvider for OllamaProvider {
         });
         let response = self
             .client
-            .post(Self::chat_endpoint(&request.endpoint))
+            .post(&request_url)
             .json(&body)
             .send()
             .await
@@ -125,18 +122,4 @@ impl LlmProvider for OllamaProvider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chat_endpoint_normalises_trailing_slash() {
-        assert_eq!(
-            OllamaProvider::chat_endpoint("http://127.0.0.1:11434"),
-            "http://127.0.0.1:11434/api/chat"
-        );
-        assert_eq!(
-            OllamaProvider::chat_endpoint("http://127.0.0.1:11434/"),
-            "http://127.0.0.1:11434/api/chat"
-        );
-    }
-}
+mod tests {}

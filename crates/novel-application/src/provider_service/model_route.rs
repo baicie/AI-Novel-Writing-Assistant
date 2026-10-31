@@ -214,6 +214,59 @@ pub enum EffectiveRoute<'a> {
     Contract,
 }
 
+/// 历史合同只写了 provider 名、没有 credential_ref。只有这些明确的历史默认来源允许回退；
+/// 其它情况必须带精确引用：否则改一个 provider 名就可能读到别人的密钥槽。
+pub const LEGACY_SECRET_PROVIDERS: [&str; 2] = ["openai-compatible", "default"];
+
+/// 解析合同里的密钥引用；历史回退只对白名单来源生效，其余一律报错。
+pub fn resolve_contract_credential_ref<'a>(
+    contract_provider: &'a str,
+    contract_ref: Option<&'a str>,
+) -> Result<&'a str, ProviderError> {
+    if let Some(reference) = contract_ref {
+        return Ok(reference);
+    }
+    if LEGACY_SECRET_PROVIDERS.contains(&contract_provider) {
+        return Ok(contract_provider);
+    }
+    Err(ProviderError::validation(
+        "这个运行记录没有密钥引用，无法安全确定用哪一把密钥；请重新保存模型来源后再继续",
+    ))
+}
+
+/// 判断某个地址是不是本机回环地址。
+fn is_loopback_host(endpoint: &str) -> bool {
+    let Ok(url) = url::Url::parse(endpoint.trim()) else {
+        return false;
+    };
+    match url.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
+}
+
+/// 没有密钥时是否允许继续：只对「本机 Ollama」开放，远程来源一律拒绝，
+/// 避免把「缺密钥」伪装成可用的远程 Provider。
+pub fn allow_keyless(protocol: &str, endpoint: &str) -> bool {
+    protocol == "ollama" && is_loopback_host(endpoint)
+}
+
+/// 调用前的密钥策略检查：有密钥直接通过，没密钥时按协议与地址判定。
+pub fn ensure_credential(
+    protocol: &str,
+    endpoint: &str,
+    api_key: &str,
+) -> Result<(), ProviderError> {
+    if !api_key.trim().is_empty() || allow_keyless(protocol, endpoint) {
+        return Ok(());
+    }
+    Err(ProviderError::credential_missing(
+        "这个模型来源没有可用的密钥，无法调用；请先在设置里填写密钥",
+    ))
+}
+
 impl<'a> EffectiveRoute<'a> {
     pub fn credential_ref(
         &self,
@@ -223,6 +276,18 @@ impl<'a> EffectiveRoute<'a> {
         match self {
             Self::Step(step) => step.credential_ref.as_str(),
             Self::Contract => contract_ref.unwrap_or(contract_provider),
+        }
+    }
+
+    /// 与 credential_ref 相同，但历史回退受白名单约束，解析不出来时直接报错。
+    pub fn credential_ref_checked(
+        &self,
+        contract_provider: &'a str,
+        contract_ref: Option<&'a str>,
+    ) -> Result<&'a str, ProviderError> {
+        match self {
+            Self::Step(step) => Ok(step.credential_ref.as_str()),
+            Self::Contract => resolve_contract_credential_ref(contract_provider, contract_ref),
         }
     }
 

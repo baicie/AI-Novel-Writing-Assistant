@@ -68,11 +68,14 @@ impl From<PortError> for AppError {
             }
             PortError::Storage(message) => {
                 tracing::error!(error = %message, "storage");
-                Self::new(
+                let mut error = Self::new(
                     AppErrorCode::StorageCorrupt,
                     "本地资料暂时没有写完，请稍后重试。",
                     true,
-                )
+                );
+                // 保留底层原因：否则排查时只剩一句通用文案，无法区分损坏、锁等待与 IO 失败。
+                error.details = Some(serde_json::json!({ "cause": message }));
+                error
             }
         }
     }

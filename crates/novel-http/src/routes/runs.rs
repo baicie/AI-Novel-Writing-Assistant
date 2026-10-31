@@ -56,6 +56,7 @@ pub async fn open(
             allow_localhost_http: payload.allow_localhost_http,
             // Web 端没有模型注册表上下文，按单一路由执行。
             step_routes: Default::default(),
+            credential_ref: None,
         })
         .await
         .map_err(HttpError::from)?;

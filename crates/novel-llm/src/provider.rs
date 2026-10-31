@@ -212,8 +212,12 @@ impl OpenAiCompatibleProvider {
                 "本次生成的 token 预算不在允许范围内".into(),
             ));
         }
-        authorize_endpoint(&request.endpoint, request.allow_localhost_http)?;
-        authorize_resolved_endpoint(&request.endpoint, request.allow_localhost_http).await?;
+        // baseURL 与操作路径分开：内置 Provider 的 baseURL 是 /v1，真正生成要补 /chat/completions；
+        // 已经写了完整路径的历史配置原样使用。
+        let request_url =
+            crate::request_url::generation_url(&request.endpoint, "openai-compatible")?;
+        authorize_endpoint(&request_url, request.allow_localhost_http)?;
+        authorize_resolved_endpoint(&request_url, request.allow_localhost_http).await?;
         let mut body = serde_json::json!({
             "model": request.model,
             "stream": true,
@@ -234,7 +238,7 @@ impl OpenAiCompatibleProvider {
             }
             let pending = self
                 .client
-                .post(&request.endpoint)
+                .post(&request_url)
                 .bearer_auth(&request.api_key)
                 .header("x-request-id", &request.request_id)
                 .json(&body)

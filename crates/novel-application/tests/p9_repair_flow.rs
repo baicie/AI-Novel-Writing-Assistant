@@ -1,10 +1,20 @@
 use std::sync::Arc;
 
 use novel_application::{
-    NovelRepository, OpenRunInput, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository,
+    ModelSecrets, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome,
+    WorkflowRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
@@ -57,7 +67,7 @@ async fn run_with(
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p9-repair-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -75,6 +85,7 @@ async fn run_with(
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),
@@ -87,24 +98,21 @@ async fn run_with(
         })
         .await
         .unwrap();
-    let mut approvals = 0;
-    let mut status = "queued".to_string();
+
     for tick in 0..60 {
         match runtime.worker.tick().await.unwrap() {
             TickOutcome::Advanced {
                 status: next,
                 run_id,
             } => {
-                status = next;
-                if status == "waiting_approval" {
+                if next == "waiting_approval" {
                     runtime
                         .director
                         .approve(&format!("p9-repair-approve-{tick}"), &run_id)
                         .await
                         .unwrap();
-                    approvals += 1;
                 }
-                if status == "succeeded" || status == "paused" {
+                if next == "succeeded" || next == "paused" {
                     break;
                 }
             }
@@ -402,7 +410,7 @@ async fn run_to_quality_stop(
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p157-quality-stop-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -424,6 +432,7 @@ async fn run_to_quality_stop(
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),

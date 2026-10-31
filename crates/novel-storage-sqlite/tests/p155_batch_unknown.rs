@@ -25,7 +25,7 @@ fn make_runtime(kernel: Arc<SqliteKernel>) -> Runtime {
         clock: Arc::new(SystemClock),
         ids: Arc::new(UuidIds),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(StaticSecrets),
         owner: "parent".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -162,6 +162,7 @@ async fn unknown_remote_is_not_resent_after_worker_sigkill() {
             endpoint: endpoint.clone(),
             allow_localhost_http: true,
             step_routes: Default::default(),
+            credential_ref: Some("mock#1".into()),
         })
         .await
         .unwrap();
@@ -270,4 +271,16 @@ async fn unknown_remote_is_not_resent_after_worker_sigkill() {
         .unwrap();
     assert!(after.items[2].run_id.is_none(), "chapter 3 must not start");
     assert_eq!(after.items[1].run_id.as_deref(), Some(run_id.as_str()));
+}
+/// 这些用例只验证持久化与恢复，不关心真实密钥；给一个固定密钥即可通过凭据检查。
+struct StaticSecrets;
+
+#[async_trait::async_trait]
+impl novel_application::ModelSecrets for StaticSecrets {
+    async fn api_key(
+        &self,
+        _provider: &str,
+    ) -> Result<Option<String>, novel_application::PortError> {
+        Ok(Some("test-key".into()))
+    }
 }

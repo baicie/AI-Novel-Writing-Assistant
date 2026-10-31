@@ -36,25 +36,7 @@ mod tests {
     }
 
     /// 验证小说对象的完整性
-    fn validate_novel_structure(novel: &serde_json::Value) {
-        assert!(novel.get("id").is_some(), "Novel should have id");
-        assert!(novel.get("title").is_some(), "Novel should have title");
-        assert!(
-            novel.get("created_at").is_some(),
-            "Novel should have created_at"
-        );
-    }
-
     /// 验证章节对象的完整性
-    fn validate_chapter_structure(chapter: &serde_json::Value) {
-        assert!(chapter.get("id").is_some(), "Chapter should have id");
-        assert!(chapter.get("title").is_some(), "Chapter should have title");
-        assert!(
-            chapter.get("novel_id").is_some(),
-            "Chapter should have novel_id"
-        );
-    }
-
     // ============================================================================
     // Stage 3.1: 小说创建工作流测试 (6 tests)
     // ============================================================================
@@ -519,7 +501,7 @@ mod tests {
     /// - 完整流程: 4 tests
     /// - 处理器覆盖: 3 tests
     /// - 应用生命周期: 3 tests
-    /// 总计: 33 个集成测试
+    ///   总计: 33 个集成测试
     #[test]
     fn test_integration_test_count_summary() {
         // 小说工作流组

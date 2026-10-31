@@ -8,6 +8,9 @@ describe("导航栏模型选择与推理强度", () => {
 
     const seeded = await browser.execute(async () => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
+      // 同一份应用数据会被多次运行复用，种子必须幂等：先读当前状态，再按 revision 更新。
+      const profiles = await invoke("list_provider_profiles");
+      const existing = (profiles || []).find((item) => item.id === "probe");
       await invoke("upsert_provider_profile", {
         request: {
           providerId: "probe",
@@ -18,17 +21,21 @@ describe("导航栏模型选择与推理强度", () => {
           sortOrder: 0,
           isBuiltin: false,
           credential: { kind: "replace", apiKey: "sk-probe" },
-          expectedRevision: null,
+          expectedRevision: existing ? existing.revision : null,
         },
       });
-      await invoke("upsert_provider_model", {
-        request: {
-          providerId: "probe",
-          modelId: "probe-model",
-          reasoningEfforts: ["low", "medium", "high", "max"],
-          expectedRevision: null,
-        },
-      });
+      const models = await invoke("list_provider_models", { providerId: "probe" });
+      const hasModel = (models || []).some((item) => item.modelId === "probe-model");
+      if (!hasModel) {
+        await invoke("upsert_provider_model", {
+          request: {
+            providerId: "probe",
+            modelId: "probe-model",
+            reasoningEfforts: ["low", "medium", "high", "max"],
+            expectedRevision: null,
+          },
+        });
+      }
       return "seeded";
     });
     console.log("种子:", seeded);

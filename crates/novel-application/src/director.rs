@@ -42,6 +42,9 @@ pub struct OpenRunInput {
     /// 按环节冻结的路由；空表示只有合同里的单一路由。
     #[allow(dead_code)]
     pub step_routes: BTreeMap<String, crate::provider_service::FrozenStepRoute>,
+    /// 调用方已知的密钥引用；路由已给出引用时以路由为准。
+    #[allow(dead_code)]
+    pub credential_ref: Option<String>,
 }
 
 /// 事件流内存缓存，用于减少数据库查询
@@ -521,7 +524,12 @@ impl DirectorService {
             repair_budget: input.repair_budget.unwrap_or(0),
             endpoint: input.endpoint.clone(),
             protocol: route.protocol.clone(),
-            credential_ref: route.credential_ref.clone(),
+            // 路由没给引用时，才使用调用方显式传入的引用；两者都没有则保持空，
+            // 由运行时的白名单策略判断是不是历史合同。
+            credential_ref: route
+                .credential_ref
+                .clone()
+                .or_else(|| input.credential_ref.clone()),
             allow_localhost_http: input.allow_localhost_http,
             reasoning_effort: route.reasoning_effort.clone(),
             step_routes: input.step_routes.clone(),

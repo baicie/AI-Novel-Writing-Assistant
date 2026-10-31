@@ -122,7 +122,7 @@ async fn seed(path: &std::path::Path, endpoint: &str) -> (String, String) {
         clock: Arc::new(novel_application::SystemClock),
         ids: Arc::new(novel_application::UuidIds),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(StaticSecrets),
         owner: "seed".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -155,6 +155,7 @@ async fn seed(path: &std::path::Path, endpoint: &str) -> (String, String) {
             endpoint: endpoint.into(),
             allow_localhost_http: true,
             step_routes: Default::default(),
+            credential_ref: Some("mock#1".into()),
         })
         .await
         .unwrap();
@@ -571,4 +572,16 @@ async fn completed_rereview_sigkill_does_not_replay_review_or_commit() {
         commits,
         revisions
     );
+}
+/// 这些用例只验证持久化与恢复，不关心真实密钥；给一个固定密钥即可通过凭据检查。
+struct StaticSecrets;
+
+#[async_trait::async_trait]
+impl novel_application::ModelSecrets for StaticSecrets {
+    async fn api_key(
+        &self,
+        _provider: &str,
+    ) -> Result<Option<String>, novel_application::PortError> {
+        Ok(Some("test-key".into()))
+    }
 }

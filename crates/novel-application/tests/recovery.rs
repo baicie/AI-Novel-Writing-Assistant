@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use novel_application::{
-    EventHub, FaultInjector, GenerationEvent, KnowledgeRepository, NewArtifact, NewDocument,
-    NewEmbedding, NovelRepository, OpenRunInput, Runtime, RuntimeDeps, TickOutcome,
-    WorkflowRepository,
+    EventHub, FaultInjector, GenerationEvent, KnowledgeRepository, ModelSecrets, NewArtifact,
+    NewDocument, NewEmbedding, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps,
+    TickOutcome, WorkflowRepository,
 };
 use novel_context::{Lexicon, fts_query, tokenize};
 use novel_llm::UnconfiguredProvider;
@@ -11,6 +11,15 @@ use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{BlockingMockLlm, FailDraftAfterCandidate, FakeClock, MockLlm, SequentialIds};
 use novel_workflow::{book_scope, chapter_scope};
 use sqlx::Row;
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
@@ -33,7 +42,7 @@ async fn runtime(
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults,
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "test-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -106,6 +115,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
@@ -126,6 +136,7 @@ async fn interrupted_draft_does_not_call_the_model_again_or_cover_author_text() 
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
@@ -264,6 +275,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter_id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
@@ -292,6 +304,7 @@ async fn approval_wait_is_not_claimed_and_a_second_run_conflicts() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter_id,
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
@@ -335,7 +348,7 @@ async fn saturated_worker_does_not_start_work() {
         Arc::new(SequentialIds::new()),
         Arc::new(EventHub::new()),
         Arc::new(novel_application::NoFault),
-        Arc::new(novel_application::NoModelSecrets),
+        Arc::new(FixtureSecrets),
         "limited".into(),
         1_000,
         0,
@@ -469,7 +482,7 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "test-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -492,6 +505,7 @@ async fn cancel_generation_during_draft_returns_cancelled_instead_of_pausing() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: None,
@@ -573,6 +587,7 @@ async fn mock_draft_stream_reaches_event_subscribers_before_checkpoint() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(256),

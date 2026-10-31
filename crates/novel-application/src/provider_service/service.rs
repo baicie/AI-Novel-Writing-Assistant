@@ -118,6 +118,29 @@ impl ProviderService {
                 "替换密钥时不能传空字符串，保留请用 keep、清除请用 clear",
             ));
         }
+        // 密钥槽按版本命名：每次替换都写新槽，旧槽继续给历史 Run 用。
+        // 这样即使数据库 CAS 失败、或者用户事后改了密钥，已提交的 Run 也不会被换成新密钥。
+        let previous = self
+            .registry
+            .list_providers()
+            .await?
+            .into_iter()
+            .find(|profile| profile.id == draft.id);
+        let base_revision = self
+            .registry
+            .provider_revision(&draft.id)
+            .await?
+            .unwrap_or(0);
+        let next_reference = format!("{}#{}", draft.id, base_revision + 1);
+        let reference = match (&credential, previous.as_ref()) {
+            // 保留：沿用当前槽，不动密钥。
+            (CredentialAction::Keep, Some(profile)) => profile.credential.reference.clone(),
+            (CredentialAction::Keep, None) => next_reference.clone(),
+            // 清除：写入一个空的新槽标记，旧槽保留给历史 Run。
+            (CredentialAction::Clear, _) => format!("{next_reference}#cleared"),
+            // 替换：写新槽，提交成功后才成为当前配置。
+            (CredentialAction::Replace(_), _) => next_reference.clone(),
+        };
         let profile = novel_domain::ProviderProfile {
             id: draft.id.clone(),
             display_name: draft.display_name,
@@ -125,8 +148,7 @@ impl ProviderService {
             base_url: draft.base_url,
             credential: novel_domain::CredentialReference {
                 kind: novel_domain::CredentialKind::OsSecret,
-                // 每个 provider 独占一个密钥槽，禁止跨 provider 复用默认槽。
-                reference: draft.id.clone(),
+                reference: reference.clone(),
             },
             is_builtin: draft.is_builtin,
             allow_localhost_http: draft.allow_localhost_http,
@@ -136,8 +158,14 @@ impl ProviderService {
             .validate()
             .map_err(|error| ProviderError::validation(error.to_string()))?;
 
-        // 先写意图再动密钥库：任何一步失败都留下可补偿的记录，且绝不落密钥正文。
-        if !matches!(credential, CredentialAction::Keep) {
+        // 先写意图，再提交数据库，最后才落密钥正文。
+        //
+        // 顺序很重要：新槽名由 revision 推导，两个窗口并发保存会算出同一个名字。
+        // 若先写密钥再提交，输的一方会覆盖赢一方的密钥，出现「配置指向 gw#N，密钥却是失败者的」。
+        // 改成先提交后写入：输的一方在 CAS 阶段就失败，根本不会碰密钥库。
+        let intent_id = if matches!(credential, CredentialAction::Keep) {
+            None
+        } else {
             let action = match credential {
                 CredentialAction::Replace(_) => "replace",
                 CredentialAction::Clear => "clear",
@@ -153,33 +181,53 @@ impl ProviderService {
                     now_ms,
                 )
                 .await?;
-            let outcome = match &credential {
-                CredentialAction::Replace(secret) => {
-                    self.vault
-                        .write(&profile.credential.reference, secret.trim())
-                        .await
+            Some(intent_id)
+        };
+
+        let revision = match self
+            .registry
+            .upsert_provider(&profile, expected_revision, now_ms)
+            .await
+        {
+            Ok(revision) => revision,
+            Err(error) => {
+                // 版本不匹配或写库失败：这次没有动过任何密钥，旧配置与旧密钥完全不受影响。
+                if let Some(intent_id) = &intent_id {
+                    let _ = self
+                        .intents
+                        .finish(intent_id, "pending", Some(&error.to_string()), now_ms)
+                        .await;
                 }
-                CredentialAction::Clear => self.vault.delete(&profile.credential.reference).await,
-                CredentialAction::Keep => Ok(()),
-            };
-            match outcome {
+                return Err(error.into());
+            }
+        };
+
+        if let (CredentialAction::Replace(secret), Some(intent_id)) = (&credential, &intent_id) {
+            match self.vault.write(&reference, secret.trim()).await {
                 Ok(()) => {
-                    self.intents
-                        .finish(&intent_id, "done", None, now_ms)
-                        .await?;
+                    self.intents.finish(intent_id, "done", None, now_ms).await?;
                 }
                 Err(error) => {
+                    // 配置已指向新槽但密钥没写成功：先补偿数据库，避免留下「有配置没密钥」的半条记录。
+                    // 旧槽与旧配置在这条路径上从未被改动，历史 Run 不受影响。
+                    if let Some(previous) = previous.as_ref() {
+                        let _ = self
+                            .registry
+                            .upsert_provider(previous, Some(revision), now_ms)
+                            .await;
+                    } else {
+                        let _ = self.registry.delete_provider(&profile.id, true).await;
+                    }
                     self.intents
-                        .finish(&intent_id, "pending", Some(&error.to_string()), now_ms)
+                        .finish(intent_id, "pending", Some(&error.to_string()), now_ms)
                         .await?;
                     return Err(error.into());
                 }
             }
+        } else if let Some(intent_id) = &intent_id {
+            self.intents.finish(intent_id, "done", None, now_ms).await?;
         }
-        let revision = self
-            .registry
-            .upsert_provider(&profile, expected_revision, now_ms)
-            .await?;
+
         let credential_present = self.vault.present(&profile.credential.reference).await?;
         Ok(ProviderView {
             id: profile.id,
@@ -331,25 +379,55 @@ impl ProviderService {
         &self,
         task_type: &str,
     ) -> Result<Option<ResolvedModelRoute>, ProviderError> {
-        let binding = self
-            .registry
-            .list_bindings()
-            .await?
-            .into_iter()
+        let snapshot = self.route_snapshot().await?;
+        Self::resolve_from_snapshot(&snapshot, task_type)
+    }
+
+    /// 一次性读取路由所需的全部配置，后续解析只在这个快照内进行。
+    ///
+    /// 这样同一批解析（例如创建 Run 时冻结所有环节）不会因为并发保存配置而拼出混合版本。
+    pub(crate) async fn route_snapshot(&self) -> Result<RouteSnapshot, ProviderError> {
+        // 走端口的一致性读取：SQLite 适配器在单个读事务里取 providers + models + bindings，
+        // 避免并发保存配置时拼出「新 Provider + 旧 Binding」这种混合快照。
+        let rows = self.registry.route_snapshot_rows().await?;
+        let mut models: std::collections::HashMap<String, Vec<novel_domain::ModelProfile>> =
+            std::collections::HashMap::new();
+        for model in rows.models {
+            models
+                .entry(model.provider_id.clone())
+                .or_default()
+                .push(model);
+        }
+        Ok(RouteSnapshot {
+            bindings: rows.bindings,
+            providers: rows.providers,
+            models,
+        })
+    }
+
+    pub(crate) fn resolve_from_snapshot(
+        snapshot: &RouteSnapshot,
+        task_type: &str,
+    ) -> Result<Option<ResolvedModelRoute>, ProviderError> {
+        let binding = snapshot
+            .bindings
+            .iter()
             .find(|item| item.task_type == task_type);
         let Some(binding) = binding else {
             return Ok(None);
         };
-        let provider = self
-            .registry
-            .list_providers()
-            .await?
-            .into_iter()
+        let provider = snapshot
+            .providers
+            .iter()
             .find(|item| item.id == binding.provider_id)
             .ok_or_else(|| {
                 ProviderError::not_found(format!("绑定的模型来源已不存在：{}", binding.provider_id))
             })?;
-        let models = self.registry.list_models(&provider.id).await?;
+        let models = snapshot
+            .models
+            .get(&provider.id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         if !models
             .iter()
             .any(|model| model.model_id == binding.model_id)
@@ -362,15 +440,22 @@ impl ProviderService {
         Ok(Some(ResolvedModelRoute {
             task_type: task_type.to_string(),
             provider_id: provider.id.clone(),
-            model_id: binding.model_id,
+            model_id: binding.model_id.clone(),
             protocol: provider.protocol.as_str().to_string(),
-            endpoint: provider.base_url,
+            endpoint: provider.base_url.clone(),
             allow_localhost_http: provider.allow_localhost_http,
-            credential_ref: provider.credential.reference,
-            reasoning_effort: binding.reasoning_effort,
+            credential_ref: provider.credential.reference.clone(),
+            reasoning_effort: binding.reasoning_effort.clone(),
             source: "binding".to_string(),
         }))
     }
+}
+
+/// 某一时刻的完整路由配置快照。
+pub(crate) struct RouteSnapshot {
+    bindings: Vec<novel_domain::ModelBinding>,
+    providers: Vec<novel_domain::ProviderProfile>,
+    models: std::collections::HashMap<String, Vec<novel_domain::ModelProfile>>,
 }
 
 impl ProviderService {
@@ -378,10 +463,14 @@ impl ProviderService {
     pub async fn frozen_step_routes(
         &self,
     ) -> Result<std::collections::BTreeMap<String, FrozenStepRoute>, ProviderError> {
+        let snapshot = self.route_snapshot().await?;
         let mut routes = std::collections::BTreeMap::new();
-        for binding in self.list_bindings().await? {
-            if let Some(route) = self.resolve_route(&binding.task_type).await? {
-                routes.insert(binding.task_type, FrozenStepRoute::from_route(&route));
+        for binding in snapshot.bindings.iter() {
+            if let Some(route) = Self::resolve_from_snapshot(&snapshot, &binding.task_type)? {
+                routes.insert(
+                    binding.task_type.clone(),
+                    FrozenStepRoute::from_route(&route),
+                );
             }
         }
         Ok(routes)

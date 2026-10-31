@@ -178,7 +178,7 @@ async fn test_list_novels_returns_persisted() {
     assert_eq!(items.len(), 3);
 
     // 验证按 updated_at 倒序排列
-    for (_idx, item) in items.iter().enumerate() {
+    for item in items.iter() {
         assert!(item["title"].as_str().unwrap().contains("小说"));
     }
 }

@@ -2,11 +2,20 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use novel_application::{
-    BatchRepository, BatchRunRequest, BatchService, NewChapter, NewNovel, OpenRunInput, Runtime,
-    RuntimeDeps, UuidIds,
+    BatchRepository, BatchRunRequest, BatchService, ModelSecrets, NewChapter, NewNovel,
+    OpenRunInput, PortError, Runtime, RuntimeDeps, UuidIds,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm};
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn prompts() -> BTreeMap<String, String> {
     let mut prompts = BTreeMap::new();
@@ -25,7 +34,7 @@ fn build_runtime(kernel: Arc<SqliteKernel>) -> Runtime {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(UuidIds),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "batch-crash-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -97,6 +106,7 @@ async fn committed_open_run_before_binding_is_replayed_after_reopen() {
             novel_id: "n1".into(),
             target_chapter_id: "c1".into(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),

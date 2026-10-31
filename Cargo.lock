@@ -2502,6 +2502,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -2576,6 +2577,7 @@ name = "novel-llm"
 version = "0.1.1-beta.6"
 dependencies = [
  "async-trait",
+ "axum 0.7.9",
  "futures",
  "reqwest 0.12.28",
  "serde",
@@ -2597,6 +2599,7 @@ dependencies = [
  "novel-llm",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

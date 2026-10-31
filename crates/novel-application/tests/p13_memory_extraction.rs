@@ -1,11 +1,20 @@
 use std::sync::Arc;
 
 use novel_application::{
-    ExtractMemoryInput, MemoryService, NewChapter, NewCharacter, NewNovel, NewTimelineEvent,
-    NovelRepository,
+    ExtractMemoryInput, MemoryService, ModelSecrets, NewChapter, NewCharacter, NewNovel,
+    NewTimelineEvent, NovelRepository, PortError,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn extraction_json() -> String {
     serde_json::json!({"facts":[
@@ -92,7 +101,7 @@ async fn fixture(output: String) -> (Arc<SqliteKernel>, MemoryService, String, S
         llm,
         Arc::new(FakeClock::new(100)),
         Arc::new(SequentialIds::new()),
-        Arc::new(novel_application::NoModelSecrets),
+        Arc::new(FixtureSecrets),
     );
     (kernel, service, "n".into(), "ch1".into())
 }
