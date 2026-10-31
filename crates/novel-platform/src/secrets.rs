@@ -437,7 +437,7 @@ mod fallback_tests {
         let dir = std::env::temp_dir().join(format!("p16-master-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        configure_secret_fallback(dir.clone());
+        // 不调用 configure_secret_fallback：它会改全局回退目录，影响其它用例。
 
         // 构造一份「只有密文、没有主密钥」的目录。
         let ciphertext = [MAGIC, &[0_u8; 12], &[1_u8; 16]].concat();
