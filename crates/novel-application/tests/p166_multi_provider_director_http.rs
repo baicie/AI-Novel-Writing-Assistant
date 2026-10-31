@@ -915,3 +915,300 @@ async fn paused_run_keeps_frozen_route_and_old_key_after_rotation() {
     // 旧 Run 的请求数在轮换后没有再打新端点。
     assert_ne!(run_old.run_id, run_new.run_id);
 }
+
+// ============================================================
+// R8.1-G5：候选稿确认的命令幂等与冲突（真实 SQLite + Director）。
+// ============================================================
+
+/// 驱动一个 Run 直到出现「候选稿确认门点」。
+async fn drive_to_candidate_gate(
+    runtime: &Runtime,
+    novel_id: &str,
+    run_id: &str,
+) -> (String, String, String, i64) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    while tokio::time::Instant::now() < deadline {
+        let detail = runtime
+            .director
+            .get_run_detail(novel_id, run_id)
+            .await
+            .unwrap();
+        if detail.status == "succeeded" || detail.status == "failed" {
+            panic!("Run 提前结束：{}", detail.status);
+        }
+        let gate_is_approval = detail
+            .gate
+            .as_ref()
+            .map(|gate| gate.id == "approval")
+            .unwrap_or(false);
+        if gate_is_approval
+            && let Some(candidate) = detail.latest_candidate.clone()
+            && !candidate.id.is_empty()
+            && !candidate.content_sha256.is_empty()
+        {
+            return (
+                candidate.id,
+                candidate.content_sha256,
+                candidate.content,
+                detail.control_version,
+            );
+        }
+        if detail.status == "waiting_approval"
+            && detail
+                .legal_actions
+                .iter()
+                .any(|action| action == "approve" || action == "confirm")
+        {
+            let _ = runtime
+                .director
+                .approve(
+                    &format!("g5-approve-{stamp}-{}", detail.control_version),
+                    run_id,
+                )
+                .await;
+        }
+        let _ = runtime.worker.tick().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("等不到候选稿确认门点");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn candidate_confirmation_is_idempotent_and_conflicting() {
+    // 八段剧本：story → cast → volume → chapters → draft → issues → repair → clean review
+    let provider = MockProvider::start(vec![
+        story(),
+        cast(),
+        volume(),
+        chapters(),
+        "候选正文：第一版。".to_string(),
+        issues(),
+        "修复后的正文：第二版。".to_string(),
+        "{\"issues\":[]}".to_string(),
+    ])
+    .await;
+
+    let directory = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&directory.path().join("g5.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let vault = Arc::new(TestVault::default());
+    let service = ProviderService::new(
+        kernel.clone() as Arc<dyn ProviderRegistry>,
+        vault.clone() as Arc<dyn CredentialVault>,
+        Arc::new(TestIntents),
+    );
+    service
+        .upsert_provider(
+            ProviderDraft {
+                id: "gw".into(),
+                display_name: Some("G5 网关".into()),
+                protocol: ProviderProtocol::OpenAiCompatible,
+                base_url: provider.base_url(),
+                allow_localhost_http: true,
+                is_builtin: false,
+                sort_order: 0,
+            },
+            CredentialAction::Replace("key-G5".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    service
+        .upsert_model(
+            novel_domain::ModelProfile {
+                provider_id: "gw".into(),
+                model_id: "model".into(),
+                display_name: Some("model".into()),
+                capabilities: Default::default(),
+                source: novel_domain::ModelSource::User,
+                overridden: Default::default(),
+            },
+            false,
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    for task in ["planner", "writer", "review", "repair"] {
+        kernel
+            .set_binding_cas(
+                &novel_domain::ModelBinding {
+                    task_type: task.into(),
+                    provider_id: "gw".into(),
+                    model_id: "model".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+    }
+
+    let step_routes = service.frozen_step_routes().await.unwrap();
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm: Arc::new(OpenAiCompatibleProvider::new()),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(TestSecrets(vault.clone())),
+        owner: "g5-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime.director.create_novel("G5 书", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let mut prompts = BTreeMap::new();
+    prompts.insert("chapter_draft".to_string(), "chapter-draft-v1".to_string());
+    prompts.insert(
+        "consistency_review".to_string(),
+        "consistency-review-v1".to_string(),
+    );
+    prompts.insert(
+        "chapter_repair".to_string(),
+        "chapter-repair-v1".to_string(),
+    );
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "g5-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "gw".into(),
+            model: "model".into(),
+            prompt_versions: prompts,
+            token_budget: Some(4096),
+            context_token_budget: None,
+            max_automatic_retries: 1,
+            repair_budget: Some(1),
+            endpoint: provider.endpoint(),
+            allow_localhost_http: true,
+            step_routes,
+            credential_ref: Some("gw#1".into()),
+        })
+        .await
+        .unwrap();
+
+    let (candidate_id, sha, content, version) =
+        drive_to_candidate_gate(&runtime, &novel.id, &opened.run_id).await;
+    let http_before = provider.records().len();
+
+    // G5.1 同一命令重复执行 → 第二次幂等，正文只提交一次。
+    let first = runtime
+        .director
+        .confirm_candidate_after_edit(
+            "g5-confirm-1",
+            &opened.run_id,
+            Some(version),
+            &candidate_id,
+            &sha,
+            &content,
+        )
+        .await
+        .expect("首次确认应当成功");
+    // 确认后需要 worker 继续推进才会把候选稿写成正式正文。
+    for _ in 0..40 {
+        let detail = runtime
+            .director
+            .get_run_detail(&novel.id, &opened.run_id)
+            .await
+            .unwrap();
+        if detail.status == "succeeded" || detail.status == "failed" {
+            break;
+        }
+        if detail.status == "waiting_approval"
+            && detail
+                .legal_actions
+                .iter()
+                .any(|action| action == "approve" || action == "confirm")
+        {
+            let _ = runtime
+                .director
+                .approve(
+                    &format!("g5-post-{}", detail.control_version),
+                    &opened.run_id,
+                )
+                .await;
+        }
+        let _ = runtime.worker.tick().await.unwrap();
+    }
+
+    let second = runtime
+        .director
+        .confirm_candidate_after_edit(
+            "g5-confirm-1",
+            &opened.run_id,
+            Some(version),
+            &candidate_id,
+            &sha,
+            &content,
+        )
+        .await;
+    assert!(second.is_ok(), "同一命令重放必须幂等：{second:?}");
+
+    let chapter_after = runtime
+        .director
+        .get_chapter(&novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        chapter_after.content, content,
+        "正式正文必须等于作者确认的内容"
+    );
+    assert!(chapter_after.official_version > 0, "正式正文版本必须递增");
+    let version_after_replay = chapter_after.official_version;
+
+    // G5.2 同一命令、不同内容 → 必须冲突，且不能覆盖正文。
+    let conflicting = runtime
+        .director
+        .confirm_candidate_after_edit(
+            "g5-confirm-1",
+            &opened.run_id,
+            Some(version),
+            &candidate_id,
+            &sha,
+            "被篡改的正文",
+        )
+        .await;
+    assert!(
+        conflicting.is_err(),
+        "同一命令携带不同内容必须冲突：{conflicting:?}"
+    );
+    let chapter_after_conflict = runtime
+        .director
+        .get_chapter(&novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        chapter_after_conflict.content, content,
+        "冲突请求不得覆盖已确认正文"
+    );
+    assert_eq!(
+        chapter_after_conflict.official_version, version_after_replay,
+        "冲突请求不得二次递增正式版本"
+    );
+
+    // G5.6 幂等由本地持久化决定，不依赖远端：确认过程不应新增模型请求。
+    assert_eq!(
+        provider.records().len(),
+        http_before,
+        "确认动作不得触发新的模型生成请求"
+    );
+}
