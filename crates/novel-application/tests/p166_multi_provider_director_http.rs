@@ -37,13 +37,6 @@ impl Record {
             .to_string()
     }
 
-    fn reasoning_effort(&self) -> Option<String> {
-        let value: serde_json::Value = serde_json::from_str(&self.body).unwrap_or_default();
-        value
-            .get("reasoning_effort")
-            .and_then(|effort| effort.as_str())
-            .map(str::to_string)
-    }
 }
 
 /// 一个可编排的 Mock LLM Server：按 FIFO 返回剧本内容，并记录每次请求。
@@ -700,8 +693,10 @@ async fn paused_run_keeps_frozen_route_and_old_key_after_rotation() {
     // 推进到第一个业务暂停点（此时已经用旧配置请求过 A）。
     let mut paused = false;
     for tick in 0..4 {
-        if let TickOutcome::Advanced { status, run_id } = runtime.worker.tick().await.unwrap() {
-            if status == "waiting_approval" {
+        if let TickOutcome::Advanced { status, run_id } = runtime.worker.tick().await.unwrap()
+            && status == "waiting_approval"
+        {
+            {
                 paused = true;
                 let detail = runtime
                     .director
