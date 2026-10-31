@@ -513,3 +513,411 @@ async fn four_steps_route_to_two_real_mock_providers() {
     assert_eq!(run_count, 1);
     assert!(approvals <= 80);
 }
+
+/// R4.2-D：Run 冻结旧路由与旧密钥；轮换后旧 Run 用旧配置，新 Run 用新配置。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn paused_run_keeps_frozen_route_and_old_key_after_rotation() {
+    // A：planner + review；B：writer + repair；B2：轮换后的新 Endpoint（必须对旧 Run 零请求）。
+    let mut script_a = Vec::new();
+    for _ in 0..2 {
+        script_a.push(story());
+        script_a.push(cast());
+        script_a.push(volume());
+        script_a.push(chapters());
+        script_a.push(issues());
+        script_a.push("{\"issues\":[]}".to_string());
+        script_a.push("{\"issues\":[]}".to_string());
+    }
+    let provider_a = MockProvider::start(script_a).await;
+    let provider_b = MockProvider::start(vec![
+        "候选正文：旧端点产出。".to_string(),
+        "修复后的候选正文：旧端点修复。".to_string(),
+        "候选正文：旧端点产出二。".to_string(),
+    ])
+    .await;
+    let provider_b2 = MockProvider::start(vec![
+        "候选正文：新端点产出。".to_string(),
+        "修复后的候选正文：新端点修复。".to_string(),
+    ])
+    .await;
+
+    let directory = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&directory.path().join("rotate.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let vault = Arc::new(TestVault::default());
+    let service = ProviderService::new(
+        kernel.clone() as Arc<dyn ProviderRegistry>,
+        vault.clone() as Arc<dyn CredentialVault>,
+        Arc::new(TestIntents),
+    );
+
+    let draft = |id: &str, name: &str, base: String, order: i32| ProviderDraft {
+        id: id.into(),
+        display_name: Some(name.into()),
+        protocol: ProviderProtocol::OpenAiCompatible,
+        base_url: base,
+        allow_localhost_http: true,
+        is_builtin: false,
+        sort_order: order,
+    };
+    service
+        .upsert_provider(
+            draft("gw-a", "A 网关", provider_a.base_url(), 0),
+            CredentialAction::Replace("key-A".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    service
+        .upsert_provider(
+            draft("gw-b", "B 网关", provider_b.base_url(), 1),
+            CredentialAction::Replace("key-B".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    for (provider, model) in [
+        ("gw-a", "model-plan"),
+        ("gw-a", "model-review"),
+        ("gw-b", "model-write"),
+        ("gw-b", "model-repair"),
+        ("gw-b", "model-write2"),
+    ] {
+        service
+            .upsert_model(
+                novel_domain::ModelProfile {
+                    provider_id: provider.into(),
+                    model_id: model.into(),
+                    display_name: Some(model.into()),
+                    capabilities: Default::default(),
+                    source: novel_domain::ModelSource::User,
+                    overridden: Default::default(),
+                },
+                false,
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+    }
+    for (task, provider, model) in [
+        ("planner", "gw-a", "model-plan"),
+        ("writer", "gw-b", "model-write"),
+        ("review", "gw-a", "model-review"),
+        ("repair", "gw-b", "model-repair"),
+    ] {
+        kernel
+            .set_binding_cas(
+                &novel_domain::ModelBinding {
+                    task_type: task.into(),
+                    provider_id: provider.into(),
+                    model_id: model.into(),
+                    reasoning_effort: None,
+                },
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+    }
+
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm: Arc::new(OpenAiCompatibleProvider::new()),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(TestSecrets(vault.clone())),
+        owner: "rotate-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime.director.create_novel("轮换书", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+
+    let open_input =
+        |command: &str,
+         chapter_id: String,
+         endpoint: String,
+         routes: std::collections::BTreeMap<String, novel_application::FrozenStepRoute>,
+         model: &str| OpenRunInput {
+            command_id: command.into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter_id,
+            provider: "gw-a".into(),
+            model: model.into(),
+            prompt_versions: {
+                let mut prompts = BTreeMap::new();
+                prompts.insert("chapter_draft".to_string(), "chapter-draft-v1".to_string());
+                prompts.insert(
+                    "consistency_review".to_string(),
+                    "consistency-review-v1".to_string(),
+                );
+                prompts.insert(
+                    "chapter_repair".to_string(),
+                    "chapter-repair-v1".to_string(),
+                );
+                prompts
+            },
+            token_budget: Some(4096),
+            context_token_budget: None,
+            max_automatic_retries: 0,
+            repair_budget: Some(1),
+            endpoint,
+            allow_localhost_http: true,
+            step_routes: routes,
+            credential_ref: Some("gw-a#1".into()),
+        };
+
+    // ---- Run-Old：冻结当前配置 ----
+    let frozen_old = service.frozen_step_routes().await.unwrap();
+    assert_eq!(frozen_old["writer"].endpoint, provider_b.base_url());
+    let run_old = runtime
+        .director
+        .open_run(open_input(
+            "rotate-open-old",
+            chapter.id.clone(),
+            provider_a.endpoint(),
+            frozen_old,
+            "model-plan",
+        ))
+        .await
+        .unwrap();
+
+    // 推进到第一个业务暂停点（此时已经用旧配置请求过 A）。
+    let mut paused = false;
+    for tick in 0..4 {
+        if let TickOutcome::Advanced { status, run_id } = runtime.worker.tick().await.unwrap() {
+            if status == "waiting_approval" {
+                paused = true;
+                let detail = runtime
+                    .director
+                    .get_run_detail(&novel.id, &run_id)
+                    .await
+                    .unwrap();
+                let resumable = detail
+                    .legal_actions
+                    .iter()
+                    .any(|action| action == "approve" || action == "confirm");
+                assert!(
+                    resumable,
+                    "需要在可恢复的业务暂停点，实际动作：{:?}",
+                    detail.legal_actions
+                );
+                let _ = tick;
+                break;
+            }
+        }
+    }
+    assert!(paused, "Run-Old 应当停在可恢复的人工确认点");
+    assert!(!provider_a.records().is_empty(), "旧 Run 已经请求过 A");
+
+    // ---- 轮换：A/B 换密钥，B 换 Endpoint，writer 换模型 ----
+    let views = service.list_providers().await.unwrap();
+    let revision_a = views
+        .iter()
+        .find(|view| view.id == "gw-a")
+        .unwrap()
+        .revision;
+    let revision_b = views
+        .iter()
+        .find(|view| view.id == "gw-b")
+        .unwrap()
+        .revision;
+    service
+        .upsert_provider(
+            draft("gw-a", "A 网关", provider_a.base_url(), 0),
+            CredentialAction::Replace("key-A2".into()),
+            Some(revision_a),
+            2,
+        )
+        .await
+        .unwrap();
+    // 换到另一个主机端口属于「明文 HTTP 主机变更」，产品要求显式确认；这里模拟用户确认。
+    service
+        .upsert_provider_with_confirmation(
+            draft("gw-b", "B 网关", provider_b2.base_url(), 1),
+            CredentialAction::Replace("key-B2".into()),
+            Some(revision_b),
+            2,
+            true,
+        )
+        .await
+        .unwrap();
+    let revision_b2 = service
+        .list_providers()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|view| view.id == "gw-b")
+        .unwrap()
+        .revision;
+    kernel
+        .set_binding_cas(
+            &novel_domain::ModelBinding {
+                task_type: "writer".into(),
+                provider_id: "gw-b".into(),
+                model_id: "model-write2".into(),
+                reasoning_effort: None,
+            },
+            Some(revision_b2),
+            2,
+        )
+        .await
+        .unwrap();
+
+    // 旧槽必须仍然存在（旧 Run 还要用）。
+    assert_eq!(
+        vault.values.lock().unwrap().get("gw-b#1").cloned(),
+        Some("key-B".to_string()),
+        "轮换不能删除旧密钥槽"
+    );
+
+    // ---- 轮换完成后再放行旧 Run（模拟作者在旧配置下继续） ----
+    let pending = runtime
+        .director
+        .get_run_detail(&novel.id, &run_old.run_id)
+        .await
+        .unwrap();
+    assert!(
+        pending
+            .legal_actions
+            .iter()
+            .any(|action| action == "approve" || action == "confirm"),
+        "轮换后旧 Run 仍应停在可恢复点，实际动作：{:?}",
+        pending.legal_actions
+    );
+    runtime
+        .director
+        .approve("rotate-resume-old", &run_old.run_id)
+        .await
+        .unwrap();
+
+    // ---- 继续旧 Run 到终态 ----
+    for tick in 0..40 {
+        match runtime.worker.tick().await.unwrap() {
+            TickOutcome::Advanced { status, run_id } => {
+                if status == "waiting_approval" {
+                    if let Ok(detail) = runtime.director.get_run_detail(&novel.id, &run_id).await
+                        && detail
+                            .legal_actions
+                            .iter()
+                            .any(|action| action == "approve" || action == "confirm")
+                    {
+                        runtime
+                            .director
+                            .approve(&format!("rotate-approve-{tick}"), &run_id)
+                            .await
+                            .unwrap();
+                    }
+                } else if status == "succeeded" || status == "paused" {
+                    break;
+                }
+            }
+            TickOutcome::Idle => break,
+            other => panic!("unexpected tick outcome: {other:?}"),
+        }
+    }
+
+    // ---- 旧 Run 的实际请求：旧密钥 + 旧端点 ----
+    let old_a = provider_a.records();
+    let old_b = provider_b.records();
+    assert!(
+        old_a.len() >= 3,
+        "旧 Run 应当多次请求 A，实际 {}",
+        old_a.len()
+    );
+    assert!(
+        !old_b.is_empty(),
+        "旧 Run 的 writer/repair 请求必须打到旧 B 端点"
+    );
+    for record in &old_a {
+        assert_eq!(
+            record.authorization.as_deref(),
+            Some("Bearer key-A"),
+            "旧 Run 必须继续用旧密钥：{record:?}"
+        );
+    }
+    for record in &old_b {
+        assert_eq!(
+            record.authorization.as_deref(),
+            Some("Bearer key-B"),
+            "旧 Run 的 B 请求必须继续用旧密钥：{record:?}"
+        );
+        assert_ne!(record.model(), "model-write2", "旧 Run 不能改用新模型");
+    }
+    assert!(
+        provider_b2.records().is_empty(),
+        "轮换后，旧 Run 不得打到新 Endpoint（实际 {} 次）",
+        provider_b2.records().len()
+    );
+
+    // ---- Run-New：使用新配置 ----
+    let frozen_new = service.frozen_step_routes().await.unwrap();
+    assert_eq!(frozen_new["writer"].endpoint, provider_b2.base_url());
+    assert_eq!(frozen_new["writer"].model_id, "model-write2");
+    assert_eq!(frozen_new["writer"].credential_ref, "gw-b#2");
+
+    let chapter_two = runtime
+        .director
+        .create_chapter(&novel.id, "第二章", 2)
+        .await
+        .unwrap();
+    let run_new = runtime
+        .director
+        .open_run(open_input(
+            "rotate-open-new",
+            chapter_two.id.clone(),
+            provider_a.endpoint(),
+            frozen_new,
+            "model-plan",
+        ))
+        .await
+        .unwrap();
+    for tick in 0..30 {
+        match runtime.worker.tick().await.unwrap() {
+            TickOutcome::Advanced { status, run_id } => {
+                if status == "waiting_approval" {
+                    runtime
+                        .director
+                        .approve(&format!("rotate-new-approve-{tick}"), &run_id)
+                        .await
+                        .unwrap();
+                }
+                if status == "succeeded" || status == "paused" {
+                    break;
+                }
+                if !provider_b2.records().is_empty() {
+                    break;
+                }
+            }
+            TickOutcome::Idle => break,
+            other => panic!("unexpected tick outcome: {other:?}"),
+        }
+    }
+    let new_b = provider_b2.records();
+    assert!(!new_b.is_empty(), "新 Run 必须打到新 Endpoint");
+    assert_eq!(
+        new_b[0].authorization.as_deref(),
+        Some("Bearer key-B2"),
+        "新 Run 必须使用新密钥：{:?}",
+        new_b[0]
+    );
+    assert_eq!(new_b[0].model(), "model-write2", "新 Run 应使用新绑定模型");
+
+    // 旧 Run 的请求数在轮换后没有再打新端点。
+    assert_ne!(run_old.run_id, run_new.run_id);
+}
