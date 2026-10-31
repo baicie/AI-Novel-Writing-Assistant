@@ -83,7 +83,7 @@ pub use provider_service::{
     CredentialAction, CredentialActionKind, CredentialIntents, CredentialReconcileReport,
     CredentialVault, FrozenRoute, FrozenRouteStatus, GenerationTarget, LegacyModelTarget,
     PendingCredentialIntent, ProviderDraft, ProviderError, ProviderErrorCode, ProviderRegistry,
-    ProviderService, ProviderView, ResolvedModelRoute, apply_route_to_run,
+    ProviderService, ProviderView, ResolvedModelRoute, RouteSnapshotRows, apply_route_to_run,
     resolve_generation_target,
 };
 pub use runtime::{Runtime, RuntimeDeps};

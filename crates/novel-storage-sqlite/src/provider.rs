@@ -430,6 +430,124 @@ impl SqliteKernel {
         })
     }
 
+    /// 在**单个读事务**里取出路由所需的 provider / model / binding。
+    ///
+    /// SQLite 的 WAL 模式下，事务内多次 SELECT 看到的是同一个快照；
+    /// 分三次独立查询则可能读到不同时刻的数据，拼出「新 Provider + 旧 Binding」。
+    pub async fn route_snapshot_rows(
+        &self,
+    ) -> Result<novel_application::RouteSnapshotRows, PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        let provider_rows = sqlx::query(
+            "SELECT id, secret_ref, endpoint, allow_localhost_http, protocol, display_name,
+                    is_builtin, sort_order
+             FROM provider_credential ORDER BY sort_order, id",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        let model_rows = sqlx::query(
+            "SELECT provider_id, model_id, display_name, context_window, max_output_tokens,
+                    supports_streaming, supports_tools, supports_reasoning, input_modalities,
+                    reasoning_efforts, source, user_overrides
+             FROM provider_model ORDER BY provider_id, model_id",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        let binding_rows = sqlx::query(
+            "SELECT task_type, provider_id, model_id, reasoning_effort FROM model_binding
+             ORDER BY task_type",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        tx.commit().await.map_err(map_sql)?;
+
+        let mut providers = Vec::with_capacity(provider_rows.len());
+        for row in provider_rows {
+            let protocol: String = row.try_get("protocol").map_err(map_sql)?;
+            let allow: i64 = row.try_get("allow_localhost_http").map_err(map_sql)?;
+            let builtin: i64 = row.try_get("is_builtin").map_err(map_sql)?;
+            providers.push(ProviderProfile {
+                id: row.try_get("id").map_err(map_sql)?,
+                display_name: row.try_get("display_name").map_err(map_sql)?,
+                protocol: ProviderProtocol::parse(&protocol)
+                    .unwrap_or(ProviderProtocol::OpenAiCompatible),
+                base_url: row.try_get("endpoint").map_err(map_sql)?,
+                credential: CredentialReference {
+                    kind: CredentialKind::OsSecret,
+                    reference: row.try_get("secret_ref").map_err(map_sql)?,
+                },
+                is_builtin: builtin != 0,
+                allow_localhost_http: allow != 0,
+                sort_order: row.try_get::<i64, _>("sort_order").map_err(map_sql)? as i32,
+            });
+        }
+
+        let mut models = Vec::with_capacity(model_rows.len());
+        for row in model_rows {
+            let provider_id: String = row.try_get("provider_id").map_err(map_sql)?;
+            let source: String = row.try_get("source").map_err(map_sql)?;
+            let overrides_raw: Option<String> = row.try_get("user_overrides").map_err(map_sql)?;
+            let overridden = overrides_raw
+                .as_deref()
+                .map(|raw| serde_json::from_str::<Vec<CapabilityField>>(raw).unwrap_or_default())
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let modalities_raw: Option<String> =
+                row.try_get("input_modalities").map_err(map_sql)?;
+            let efforts_raw: Option<String> = row.try_get("reasoning_efforts").map_err(map_sql)?;
+            let streaming: Option<i64> = row.try_get("supports_streaming").map_err(map_sql)?;
+            let tools: Option<i64> = row.try_get("supports_tools").map_err(map_sql)?;
+            let reasoning: Option<i64> = row.try_get("supports_reasoning").map_err(map_sql)?;
+            models.push(ModelProfile {
+                provider_id,
+                model_id: row.try_get("model_id").map_err(map_sql)?,
+                display_name: row.try_get("display_name").map_err(map_sql)?,
+                capabilities: ModelCapabilities {
+                    context_window: row
+                        .try_get::<Option<i64>, _>("context_window")
+                        .map_err(map_sql)?
+                        .map(|value| value as u32),
+                    max_output_tokens: row
+                        .try_get::<Option<i64>, _>("max_output_tokens")
+                        .map_err(map_sql)?
+                        .map(|value| value as u32),
+                    supports_streaming: streaming.map(|value| value != 0),
+                    supports_tools: tools.map(|value| value != 0),
+                    supports_reasoning: reasoning.map(|value| value != 0),
+                    input_modalities: modalities_raw
+                        .as_deref()
+                        .map(|raw| serde_json::from_str::<Vec<Modality>>(raw).unwrap_or_default()),
+                    reasoning_efforts: efforts_raw.as_deref().map(|raw| {
+                        serde_json::from_str::<std::collections::BTreeSet<String>>(raw)
+                            .unwrap_or_default()
+                    }),
+                },
+                source: parse_source(&source),
+                overridden,
+            });
+        }
+
+        let mut bindings = Vec::with_capacity(binding_rows.len());
+        for row in binding_rows {
+            bindings.push(ModelBinding {
+                task_type: row.try_get("task_type").map_err(map_sql)?,
+                provider_id: row.try_get("provider_id").map_err(map_sql)?,
+                model_id: row.try_get("model_id").map_err(map_sql)?,
+                reasoning_effort: row.try_get("reasoning_effort").map_err(map_sql)?,
+            });
+        }
+
+        Ok(novel_application::RouteSnapshotRows {
+            providers,
+            models,
+            bindings,
+        })
+    }
+
     /// 删除 provider：默认拒绝「仍被绑定引用」或「仍是默认模型配置」的删除。
     pub async fn delete_provider_guarded(
         &self,
@@ -451,6 +569,25 @@ impl SqliteKernel {
             return Err(PortError::Conflict(
                 "这是桌面版当前使用的默认模型配置，删除后创作会失去模型来源".into(),
             ));
+        }
+        // 还有任务停在等待人工恢复 / 暂停 / 队列里时，删掉来源会让恢复路径失去密钥与地址。
+        let active_runs: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM workflow_control c
+               JOIN workflow_run r ON r.id = c.run_id
+              WHERE c.status IN ('queued','running','waiting_approval','paused')
+                AND (json_extract(r.contract_json, '$.provider') = ?
+                     OR EXISTS (SELECT 1 FROM json_each(r.contract_json, '$.step_routes') s
+                                 WHERE json_extract(s.value, '$.provider_id') = ?))",
+        )
+        .bind(provider_id)
+        .bind(provider_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        if active_runs > 0 && !force {
+            return Err(PortError::Conflict(format!(
+                "还有 {active_runs} 个未完成的创作任务在使用这个模型来源，先处理完再删除"
+            )));
         }
         self.delete_provider(provider_id).await
     }

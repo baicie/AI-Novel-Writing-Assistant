@@ -67,6 +67,11 @@ impl ProviderRegistry for SqliteKernel {
             .await
     }
 
+    /// 覆盖默认实现：在单个读事务里取路由配置，保证快照内部一致。
+    async fn route_snapshot_rows(&self) -> Result<novel_application::RouteSnapshotRows, PortError> {
+        SqliteKernel::route_snapshot_rows(self).await
+    }
+
     async fn list_bindings(&self) -> Result<Vec<ModelBinding>, PortError> {
         SqliteKernel::list_model_bindings(self).await
     }

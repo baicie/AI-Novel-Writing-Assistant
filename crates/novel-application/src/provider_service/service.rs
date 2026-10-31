@@ -369,18 +369,20 @@ impl ProviderService {
     ///
     /// 这样同一批解析（例如创建 Run 时冻结所有环节）不会因为并发保存配置而拼出混合版本。
     pub(crate) async fn route_snapshot(&self) -> Result<RouteSnapshot, ProviderError> {
-        let bindings = self.registry.list_bindings().await?;
-        let providers = self.registry.list_providers().await?;
-        let mut models = std::collections::HashMap::new();
-        for provider in &providers {
-            models.insert(
-                provider.id.clone(),
-                self.registry.list_models(&provider.id).await?,
-            );
+        // 走端口的一致性读取：SQLite 适配器在单个读事务里取 providers + models + bindings，
+        // 避免并发保存配置时拼出「新 Provider + 旧 Binding」这种混合快照。
+        let rows = self.registry.route_snapshot_rows().await?;
+        let mut models: std::collections::HashMap<String, Vec<novel_domain::ModelProfile>> =
+            std::collections::HashMap::new();
+        for model in rows.models {
+            models
+                .entry(model.provider_id.clone())
+                .or_default()
+                .push(model);
         }
         Ok(RouteSnapshot {
-            bindings,
-            providers,
+            bindings: rows.bindings,
+            providers: rows.providers,
             models,
         })
     }

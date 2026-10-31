@@ -151,9 +151,34 @@ pub fn protocol_supports_generation(protocol: novel_domain::ProviderProtocol) ->
     )
 }
 
+/// 路由配置的一次性读取结果。
+#[derive(Debug, Clone, Default)]
+pub struct RouteSnapshotRows {
+    pub providers: Vec<novel_domain::ProviderProfile>,
+    pub models: Vec<novel_domain::ModelProfile>,
+    pub bindings: Vec<novel_domain::ModelBinding>,
+}
+
 /// 存储端口：SQLite adapter 实现它。
 #[async_trait]
 pub trait ProviderRegistry: Send + Sync {
+    /// 一次性读取路由所需的全部配置。
+    ///
+    /// 默认实现只是连续调用三次，**不具备事务一致性**；SQLite 适配器会覆盖成单事务读取。
+    async fn route_snapshot_rows(&self) -> Result<RouteSnapshotRows, PortError> {
+        let providers = self.list_providers().await?;
+        let mut models = Vec::new();
+        for provider in &providers {
+            models.extend(self.list_models(&provider.id).await?);
+        }
+        let bindings = self.list_bindings().await?;
+        Ok(RouteSnapshotRows {
+            providers,
+            models,
+            bindings,
+        })
+    }
+
     async fn list_providers(&self) -> Result<Vec<novel_domain::ProviderProfile>, PortError>;
     async fn provider_revision(&self, provider_id: &str) -> Result<Option<i64>, PortError>;
     async fn upsert_provider(
