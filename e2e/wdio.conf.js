@@ -10,6 +10,7 @@ export const config = {
     "./provider-selector.e2e.js",
     "./provider-protocol-guard.e2e.js",
     "./author-journey.e2e.js",
+    "./p17-workbench.e2e.js",
   ],
   maxInstances: 1,
   logLevel: "warn",
