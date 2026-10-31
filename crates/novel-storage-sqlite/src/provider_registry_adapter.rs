@@ -41,20 +41,8 @@ impl ProviderRegistry for SqliteKernel {
         expected_revision: Option<i64>,
         now_ms: i64,
     ) -> Result<(), PortError> {
-        if let Some(expected) = expected_revision {
-            let current = self
-                .provider_revision(&model.provider_id)
-                .await?
-                .ok_or_else(|| {
-                    PortError::NotFound(format!("模型来源不存在：{}", model.provider_id))
-                })?;
-            if current != expected {
-                return Err(PortError::Conflict(format!(
-                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
-                )));
-            }
-        }
-        SqliteKernel::upsert_model(self, model, user_edit, now_ms).await
+        // 版本校验与写入必须原子：放在同一个事务里，避免读版本与写模型之间的并发窗口。
+        SqliteKernel::upsert_model_cas(self, model, user_edit, expected_revision, now_ms).await
     }
 
     async fn delete_model(

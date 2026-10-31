@@ -112,84 +112,38 @@ impl SqliteKernel {
         user_edit: bool,
         now_ms: i64,
     ) -> Result<(), PortError> {
-        let overrides: Vec<CapabilityField> = if user_edit {
-            profile.overridden.iter().copied().collect()
-        } else {
-            Vec::new()
-        };
-        let overrides_json = if overrides.is_empty() {
-            None
-        } else {
-            Some(
-                serde_json::to_string(&overrides)
-                    .map_err(|error| PortError::Storage(format!("覆盖字段序列化失败：{error}")))?,
-            )
-        };
-        let modalities = profile
-            .capabilities
-            .input_modalities
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| PortError::Storage(format!("模态序列化失败：{error}")))?;
-        let efforts = profile
-            .capabilities
-            .reasoning_efforts
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(|error| PortError::Storage(format!("推理档位序列化失败：{error}")))?;
-        sqlx::query(
-            "INSERT INTO provider_model(
-                 provider_id, model_id, display_name, context_window, max_output_tokens,
-                 supports_streaming, supports_tools, supports_reasoning, input_modalities,
-                 reasoning_efforts, source, user_overrides, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(provider_id, model_id) DO UPDATE SET
-               display_name = excluded.display_name,
-               context_window = excluded.context_window,
-               max_output_tokens = excluded.max_output_tokens,
-               supports_streaming = excluded.supports_streaming,
-               supports_tools = excluded.supports_tools,
-               supports_reasoning = excluded.supports_reasoning,
-               input_modalities = excluded.input_modalities,
-               reasoning_efforts = excluded.reasoning_efforts,
-               source = excluded.source,
-               user_overrides = excluded.user_overrides,
-               updated_at = excluded.updated_at",
-        )
-        .bind(&profile.provider_id)
-        .bind(&profile.model_id)
-        .bind(&profile.display_name)
-        .bind(profile.capabilities.context_window.map(i64::from))
-        .bind(profile.capabilities.max_output_tokens.map(i64::from))
-        .bind(
-            profile
-                .capabilities
-                .supports_streaming
-                .map(|value| i64::from(u8::from(value))),
-        )
-        .bind(
-            profile
-                .capabilities
-                .supports_tools
-                .map(|value| i64::from(u8::from(value))),
-        )
-        .bind(
-            profile
-                .capabilities
-                .supports_reasoning
-                .map(|value| i64::from(u8::from(value))),
-        )
-        .bind(modalities)
-        .bind(efforts)
-        .bind(source_str(profile.source))
-        .bind(overrides_json)
-        .bind(now_ms)
-        .bind(now_ms)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sql)?;
+        let mut conn = self.pool.acquire().await.map_err(map_sql)?;
+        upsert_model_row(&mut conn, profile, user_edit, now_ms).await
+    }
+
+    /// 事务内校验 provider revision 再写模型：
+    /// 版本检查与写入必须在同一个事务里，否则两次查询之间的并发更新会被旧版本号放过（TOCTOU）。
+    pub async fn upsert_model_cas(
+        &self,
+        profile: &ModelProfile,
+        user_edit: bool,
+        expected_revision: Option<i64>,
+        now_ms: i64,
+    ) -> Result<(), PortError> {
+        let mut tx = self.pool.begin().await.map_err(map_sql)?;
+        if let Some(expected) = expected_revision {
+            let current: Option<i64> =
+                sqlx::query_scalar("SELECT revision FROM provider_credential WHERE id = ?")
+                    .bind(&profile.provider_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(map_sql)?;
+            let current = current.ok_or_else(|| {
+                PortError::NotFound(format!("模型来源不存在：{}", profile.provider_id))
+            })?;
+            if current != expected {
+                return Err(PortError::Conflict(format!(
+                    "配置已被修改（期望版本 {expected}，当前 {current}），请刷新后再试"
+                )));
+            }
+        }
+        upsert_model_row(&mut tx, profile, user_edit, now_ms).await?;
+        tx.commit().await.map_err(map_sql)?;
         Ok(())
     }
 
@@ -859,5 +813,94 @@ async fn guard_provider_revision<'a>(
             None => PortError::NotFound(format!("模型来源不存在：{provider_id}")),
         });
     }
+    Ok(())
+}
+
+async fn upsert_model_row(
+    conn: &mut sqlx::SqliteConnection,
+    profile: &ModelProfile,
+    user_edit: bool,
+    now_ms: i64,
+) -> Result<(), PortError> {
+    let overrides: Vec<CapabilityField> = if user_edit {
+        profile.overridden.iter().copied().collect()
+    } else {
+        Vec::new()
+    };
+    // 用户保存时总是写覆盖列表（空数组表示「没有覆盖了」，需要清除）；
+    // 自动发现写入时写 NULL，配合下面的 COALESCE 保留用户已有的覆盖。
+    let overrides_json = if user_edit {
+        Some(
+            serde_json::to_string(&overrides)
+                .map_err(|error| PortError::Storage(format!("覆盖字段序列化失败：{error}")))?,
+        )
+    } else {
+        None
+    };
+    let modalities = profile
+        .capabilities
+        .input_modalities
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| PortError::Storage(format!("模态序列化失败：{error}")))?;
+    let efforts = profile
+        .capabilities
+        .reasoning_efforts
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| PortError::Storage(format!("推理档位序列化失败：{error}")))?;
+    sqlx::query(
+        "INSERT INTO provider_model(
+                 provider_id, model_id, display_name, context_window, max_output_tokens,
+                 supports_streaming, supports_tools, supports_reasoning, input_modalities,
+                 reasoning_efforts, source, user_overrides, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(provider_id, model_id) DO UPDATE SET
+               display_name = excluded.display_name,
+               context_window = excluded.context_window,
+               max_output_tokens = excluded.max_output_tokens,
+               supports_streaming = excluded.supports_streaming,
+               supports_tools = excluded.supports_tools,
+               supports_reasoning = excluded.supports_reasoning,
+               input_modalities = excluded.input_modalities,
+               reasoning_efforts = excluded.reasoning_efforts,
+               source = excluded.source,
+               user_overrides = COALESCE(excluded.user_overrides, provider_model.user_overrides),
+               updated_at = excluded.updated_at",
+    )
+    .bind(&profile.provider_id)
+    .bind(&profile.model_id)
+    .bind(&profile.display_name)
+    .bind(profile.capabilities.context_window.map(i64::from))
+    .bind(profile.capabilities.max_output_tokens.map(i64::from))
+    .bind(
+        profile
+            .capabilities
+            .supports_streaming
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(
+        profile
+            .capabilities
+            .supports_tools
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(
+        profile
+            .capabilities
+            .supports_reasoning
+            .map(|value| i64::from(u8::from(value))),
+    )
+    .bind(modalities)
+    .bind(efforts)
+    .bind(source_str(profile.source))
+    .bind(overrides_json)
+    .bind(now_ms)
+    .bind(now_ms)
+    .execute(&mut *conn)
+    .await
+    .map_err(map_sql)?;
     Ok(())
 }

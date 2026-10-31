@@ -132,19 +132,32 @@ fn master_key(dir: &std::path::Path) -> Result<[u8; 32], SecretError> {
 
     let key = random_bytes::<32>();
     let encoded = hex::encode(key);
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)
+    // 权限必须在写入敏感字节之前就正确：create_new + mode(0600) 一次到位，
+    // 避免「先按 umask 建出 0644，再 chmod」之间的可读窗口。
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
     {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    match options.open(&path) {
         Ok(mut file) => {
             use std::io::Write;
             file.write_all(encoded.as_bytes())
                 .map_err(|_| SecretError::Unavailable)?;
+            file.flush().map_err(|_| SecretError::Unavailable)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+                // 兜底：显式收紧一次，防止上层 umask 或文件系统语义差异。
                 let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                let mode = std::fs::metadata(&path)
+                    .map(|meta| meta.permissions().mode() & 0o777)
+                    .unwrap_or(0);
+                if mode != 0o600 {
+                    return Err(SecretError::Unavailable);
+                }
             }
             mirror_master_key_to_keychain(&encoded);
             Ok(key)
@@ -213,38 +226,88 @@ fn write_fallback(id: &str, secret: &str) -> Result<(), SecretError> {
     Ok(())
 }
 
-fn read_fallback(id: &str) -> Option<String> {
+/// 文件侧读取结果：区分「没有」「读到了」「有文件但读不出来」。
+#[derive(Debug, PartialEq, Eq)]
+enum FileSecret {
+    Missing,
+    Found(String),
+    Corrupt,
+}
+
+/// 权威优先级：本地加密文件 > 历史钥匙库副本。
+///
+/// 文件存在但读不出来时直接失败，绝不回退到钥匙库：那里可能是一把过期版本的密钥，
+/// 静默返回会让调用方拿着旧密钥去请求，表现为难以诊断的 401。
+fn resolve_secret(
+    file: FileSecret,
+    keychain: Option<String>,
+) -> Result<Option<String>, SecretError> {
+    match file {
+        FileSecret::Found(secret) => Ok(Some(secret)),
+        FileSecret::Corrupt => Err(SecretError::Unavailable),
+        FileSecret::Missing => Ok(keychain),
+    }
+}
+
+fn read_fallback_state(id: &str) -> FileSecret {
     let path = match fallback_file(id) {
         Some(path) if path.exists() => path,
         // 兼容升级前写入的文件名（没有哈希后缀）
-        _ => legacy_fallback_file(id).filter(|path| path.exists())?,
+        _ => match legacy_fallback_file(id).filter(|path| path.exists()) {
+            Some(path) => path,
+            None => return FileSecret::Missing,
+        },
     };
-    let raw = std::fs::read(&path).ok()?;
+    let Ok(raw) = std::fs::read(&path) else {
+        return FileSecret::Corrupt;
+    };
     if raw.len() < MAGIC.len() + 12 || !raw.starts_with(MAGIC) {
         // 历史明文：读得出来就顺手加密写回，完成迁移。
-        let legacy = String::from_utf8(raw)
+        return match String::from_utf8(raw)
             .ok()
-            .filter(|value| !value.is_empty())?;
-        let _ = write_fallback(id, &legacy);
-        return Some(legacy);
+            .filter(|value| !value.is_empty())
+        {
+            Some(legacy) => {
+                let _ = write_fallback(id, &legacy);
+                FileSecret::Found(legacy)
+            }
+            None => FileSecret::Corrupt,
+        };
     }
-    let dir = path.parent()?;
-    let key = master_key(dir).ok()?;
+    let Some(dir) = path.parent() else {
+        return FileSecret::Corrupt;
+    };
+    let Ok(key) = master_key(dir) else {
+        return FileSecret::Corrupt;
+    };
     let cipher = ChaCha20Poly1305::new((&key).into());
-    let nonce_bytes: [u8; 12] = raw[MAGIC.len()..MAGIC.len() + 12].try_into().ok()?;
+    let Ok(nonce_bytes) = <[u8; 12]>::try_from(&raw[MAGIC.len()..MAGIC.len() + 12]) else {
+        return FileSecret::Corrupt;
+    };
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let plain = cipher
-        .decrypt(
-            nonce,
-            Payload {
-                msg: &raw[MAGIC.len() + 12..],
-                aad: id.as_bytes(),
-            },
-        )
-        .ok()?;
-    String::from_utf8(plain)
+    let Ok(plain) = cipher.decrypt(
+        nonce,
+        Payload {
+            msg: &raw[MAGIC.len() + 12..],
+            aad: id.as_bytes(),
+        },
+    ) else {
+        return FileSecret::Corrupt;
+    };
+    match String::from_utf8(plain)
         .ok()
         .filter(|value| !value.is_empty())
+    {
+        Some(secret) => FileSecret::Found(secret),
+        None => FileSecret::Corrupt,
+    }
+}
+
+fn read_fallback(id: &str) -> Option<String> {
+    match read_fallback_state(id) {
+        FileSecret::Found(secret) => Some(secret),
+        FileSecret::Missing | FileSecret::Corrupt => None,
+    }
 }
 
 fn delete_fallback(id: &str) -> Result<(), SecretError> {
@@ -315,15 +378,17 @@ impl SecretStore for OsSecretStore {
     }
 
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError> {
-        // 读取权威是本地加密文件：写入路径也只以它为准，避免「写进钥匙库、读却读文件」的错配。
-        // 钥匙库只作为升级前的历史副本兜底。
-        let from_keychain = keyring::Entry::new("Biz Novel Studio", id)
-            .ok()
-            .and_then(|entry| entry.get_password().ok());
-        if let Some(secret) = from_keychain {
-            return Ok(Some(secret));
-        }
-        Ok(read_fallback(id))
+        // 本地加密文件是唯一权威；钥匙库只用来兼容升级前只写进钥匙库的老数据。
+        // 文件存在却解不开时直接失败，不能让可能过期的钥匙库副本悄悄顶上去。
+        let file = read_fallback_state(id);
+        let keychain = match &file {
+            // 只有文件缺失时才去问钥匙库，省掉一次无意义的钥匙库调用。
+            FileSecret::Missing => keyring::Entry::new("Biz Novel Studio", id)
+                .ok()
+                .and_then(|entry| entry.get_password().ok()),
+            _ => None,
+        };
+        resolve_secret(file, keychain)
     }
 
     async fn delete(&self, id: &str) -> Result<(), SecretError> {
@@ -470,5 +535,88 @@ mod fallback_tests {
         std::fs::write(dir.join("slot-b.secret"), &stolen).unwrap();
 
         assert_eq!(read_fallback("slot-b"), None, "换个槽位不能解开");
+    }
+}
+
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+
+    /// 与 fallback_tests 共用同一个进程级目录，且**不删除**它：
+    /// 这些用例并行执行，删除目录会让别的用例突然读不到主密钥。
+    fn shared_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("p16-secrets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        configure_secret_fallback(dir.clone());
+        dir
+    }
+
+    #[test]
+    fn local_file_wins_over_stale_keychain_copy() {
+        let resolved = resolve_secret(
+            FileSecret::Found("sk-current".into()),
+            Some("sk-stale-from-keychain".into()),
+        );
+        assert_eq!(resolved.unwrap().as_deref(), Some("sk-current"));
+    }
+
+    #[test]
+    fn corrupt_file_fails_instead_of_falling_back_to_keychain() {
+        let resolved = resolve_secret(FileSecret::Corrupt, Some("sk-old".into()));
+        assert!(
+            resolved.is_err(),
+            "文件损坏时不能静默返回可能过期的钥匙库副本"
+        );
+    }
+
+    #[test]
+    fn missing_file_still_reads_legacy_keychain_only_data() {
+        let resolved = resolve_secret(FileSecret::Missing, Some("sk-legacy".into()));
+        assert_eq!(resolved.unwrap().as_deref(), Some("sk-legacy"));
+        assert_eq!(resolve_secret(FileSecret::Missing, None).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn rotated_slots_keep_old_and_new_readable() {
+        shared_dir();
+        write_fallback("authority-gw#1", "key-v1").unwrap();
+        write_fallback("authority-gw#2", "key-v2").unwrap();
+        assert_eq!(read_fallback("authority-gw#1").as_deref(), Some("key-v1"));
+        assert_eq!(read_fallback("authority-gw#2").as_deref(), Some("key-v2"));
+
+        write_fallback("authority-gw#2", "key-v2b").unwrap();
+        assert_eq!(read_fallback("authority-gw#2").as_deref(), Some("key-v2b"));
+        assert_eq!(read_fallback("authority-gw#1").as_deref(), Some("key-v1"));
+    }
+
+    #[tokio::test]
+    async fn corrupted_ciphertext_is_reported_as_corrupt_not_missing() {
+        shared_dir();
+        write_fallback("authority-bad#9", "key-v9").unwrap();
+        let path = fallback_file("authority-bad#9").unwrap();
+        let mut raw = std::fs::read(&path).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&path, raw).unwrap();
+
+        assert_eq!(read_fallback_state("authority-bad#9"), FileSecret::Corrupt);
+        assert_eq!(read_fallback("authority-bad#9"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn master_key_file_is_created_with_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("p16-master-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let _ = master_key(&dir).unwrap();
+        let mode = std::fs::metadata(dir.join("master.key"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "主密钥文件必须是 0600，实际 {mode:o}");
     }
 }
