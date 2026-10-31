@@ -8,6 +8,7 @@ export const config = {
     "./provider-no-missing-routes.e2e.js",
     "./quick-setup-models.e2e.js",
     "./provider-selector.e2e.js",
+    "./provider-protocol-guard.e2e.js",
   ],
   maxInstances: 1,
   logLevel: "warn",
