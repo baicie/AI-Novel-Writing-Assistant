@@ -105,6 +105,7 @@ async fn committed_open_run_before_binding_is_replayed_after_reopen() {
             repair_budget: Some(0),
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

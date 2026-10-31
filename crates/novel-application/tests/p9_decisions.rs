@@ -70,6 +70,7 @@ async fn reject_regenerates_and_confirm_after_edit_protects_author_artifact() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

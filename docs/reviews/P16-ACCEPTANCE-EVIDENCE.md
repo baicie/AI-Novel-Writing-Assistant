@@ -10,7 +10,7 @@ HEAD：`0adc19b8`（本轮新增提交见文末）
 | --- | --- | --- | --- |
 | 格式 | `cargo fmt --all -- --check` | 0 | 无 diff |
 | 静态检查 | `cargo clippy --workspace --exclude novel-http --lib -- -D warnings` | 0 | 无告警 |
-| 后端全量测试 | `cargo test --workspace --exclude novel-http` | 0 | 66 个测试目标全 ok，0 FAILED（日志 `/tmp/p16-ws2.log`） |
+| 后端全量测试 | `cargo test --workspace --exclude novel-http` | 0 | 66 个测试目标全 ok，0 FAILED（日志 `/tmp/p16-ws4.log`） |
 | 前端类型 | `pnpm --filter @ai-novel/client typecheck` | 0 | tsc 无错 |
 | 前端测试 | `pnpm --filter @ai-novel/client test` | 0 | 215 passed / 0 fail |
 | Native E2E 构建 | `pnpm tauri build --target aarch64-apple-darwin --bundles app --features e2e --config src-tauri/tauri.updater.conf.json` | 0 | 产出 `target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app` |
@@ -26,6 +26,7 @@ HEAD：`0adc19b8`（本轮新增提交见文末）
 | 明文 HTTP 主机绑定（换主机需确认） | `provider_service/tests.rs::plaintext_authorization_is_bound_to_host` | ok |
 | 密钥加密落盘、旧明文迁移、篡改拒绝、跨槽隔离 | `crates/novel-platform/src/secrets.rs` 的 4 条 fallback 用例 | ok |
 | 推理强度随请求发送 | `crates/novel-llm/tests/gateway.rs::reasoning_effort_is_forwarded_when_selected` | ok |
+| 按环节冻结路由（正文/审校/修复各用各的模型）与旧合同回落 | `crates/novel-application/src/provider_service/tests.rs` 三条 step_routes 用例 | ok（`cargo test -p novel-application --lib` 186 passed） |
 | 发现解析与 /v1 回退 | `crates/novel-llm/tests/discovery_http.rs`（22 条） | ok |
 | 迁移与备份 | `crates/novel-storage-sqlite/tests/p151_historical_migration.rs`、`p149_backup_restore.rs` | ok |
 | 桌面适配层不落未映射接口 | `e2e/provider-no-missing-routes.e2e.js` | ok |

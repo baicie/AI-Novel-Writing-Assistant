@@ -102,6 +102,7 @@ async fn hundred_chapter_mock_generation_benchmark() {
                 repair_budget: Some(0),
                 endpoint: "https://api.example.com/v1/chat/completions".into(),
                 allow_localhost_http: false,
+                step_routes: Default::default(),
             })
             .await
             .unwrap();

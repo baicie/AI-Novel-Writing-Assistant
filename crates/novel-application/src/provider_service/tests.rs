@@ -893,3 +893,95 @@ async fn plaintext_authorization_is_bound_to_host() {
         .await
         .expect("确认后可以改到新主机");
 }
+
+/// 冻结的环节表优先于合同单一路由（审校/修复可以各用各的模型）。
+#[test]
+fn step_routes_take_priority_over_contract_route() {
+    let mut contract = contract_with_route();
+    contract.step_routes.insert(
+        "review".to_string(),
+        FrozenStepRoute {
+            provider_id: "review-gw".into(),
+            model_id: "review-model".into(),
+            protocol: "ollama".into(),
+            endpoint: "http://127.0.0.1:1/v1".into(),
+            allow_localhost_http: true,
+            credential_ref: "review-gw".into(),
+            reasoning_effort: Some("high".into()),
+        },
+    );
+
+    let route = contract.effective_route("review");
+    assert_eq!(route.model_id(&contract.model), "review-model");
+    assert_eq!(route.endpoint(&contract.endpoint), "http://127.0.0.1:1/v1");
+    assert_eq!(route.protocol(contract.protocol.as_deref()), "ollama");
+    assert_eq!(
+        route.reasoning_effort(contract.reasoning_effort.as_deref()),
+        Some("high")
+    );
+    assert_eq!(
+        route.credential_ref(&contract.provider, contract.credential_ref.as_deref()),
+        "review-gw"
+    );
+    assert!(route.allow_localhost_http(contract.allow_localhost_http));
+}
+
+/// 旧合同没有环节表：所有环节都回落到单一路由，行为与升级前一致。
+#[test]
+fn legacy_contract_without_step_routes_falls_back() {
+    let contract = contract_with_route();
+    let route = contract.effective_route("review");
+    assert!(matches!(
+        route,
+        crate::provider_service::EffectiveRoute::Contract
+    ));
+    assert_eq!(route.model_id(&contract.model), contract.model.as_str());
+    assert_eq!(
+        route.protocol(contract.protocol.as_deref()),
+        "openai-compatible"
+    );
+}
+
+/// 有环节表但这一个环节没绑定：仍然回落，不会串到别的环节。
+#[test]
+fn missing_step_entry_falls_back_to_contract() {
+    let mut contract = contract_with_route();
+    contract.step_routes.insert(
+        "review".to_string(),
+        FrozenStepRoute {
+            provider_id: "review-gw".into(),
+            model_id: "review-model".into(),
+            protocol: "openai-compatible".into(),
+            endpoint: "https://review.example.com/v1".into(),
+            allow_localhost_http: false,
+            credential_ref: "review-gw".into(),
+            reasoning_effort: None,
+        },
+    );
+
+    let route = contract.effective_route("repair");
+    assert_eq!(route.model_id(&contract.model), contract.model.as_str());
+}
+
+fn contract_with_route() -> crate::dto::RunContract {
+    crate::dto::RunContract {
+        run_id: "run-1".into(),
+        novel_id: "novel-1".into(),
+        plan_version: "v1".into(),
+        chapter_plan_version: "v1".into(),
+        target_chapter_id: "chapter-1".into(),
+        provider: "main-gw".into(),
+        model: "main-model".into(),
+        prompt_versions: Default::default(),
+        token_budget: None,
+        context_token_budget: 1024,
+        max_automatic_retries: 0,
+        repair_budget: 0,
+        endpoint: "https://main.example.com/v1".into(),
+        allow_localhost_http: false,
+        reasoning_effort: None,
+        protocol: Some("openai-compatible".into()),
+        credential_ref: Some("main-gw".into()),
+        step_routes: Default::default(),
+    }
+}

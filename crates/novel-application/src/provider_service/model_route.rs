@@ -178,3 +178,86 @@ pub fn apply_route_to_run(
         ),
     }
 }
+
+/// 冻结在 Run 合同里的单环节路由：只含引用与地址，不含任何密钥正文。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrozenStepRoute {
+    pub provider_id: String,
+    pub model_id: String,
+    pub protocol: String,
+    pub endpoint: String,
+    pub allow_localhost_http: bool,
+    pub credential_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+}
+
+impl FrozenStepRoute {
+    pub fn from_route(route: &ResolvedModelRoute) -> Self {
+        Self {
+            provider_id: route.provider_id.clone(),
+            model_id: route.model_id.clone(),
+            protocol: route.protocol.clone(),
+            endpoint: route.endpoint.clone(),
+            allow_localhost_http: route.allow_localhost_http,
+            credential_ref: route.credential_ref.clone(),
+            reasoning_effort: route.reasoning_effort.clone(),
+        }
+    }
+}
+
+/// 某一步骤真正要用的路由来源：命中冻结的环节表，或回落到合同的单一路由。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectiveRoute<'a> {
+    Step(&'a FrozenStepRoute),
+    Contract,
+}
+
+impl<'a> EffectiveRoute<'a> {
+    pub fn credential_ref(
+        &self,
+        contract_provider: &'a str,
+        contract_ref: Option<&'a str>,
+    ) -> &'a str {
+        match self {
+            Self::Step(step) => step.credential_ref.as_str(),
+            Self::Contract => contract_ref.unwrap_or(contract_provider),
+        }
+    }
+
+    pub fn model_id(&self, contract_model: &'a str) -> &'a str {
+        match self {
+            Self::Step(step) => step.model_id.as_str(),
+            Self::Contract => contract_model,
+        }
+    }
+
+    pub fn endpoint(&self, contract_endpoint: &'a str) -> &'a str {
+        match self {
+            Self::Step(step) => step.endpoint.as_str(),
+            Self::Contract => contract_endpoint,
+        }
+    }
+
+    pub fn allow_localhost_http(&self, contract_allow: bool) -> bool {
+        match self {
+            Self::Step(step) => step.allow_localhost_http,
+            Self::Contract => contract_allow,
+        }
+    }
+
+    pub fn protocol<'b>(&'b self, contract_protocol: Option<&'b str>) -> &'b str {
+        match self {
+            Self::Step(step) => step.protocol.as_str(),
+            Self::Contract => contract_protocol.unwrap_or("openai-compatible"),
+        }
+    }
+
+    pub fn reasoning_effort<'b>(&'b self, contract_effort: Option<&'b str>) -> Option<&'b str> {
+        match self {
+            Self::Step(step) => step.reasoning_effort.as_deref(),
+            Self::Contract => contract_effort,
+        }
+    }
+}

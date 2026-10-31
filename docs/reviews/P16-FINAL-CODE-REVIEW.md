@@ -23,20 +23,18 @@
 | # | 位置 | 问题 | 状态 |
 | --- | --- | --- | --- |
 | P1-1 | `client/src/pages/settings/DesktopModelSettingsCard.tsx` | 「保存并测试」实际会向网关发一次真实生成请求（`src-tauri/src/commands/model.rs::test_model_setup`），界面没有任何费用提示，违反「付费测试不得伪装成免费探测」 | **已修**：加提示「会发送一次真实请求（只要求回一个字），可能产生少量费用」，按钮改为「保存并发送测试请求」 |
-| P1-2 | `src-tauri/src/commands/run.rs`、`crates/novel-application/src/worker.rs` | **按环节绑定在 Director 运行链路里不生效**：Run 创建时只解析 `writer` 一条路由并冻结（`run.rs` 的 `resolve_route("writer")`），worker 三个生成点全部使用 `claimed.contract` 的单一路由；`review` / `repair` / `planner` 等绑定只有前端主动调 `generate_text` 并带 `taskType` 时才会被用 | **未完成**（见下节） |
+| P1-2 | `src-tauri/src/commands/run.rs`、`crates/novel-application/src/worker.rs` | 按环节绑定在 Director 运行链路里不生效（已修复，见下）：Run 创建时只解析 `writer` 一条路由并冻结（`run.rs` 的 `resolve_route("writer")`），worker 三个生成点全部使用 `claimed.contract` 的单一路由；`review` / `repair` / `planner` 等绑定只有前端主动调 `generate_text` 并带 `taskType` 时才会被用 | **已修**：新增 `RunContract.step_routes` 冻结表 + worker 按步骤取路由 + 旧合同回落；新增 3 条用例 |
 
-### P1-2 详细说明与实施计划
+### P1-2 实施结果（已完成）
 
-- 现状证据：
-  - `src-tauri/src/commands/run.rs:90`：`.resolve_route("writer")`
-  - `crates/novel-application/src/worker.rs:424 / 655 / 1323`：三个生成点都用 `claimed.contract.*`，无按环节路由
-  - `crates/novel-application/src/director.rs`：只 `use crate::provider_service::FrozenRoute`
-- 影响：界面允许为 11 个环节分别绑定模型，但在 Director 跑长文时，审校/修复仍走正文那条冻结路由。这属于「UI 显示支持、运行时未生效」。
-- 计划（不破坏既有合同）：
-  1. `RunContract` 增加 `step_routes: BTreeMap<String, FrozenStepRoute>`（`serde(default)`，旧 Run 读出来是空表，行为不变）；
-  2. Run 创建时按真实环节键解析并冻结（`chapter_draft`/`review`/`repair`/…），仍然**不写明文密钥**，只写 credential_ref；
-  3. worker 三个生成点按自身环节键查表，查不到则回落到合同里的单一路由（保证旧 Run 与未绑定环节一致）；
-  4. 补测试：多环节冻结表生效、旧合同回落、环节缺失模型时报错而不是静默换来源。
+- 修复内容：
+  - `crates/novel-application/src/provider_service/model_route.rs`：新增 `FrozenStepRoute`（provider/model/protocol/endpoint/allowLocalhostHttp/credentialRef/reasoningEffort，**不含密钥正文**）与 `EffectiveRoute`；
+  - `crates/novel-application/src/dto.rs`：`RunContract` 增加 `step_routes: BTreeMap<String, FrozenStepRoute>`（`serde(default)`，旧 Run 读出来是空表）与 `effective_route(task_type)`；
+  - `crates/novel-application/src/provider_service/service.rs`：新增 `frozen_step_routes()`，把当前绑定一次性解析成冻结表；
+  - `src-tauri/src/commands/run.rs`：Run 创建时解析冻结表并写入合同（仍只写 credential_ref）；
+  - `crates/novel-application/src/worker.rs`：`task_type_for_step`（draft→writer、consistency_review→review、bounded_repair→repair、story_macro/character_cast/volume_strategy/chapter_list→planner…），三个生成点按环节取路由，表缺失或该环节未绑定则回落到合同单一路由；调用记录里的 provider/model 也改成按环节记录。
+- 测试：`step_routes_take_priority_over_contract_route`、`legacy_contract_without_step_routes_falls_back`、`missing_step_entry_falls_back_to_contract`（`cargo test -p novel-application --lib` 186 passed）。
+- 兼容性：`p9_repair_flow`、`p9_context_flow`、`p8_director_loop`、`p10_confirm_edit`、`p11_lease_fence`、`p11_repair_faults`、`p12_long_generation`、`p145_batch_crash_binding`、`recovery`、`runtime_provider_http` 等既有链路测试全部通过（workspace exit 0）。
 
 ## 3. 依赖方向与结构核查
 
@@ -65,4 +63,5 @@
 
 ## 7. 最终判定
 
-**PARTIAL** —— 唯一阻塞是 P1-2（Director 运行链路未按环节使用绑定模型）。其余 P0 与 P1-1 已修复，门禁与 Native E2E 全绿。
+**IMPLEMENTATION_COMPLETE_EXTERNAL_VALIDATION_PENDING** —— P0 全清、P1 全清；本地门禁（fmt/clippy/workspace 66 目标/前端 215 用例/Native E2E 5 规格）全绿。
+原因：远端 CI 受「禁止 push」限制无法运行，按规则不宣称 CI 通过。

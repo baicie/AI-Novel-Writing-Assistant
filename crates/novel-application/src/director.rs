@@ -39,6 +39,9 @@ pub struct OpenRunInput {
     pub repair_budget: Option<u8>,
     pub endpoint: String,
     pub allow_localhost_http: bool,
+    /// 按环节冻结的路由；空表示只有合同里的单一路由。
+    #[allow(dead_code)]
+    pub step_routes: BTreeMap<String, crate::provider_service::FrozenStepRoute>,
 }
 
 /// 事件流内存缓存，用于减少数据库查询
@@ -521,6 +524,7 @@ impl DirectorService {
             credential_ref: route.credential_ref.clone(),
             allow_localhost_http: input.allow_localhost_http,
             reasoning_effort: route.reasoning_effort.clone(),
+            step_routes: input.step_routes.clone(),
         };
         let request_hash = json_hash(&OpenRunHash {
             novel_id: &input.novel_id,

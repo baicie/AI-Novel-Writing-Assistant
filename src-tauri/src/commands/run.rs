@@ -90,6 +90,11 @@ pub async fn open_run(
         .resolve_route("writer")
         .await
         .map_err(crate::commands::provider::to_app_error)?;
+    // 按环节冻结：正文以外的审校/修复等环节各用各的绑定，缺绑定就回落到单一路由。
+    let step_routes = crate::commands::provider::service(&state)
+        .frozen_step_routes()
+        .await
+        .map_err(crate::commands::provider::to_app_error)?;
     let (provider, model, endpoint, allow_localhost_http, frozen) =
         novel_application::apply_route_to_run(
             request.provider,
@@ -115,6 +120,7 @@ pub async fn open_run(
                 repair_budget: request.repair_budget,
                 endpoint,
                 allow_localhost_http,
+                step_routes,
             },
             frozen,
         )

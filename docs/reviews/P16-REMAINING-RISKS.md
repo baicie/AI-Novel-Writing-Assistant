@@ -1,11 +1,10 @@
 # P16 剩余风险与未完成项
 
-## 1. P1 未完成：Director 运行链路未按环节使用绑定模型
+## 1. 原 P1（已关闭）：Director 运行链路按环节使用绑定模型
 
-- 现象：界面可为 11 个环节绑定不同模型，但长文自动导演只冻结并使用 `writer` 一条路由。
-- 证据：`src-tauri/src/commands/run.rs`（只 `resolve_route("writer")`）、`crates/novel-application/src/worker.rs`（三个生成点都用合同里的单一路由）。
-- 影响：用户以为「审校用便宜模型、正文用强模型」生效，实际不生效；属于产品承诺与运行时不一致。
-- 实施计划见 `P16-FINAL-CODE-REVIEW.md` 的 P1-2。**没有以任何方式弱化断言或隐藏失败。**
+- 现状：`RunContract.step_routes` 在 Run 创建时冻结各环节路由；worker 的正文/审校/修复三个生成点按环节取路由，旧合同（无该表）与未绑定环节自动回落单一路由。
+- 证据：`provider_service/tests.rs` 三条用例、`cargo test -p novel-application --lib` 186 passed、workspace 全量 exit 0。
+- 残留观察点：新增环节（例如将来加入的图像任务）需要在 `task_type_for_step` 里显式登记，否则按 writer 处理；这条已写进代码注释。
 
 ## 2. 安全取舍（已记录，需产品确认）
 
@@ -30,5 +29,5 @@
 
 ## 6. 判定
 
-代码层面：P0 全清、P1 仅剩 1 项、P2 已记录。
-对外状态：**IMPLEMENTATION 基本完成但功能承诺未闭合**，因此本次报告 **PARTIAL**，不报 `P16_COMPLETE`，也不把「本地门禁全绿」等同于远端 CI 通过。
+代码层面：P0 与 P1 全清，P2 已记录。
+对外状态：本次报告 **IMPLEMENTATION_COMPLETE_EXTERNAL_VALIDATION_PENDING** —— 实现与本地验收完成，远端 CI 因禁止 push 未运行。

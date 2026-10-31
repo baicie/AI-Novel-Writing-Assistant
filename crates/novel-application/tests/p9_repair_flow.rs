@@ -83,6 +83,7 @@ async fn run_with(
             repair_budget,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();
@@ -431,6 +432,7 @@ async fn run_to_quality_stop(
             repair_budget,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

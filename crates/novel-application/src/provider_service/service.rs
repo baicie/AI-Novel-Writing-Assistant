@@ -374,6 +374,19 @@ impl ProviderService {
 }
 
 impl ProviderService {
+    /// 把当前所有绑定解析成「环节 -> 冻结路由」，用于 Run 创建时一次性冻结。
+    pub async fn frozen_step_routes(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, FrozenStepRoute>, ProviderError> {
+        let mut routes = std::collections::BTreeMap::new();
+        for binding in self.list_bindings().await? {
+            if let Some(route) = self.resolve_route(&binding.task_type).await? {
+                routes.insert(binding.task_type, FrozenStepRoute::from_route(&route));
+            }
+        }
+        Ok(routes)
+    }
+
     /// 注册表里是否已经有「可创建第一本书」的来源：有密钥且有至少一个模型。
     pub async fn ready_provider(&self) -> Result<Option<(String, String, bool)>, ProviderError> {
         for profile in self.registry.list_providers().await? {

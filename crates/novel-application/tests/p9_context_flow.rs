@@ -129,6 +129,7 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
             repair_budget: None,
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

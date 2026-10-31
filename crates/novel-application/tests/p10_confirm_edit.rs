@@ -84,6 +84,7 @@ async fn author_edited_candidate_uses_cas_and_does_not_touch_official_until_comm
             repair_budget: Some(0),
             endpoint: "https://api.example.com/v1/chat/completions".into(),
             allow_localhost_http: false,
+            step_routes: Default::default(),
         })
         .await
         .unwrap();

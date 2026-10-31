@@ -399,6 +399,19 @@ pub struct RunContract {
     /// 冻结的凭据引用（不含密钥正文）；旧记录没有则回退到 `provider`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
+    /// 按环节冻结的路由表；旧记录没有就是空表，行为等同只有单一路由。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub step_routes: BTreeMap<String, crate::provider_service::FrozenStepRoute>,
+}
+
+impl RunContract {
+    /// 取某个环节真正要用的路由：命中冻结表就用表，没有就回落到合同本身的单一路由。
+    pub fn effective_route(&self, task_type: &str) -> crate::provider_service::EffectiveRoute<'_> {
+        match self.step_routes.get(task_type) {
+            Some(step) => crate::provider_service::EffectiveRoute::Step(step),
+            None => crate::provider_service::EffectiveRoute::Contract,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
