@@ -110,7 +110,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             label: macOS
             slug: macos
             # 两个架构在同一个 macOS runner 上顺序构建：macOS 并发很少，
