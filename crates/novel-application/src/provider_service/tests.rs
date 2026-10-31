@@ -250,7 +250,10 @@ async fn replace_writes_secret_and_hides_it() {
     assert!(view.credential_present);
     let json = serde_json::to_string(&view).unwrap();
     assert!(!json.contains("sk-secret"), "视图里不能出现密钥：{json}");
-    assert!(vault.values.lock().unwrap().contains_key("gw"));
+    assert!(
+        vault.values.lock().unwrap().contains_key("gw#1"),
+        "首次保存应写入带版本的密钥槽"
+    );
 }
 
 #[tokio::test]
@@ -271,8 +274,9 @@ async fn keep_never_touches_the_vault() {
         .unwrap();
     assert_eq!(view.revision, 2);
     assert_eq!(
-        vault.values.lock().unwrap().get("gw").map(String::as_str),
-        Some("sk-1")
+        vault.values.lock().unwrap().get("gw#1").map(String::as_str),
+        Some("sk-1"),
+        "保留密钥时不应改动已存槽位"
     );
 }
 
@@ -530,7 +534,7 @@ async fn route_resolves_from_binding_without_secret() {
     assert_eq!(route.provider_id, "gw");
     assert_eq!(route.model_id, "a");
     assert_eq!(route.protocol, "openai-compatible");
-    assert_eq!(route.credential_ref, "gw");
+    assert_eq!(route.credential_ref, "gw#1");
     assert_eq!(route.source, "binding");
     let json = serde_json::to_string(&route).unwrap();
     assert!(!json.contains("sk-secret"), "路由里不能出现密钥");
@@ -680,7 +684,7 @@ async fn frozen_route_validates_and_returns_refs_without_secret() {
             credential_ref,
         } => {
             assert_eq!(protocol, "openai-compatible");
-            assert_eq!(credential_ref, "gw");
+            assert_eq!(credential_ref, "gw#1");
         }
         other => panic!("期望 Resolved，实际 {other:?}"),
     }
@@ -984,4 +988,113 @@ fn contract_with_route() -> crate::dto::RunContract {
         credential_ref: Some("main-gw".into()),
         step_routes: Default::default(),
     }
+}
+
+/// P16.6 P0：CAS 失败时，旧配置与旧密钥必须完全不受影响。
+#[tokio::test]
+async fn cas_failure_keeps_old_secret_and_profile() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+
+    let blocked = service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-new".into()),
+            Some(99),
+            2,
+        )
+        .await;
+    assert!(blocked.is_err(), "版本不匹配必须失败");
+
+    // 数据库里的当前槽位没变
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert_eq!(profile.credential.reference, "gw#1");
+
+    // 旧密钥还在，且没有把新密钥残留成孤儿
+    let values = vault.values.lock().unwrap();
+    assert_eq!(values.get("gw#1").map(String::as_str), Some("sk-old"));
+    assert_eq!(values.get("gw#2"), None, "失败的新槽必须被清理");
+}
+
+/// 换密钥后：新槽成为当前配置，旧槽仍然可读，历史 Run 不会读到新密钥。
+#[tokio::test]
+async fn replace_moves_to_new_slot_and_keeps_old_for_runs() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    // 模拟一个已提交的 Run 冻结了旧槽位
+    let frozen_for_old_run = "gw#1".to_string();
+
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-new".into()),
+            Some(1),
+            2,
+        )
+        .await
+        .unwrap();
+
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert_eq!(profile.credential.reference, "gw#2", "新配置指向新槽");
+
+    let values = vault.values.lock().unwrap();
+    assert_eq!(values.get("gw#2").map(String::as_str), Some("sk-new"));
+    assert_eq!(
+        values.get(&frozen_for_old_run).map(String::as_str),
+        Some("sk-old"),
+        "历史 Run 的旧槽不能被覆盖"
+    );
+}
+
+/// 清除密钥：新请求不再带密钥，但历史 Run 的旧槽仍然可用。
+#[tokio::test]
+async fn clear_marks_new_slot_absent_but_keeps_history() {
+    let (service, registry, vault) = service();
+    service
+        .upsert_provider(
+            draft("gw"),
+            CredentialAction::Replace("sk-old".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+
+    let view = service
+        .upsert_provider(draft("gw"), CredentialAction::Clear, Some(1), 2)
+        .await
+        .unwrap();
+    assert!(!view.credential_present, "清除后当前配置应无密钥");
+
+    let profiles = registry.list_providers().await.unwrap();
+    let profile = profiles.iter().find(|item| item.id == "gw").unwrap();
+    assert!(
+        profile.credential.reference.ends_with("#cleared"),
+        "清除应指向明确作废的槽位：{}",
+        profile.credential.reference
+    );
+    let values = vault.values.lock().unwrap();
+    assert_eq!(
+        values.get("gw#1").map(String::as_str),
+        Some("sk-old"),
+        "历史 Run 的旧槽必须保留"
+    );
 }

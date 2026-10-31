@@ -27,11 +27,9 @@ pub fn configure_secret_fallback(dir: std::path::PathBuf) {
     let _ = FALLBACK_DIR.set(dir);
 }
 
-fn fallback_file(id: &str) -> Option<std::path::PathBuf> {
-    let dir = FALLBACK_DIR.get()?;
-    // 文件名只保留安全字符，避免路径逃逸。
-    let safe: String = id
-        .chars()
+/// 把引用名映射为文件名：清洗路径字符，并在改名时追加短哈希避免碰撞。
+fn safe_stem(id: &str) -> String {
+    id.chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
                 ch
@@ -39,8 +37,31 @@ fn fallback_file(id: &str) -> Option<std::path::PathBuf> {
                 '_'
             }
         })
-        .collect();
-    Some(dir.join(format!("{safe}.secret")))
+        .collect()
+}
+
+fn short_hash(id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(id.as_bytes());
+    hex::encode(&digest[..4])
+}
+
+fn fallback_file(id: &str) -> Option<std::path::PathBuf> {
+    let dir = FALLBACK_DIR.get()?;
+    let stem = safe_stem(id);
+    // 清洗会改变原名时，追加哈希，避免 "a/b" 与 "a_b" 这类引用落到同一个文件。
+    let stem = if stem == id {
+        stem
+    } else {
+        format!("{stem}-{}", short_hash(id))
+    };
+    Some(dir.join(format!("{stem}.secret")))
+}
+
+/// 历史文件名（没有哈希后缀）：只在读取与删除时兼容访问。
+fn legacy_fallback_file(id: &str) -> Option<std::path::PathBuf> {
+    let dir = FALLBACK_DIR.get()?;
+    Some(dir.join(format!("{}.secret", safe_stem(id))))
 }
 
 /// 加密文件头：用于区分「加密后的密文」与「历史明文」。
@@ -60,6 +81,25 @@ fn random_bytes<const N: usize>() -> [u8; N] {
 }
 
 /// 主密钥：优先放系统钥匙库；不可用时落 0600 文件。
+/// 目录里是否已经存在「加密后的」密钥文件。
+///
+/// 只看前缀是不是 MAGIC：历史明文文件不算密文，不会被误判成「主密钥丢了」。
+fn has_ciphertext(dir: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_none_or(|extension| extension != "secret")
+        {
+            return false;
+        }
+        std::fs::read(&path).is_ok_and(|bytes| bytes.starts_with(MAGIC))
+    })
+}
+
 fn parse_key_hex(text: &str) -> Option<[u8; 32]> {
     let bytes = hex::decode(text.trim()).ok()?;
     let array: [u8; 32] = bytes.try_into().ok()?;
@@ -79,6 +119,10 @@ fn master_key(dir: &std::path::Path) -> Result<[u8; 32], SecretError> {
         .unwrap_or_else(|error| error.into_inner());
 
     let path = dir.join("master.key");
+    if !path.exists() && has_ciphertext(dir) {
+        // 主密钥丢了但密文还在：重建只会让旧密文永久无法解密，必须显式失败。
+        return Err(SecretError::Unavailable);
+    }
     if let Some(key) = std::fs::read_to_string(&path)
         .ok()
         .and_then(|text| parse_key_hex(&text))
@@ -147,17 +191,34 @@ fn write_fallback(id: &str, secret: &str) -> Result<(), SecretError> {
     payload.extend_from_slice(MAGIC);
     payload.extend_from_slice(&nonce_bytes);
     payload.extend_from_slice(&sealed);
-    std::fs::write(&path, &payload).map_err(|_| SecretError::Unavailable)?;
+
+    // 权限在写入敏感字节之前就建立：用临时文件 + rename，避免出现「先 0644 再 chmod」的窗口。
+    let tmp = dir.join(format!(".{}.tmp", short_hash(id)));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(&tmp).map_err(|_| SecretError::Unavailable)?;
+    {
+        use std::io::Write;
+        file.write_all(&payload)
+            .map_err(|_| SecretError::Unavailable)?;
+        file.sync_all().map_err(|_| SecretError::Unavailable)?;
+    }
+    drop(file);
+    std::fs::rename(&tmp, &path).map_err(|_| SecretError::Unavailable)?;
     Ok(())
 }
 
 fn read_fallback(id: &str) -> Option<String> {
-    let path = fallback_file(id)?;
+    let path = match fallback_file(id) {
+        Some(path) if path.exists() => path,
+        // 兼容升级前写入的文件名（没有哈希后缀）
+        _ => legacy_fallback_file(id).filter(|path| path.exists())?,
+    };
     let raw = std::fs::read(&path).ok()?;
     if raw.len() < MAGIC.len() + 12 || !raw.starts_with(MAGIC) {
         // 历史明文：读得出来就顺手加密写回，完成迁移。
@@ -188,6 +249,9 @@ fn read_fallback(id: &str) -> Option<String> {
 
 fn delete_fallback(id: &str) -> Result<(), SecretError> {
     if let Some(path) = fallback_file(id) {
+        let _ = std::fs::remove_file(path);
+    }
+    if let Some(path) = legacy_fallback_file(id) {
         let _ = std::fs::remove_file(path);
     }
     Ok(())
@@ -251,6 +315,8 @@ impl SecretStore for OsSecretStore {
     }
 
     async fn get(&self, id: &str) -> Result<Option<String>, SecretError> {
+        // 读取权威是本地加密文件：写入路径也只以它为准，避免「写进钥匙库、读却读文件」的错配。
+        // 钥匙库只作为升级前的历史副本兜底。
         let from_keychain = keyring::Entry::new("Biz Novel Studio", id)
             .ok()
             .and_then(|entry| entry.get_password().ok());
@@ -347,6 +413,38 @@ mod fallback_tests {
             !String::from_utf8_lossy(&raw).contains("legacy-secret"),
             "迁移后不应再存明文"
         );
+    }
+
+    /// 清洗后会重名的两个引用必须落到不同文件。
+    #[test]
+    fn reference_names_do_not_collide_after_sanitising() {
+        let dir = temp_dir();
+        write_fallback("a/b", "sk-slash").unwrap();
+        write_fallback("a_b", "sk-underscore").unwrap();
+        assert_eq!(read_fallback("a/b").as_deref(), Some("sk-slash"));
+        assert_eq!(read_fallback("a_b").as_deref(), Some("sk-underscore"));
+        let count = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "secret"))
+            .count();
+        assert!(count >= 2, "两个引用必须写到两个文件，实际 {count}");
+    }
+
+    /// 主密钥丢失但密文还在时，不允许悄悄重建（否则旧密文永久解不开）。
+    #[test]
+    fn missing_master_key_is_not_silently_recreated() {
+        let dir = std::env::temp_dir().join(format!("p16-master-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        configure_secret_fallback(dir.clone());
+
+        // 构造一份「只有密文、没有主密钥」的目录。
+        let ciphertext = [MAGIC, &[0_u8; 12], &[1_u8; 16]].concat();
+        std::fs::write(dir.join("orphan.secret"), ciphertext).unwrap();
+        assert!(master_key(&dir).is_err(), "有密文时必须拒绝重建主密钥");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 密文被改动后必须读不出来，不能把损坏数据当密钥用。

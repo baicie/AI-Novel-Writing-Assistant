@@ -118,6 +118,29 @@ impl ProviderService {
                 "替换密钥时不能传空字符串，保留请用 keep、清除请用 clear",
             ));
         }
+        // 密钥槽按版本命名：每次替换都写新槽，旧槽继续给历史 Run 用。
+        // 这样即使数据库 CAS 失败、或者用户事后改了密钥，已提交的 Run 也不会被换成新密钥。
+        let previous = self
+            .registry
+            .list_providers()
+            .await?
+            .into_iter()
+            .find(|profile| profile.id == draft.id);
+        let base_revision = self
+            .registry
+            .provider_revision(&draft.id)
+            .await?
+            .unwrap_or(0);
+        let next_reference = format!("{}#{}", draft.id, base_revision + 1);
+        let reference = match (&credential, previous.as_ref()) {
+            // 保留：沿用当前槽，不动密钥。
+            (CredentialAction::Keep, Some(profile)) => profile.credential.reference.clone(),
+            (CredentialAction::Keep, None) => next_reference.clone(),
+            // 清除：写入一个空的新槽标记，旧槽保留给历史 Run。
+            (CredentialAction::Clear, _) => format!("{next_reference}#cleared"),
+            // 替换：写新槽，提交成功后才成为当前配置。
+            (CredentialAction::Replace(_), _) => next_reference.clone(),
+        };
         let profile = novel_domain::ProviderProfile {
             id: draft.id.clone(),
             display_name: draft.display_name,
@@ -125,8 +148,7 @@ impl ProviderService {
             base_url: draft.base_url,
             credential: novel_domain::CredentialReference {
                 kind: novel_domain::CredentialKind::OsSecret,
-                // 每个 provider 独占一个密钥槽，禁止跨 provider 复用默认槽。
-                reference: draft.id.clone(),
+                reference: reference.clone(),
             },
             is_builtin: draft.is_builtin,
             allow_localhost_http: draft.allow_localhost_http,
@@ -154,13 +176,11 @@ impl ProviderService {
                 )
                 .await?;
             let outcome = match &credential {
+                // 只写新槽：旧槽在任何情况下都不能被覆盖或删除，历史 Run 还要用。
                 CredentialAction::Replace(secret) => {
-                    self.vault
-                        .write(&profile.credential.reference, secret.trim())
-                        .await
+                    self.vault.write(&reference, secret.trim()).await
                 }
-                CredentialAction::Clear => self.vault.delete(&profile.credential.reference).await,
-                CredentialAction::Keep => Ok(()),
+                CredentialAction::Clear | CredentialAction::Keep => Ok(()),
             };
             match outcome {
                 Ok(()) => {
@@ -176,10 +196,20 @@ impl ProviderService {
                 }
             }
         }
-        let revision = self
+        let revision = match self
             .registry
             .upsert_provider(&profile, expected_revision, now_ms)
-            .await?;
+            .await
+        {
+            Ok(revision) => revision,
+            Err(error) => {
+                // 数据库没提交成功：把这次刚写的新槽清掉，旧配置与旧密钥完全不受影响。
+                if matches!(credential, CredentialAction::Replace(_)) {
+                    let _ = self.vault.delete(&reference).await;
+                }
+                return Err(error.into());
+            }
+        };
         let credential_present = self.vault.present(&profile.credential.reference).await?;
         Ok(ProviderView {
             id: profile.id,
