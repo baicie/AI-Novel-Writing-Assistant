@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
+import ChapterRightPanel from "./rightPanel/ChapterRightPanel";
 import ChapterEditorSidebar from "./ChapterEditorSidebar";
 import ChapterVersionDrawer from "./ChapterVersionDrawer";
 import ChapterTextEditor from "./ChapterTextEditor";
@@ -101,6 +102,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     chapters = [],
     volumes = [],
     onSelectChapter,
+    world = null,
+    characters = [],
     novelId,
     chapter,
     workspace,
@@ -741,6 +744,22 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         </div>
 
         <div className="min-h-0 overflow-hidden">
+          <ChapterRightPanel
+            novelId={novelId}
+            chapterId={chapter?.id ?? ""}
+            workspace={workspace}
+            selectedDiagnosticId={selectedDiagnosticId}
+            world={world}
+            characters={characters}
+            onFocusDiagnostic={handleFocusDiagnostic}
+            onRunDiagnostic={handleRunDiagnostic}
+            onResolveDiagnostic={(card) => {
+              if (card.sourceIssueId) {
+                resolveDiagnosticMutation.mutate(card.sourceIssueId);
+              }
+            }}
+            isResolvingDiagnostic={resolveDiagnosticMutation.isPending}
+          >
           <ChapterEditorDirectorPanel
             workspace={workspace}
             workspaceStatus={workspaceStatus}
@@ -770,6 +789,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
             onReject={handleReject}
             onRegenerate={handleRegenerate}
           />
+          </ChapterRightPanel>
         </div>
       </div>
       <ChapterVersionDrawer

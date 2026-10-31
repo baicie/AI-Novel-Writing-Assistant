@@ -124,6 +124,14 @@ export default function NovelChapterEdit() {
         chapters={detail?.chapters ?? []}
         volumes={(detail?.volumes ?? []).map((volume) => ({ id: volume.id, title: volume.title }))}
         onSelectChapter={(nextChapterId) => navigate(`/novels/${id}/chapters/${nextChapterId}`)}
+        world={detail?.world ? { name: detail.world.name, summary: detail.world.overviewSummary ?? null } : null}
+        characters={(detail?.characters ?? []).map((character) => ({
+          id: character.id,
+          name: character.name,
+          role: character.role,
+          storyFunction: character.storyFunction ?? null,
+          currentGoal: character.currentGoal ?? null,
+        }))}
         workspace={chapterEditorWorkspaceQuery.data?.data ?? null}
         workspaceStatus={chapterEditorWorkspaceQuery.isLoading
           ? "loading"

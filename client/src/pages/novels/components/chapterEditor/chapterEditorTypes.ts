@@ -49,6 +49,8 @@ export interface ChapterEditorShellProps {
   chapters?: Chapter[];
   volumes?: { id: string; title: string }[];
   onSelectChapter?: (chapterId: string) => void;
+  world?: { name: string; summary: string | null } | null;
+  characters?: import("./rightPanel/panelModel").CastItem[];
   workspace: ChapterEditorWorkspaceResponse | null;
   workspaceStatus: "loading" | "ready" | "error";
   onBack?: () => void;
