@@ -147,7 +147,7 @@ async fn provider_flow_create_discover_apply_bind_resolve() {
     let route = service.resolve_route("writer").await.unwrap().unwrap();
     assert_eq!(route.model_id, "model-a");
     assert_eq!(route.endpoint, "http://127.0.0.1:1/v1");
-    assert_eq!(route.credential_ref, "gw");
+    assert_eq!(route.credential_ref, "gw#1", "密钥槽按版本命名");
     assert!(
         !serde_json::to_string(&route).unwrap().contains("sk-test"),
         "路由不含密钥"

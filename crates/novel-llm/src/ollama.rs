@@ -34,10 +34,6 @@ impl OllamaProvider {
                 .unwrap_or_default(),
         }
     }
-
-    fn chat_endpoint(base: &str) -> String {
-        format!("{}/api/chat", base.trim_end_matches('/'))
-    }
 }
 
 #[async_trait]
@@ -128,16 +124,4 @@ impl LlmProvider for OllamaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn chat_endpoint_normalises_trailing_slash() {
-        assert_eq!(
-            OllamaProvider::chat_endpoint("http://127.0.0.1:11434"),
-            "http://127.0.0.1:11434/api/chat"
-        );
-        assert_eq!(
-            OllamaProvider::chat_endpoint("http://127.0.0.1:11434/"),
-            "http://127.0.0.1:11434/api/chat"
-        );
-    }
 }
