@@ -115,6 +115,7 @@ async fn tauri_runtime_uses_real_openai_compatible_http_provider_for_story_macro
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id,
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: {
                 let mut prompts = std::collections::BTreeMap::new();

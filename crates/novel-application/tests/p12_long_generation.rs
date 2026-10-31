@@ -1,8 +1,19 @@
 use std::sync::Arc;
 
-use novel_application::{OpenRunInput, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository};
+use novel_application::{
+    ModelSecrets, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository,
+};
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn story() -> String {
     serde_json::json!({"expansion":{"expanded_premise":"少年入山。","protagonist_core":"被逐少年","conflict_engine":"宗门秘密","conflict_layers":{"external":"外","internal":"内"},"mystery_box":"祖祠","emotional_line":"成长","setpiece_seeds":["夜战"],"tone_reference":"冷峻"},"decomposition":{"selling_point":"逆袭","core_conflict":"真相","main_hook":"血脉","progression_loop":"发现","growth_path":"承担","major_payoffs":["真相"],"ending_flavor":"新生"},"constraints":["不揭露终极秘密"],"issues":[]}).to_string()
@@ -60,7 +71,7 @@ async fn hundred_chapter_mock_generation_benchmark() {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "long-gen".into(),
         lease_ms: 120_000,
         concurrency: 1,
@@ -90,6 +101,7 @@ async fn hundred_chapter_mock_generation_benchmark() {
                 novel_id: novel.id.clone(),
                 target_chapter_id: chapter.id.clone(),
                 provider: "mock".into(),
+                credential_ref: Some("mock".into()),
                 model: "mock".into(),
                 prompt_versions: {
                     let mut p = std::collections::BTreeMap::new();

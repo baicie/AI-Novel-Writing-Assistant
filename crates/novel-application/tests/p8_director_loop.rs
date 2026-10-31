@@ -1,11 +1,21 @@
 use std::sync::Arc;
 
 use novel_application::{
-    NovelRepository, OpenRunInput, Runtime, RuntimeDeps, TickOutcome, WorkflowRepository,
+    ModelSecrets, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome,
+    WorkflowRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
 use sqlx::Row;
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
@@ -83,7 +93,7 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p8-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -101,6 +111,7 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),
@@ -255,7 +266,7 @@ async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p8-invalid-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -273,6 +284,7 @@ async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id,
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),
@@ -352,7 +364,7 @@ async fn consistency_issues_fail_closed_without_fake_repair_or_commit() {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p8-repair-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -374,6 +386,7 @@ async fn consistency_issues_fail_closed_without_fake_repair_or_commit() {
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),

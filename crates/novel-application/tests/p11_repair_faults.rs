@@ -179,6 +179,7 @@ async fn runtime_for(
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock".into(),
             prompt_versions: prompts,
             token_budget: Some(512),

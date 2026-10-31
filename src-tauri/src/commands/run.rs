@@ -121,6 +121,7 @@ pub async fn open_run(
                 endpoint,
                 allow_localhost_http,
                 step_routes,
+                credential_ref: None,
             },
             frozen,
         )

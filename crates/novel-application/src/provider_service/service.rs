@@ -361,25 +361,53 @@ impl ProviderService {
         &self,
         task_type: &str,
     ) -> Result<Option<ResolvedModelRoute>, ProviderError> {
-        let binding = self
-            .registry
-            .list_bindings()
-            .await?
-            .into_iter()
+        let snapshot = self.route_snapshot().await?;
+        Self::resolve_from_snapshot(&snapshot, task_type)
+    }
+
+    /// 一次性读取路由所需的全部配置，后续解析只在这个快照内进行。
+    ///
+    /// 这样同一批解析（例如创建 Run 时冻结所有环节）不会因为并发保存配置而拼出混合版本。
+    pub(crate) async fn route_snapshot(&self) -> Result<RouteSnapshot, ProviderError> {
+        let bindings = self.registry.list_bindings().await?;
+        let providers = self.registry.list_providers().await?;
+        let mut models = std::collections::HashMap::new();
+        for provider in &providers {
+            models.insert(
+                provider.id.clone(),
+                self.registry.list_models(&provider.id).await?,
+            );
+        }
+        Ok(RouteSnapshot {
+            bindings,
+            providers,
+            models,
+        })
+    }
+
+    pub(crate) fn resolve_from_snapshot(
+        snapshot: &RouteSnapshot,
+        task_type: &str,
+    ) -> Result<Option<ResolvedModelRoute>, ProviderError> {
+        let binding = snapshot
+            .bindings
+            .iter()
             .find(|item| item.task_type == task_type);
         let Some(binding) = binding else {
             return Ok(None);
         };
-        let provider = self
-            .registry
-            .list_providers()
-            .await?
-            .into_iter()
+        let provider = snapshot
+            .providers
+            .iter()
             .find(|item| item.id == binding.provider_id)
             .ok_or_else(|| {
                 ProviderError::not_found(format!("绑定的模型来源已不存在：{}", binding.provider_id))
             })?;
-        let models = self.registry.list_models(&provider.id).await?;
+        let models = snapshot
+            .models
+            .get(&provider.id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         if !models
             .iter()
             .any(|model| model.model_id == binding.model_id)
@@ -392,15 +420,22 @@ impl ProviderService {
         Ok(Some(ResolvedModelRoute {
             task_type: task_type.to_string(),
             provider_id: provider.id.clone(),
-            model_id: binding.model_id,
+            model_id: binding.model_id.clone(),
             protocol: provider.protocol.as_str().to_string(),
-            endpoint: provider.base_url,
+            endpoint: provider.base_url.clone(),
             allow_localhost_http: provider.allow_localhost_http,
-            credential_ref: provider.credential.reference,
-            reasoning_effort: binding.reasoning_effort,
+            credential_ref: provider.credential.reference.clone(),
+            reasoning_effort: binding.reasoning_effort.clone(),
             source: "binding".to_string(),
         }))
     }
+}
+
+/// 某一时刻的完整路由配置快照。
+pub(crate) struct RouteSnapshot {
+    bindings: Vec<novel_domain::ModelBinding>,
+    providers: Vec<novel_domain::ProviderProfile>,
+    models: std::collections::HashMap<String, Vec<novel_domain::ModelProfile>>,
 }
 
 impl ProviderService {
@@ -408,10 +443,14 @@ impl ProviderService {
     pub async fn frozen_step_routes(
         &self,
     ) -> Result<std::collections::BTreeMap<String, FrozenStepRoute>, ProviderError> {
+        let snapshot = self.route_snapshot().await?;
         let mut routes = std::collections::BTreeMap::new();
-        for binding in self.list_bindings().await? {
-            if let Some(route) = self.resolve_route(&binding.task_type).await? {
-                routes.insert(binding.task_type, FrozenStepRoute::from_route(&route));
+        for binding in snapshot.bindings.iter() {
+            if let Some(route) = Self::resolve_from_snapshot(&snapshot, &binding.task_type)? {
+                routes.insert(
+                    binding.task_type.clone(),
+                    FrozenStepRoute::from_route(&route),
+                );
             }
         }
         Ok(routes)

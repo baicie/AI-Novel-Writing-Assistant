@@ -1,11 +1,20 @@
 use std::sync::Arc;
 
 use novel_application::{
-    NewWorld, NovelRepository, OpenRunInput, Runtime, RuntimeDeps, SaveChapterRecord, TickOutcome,
-    WorkflowRepository, WorldRepository,
+    ModelSecrets, NewWorld, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps,
+    SaveChapterRecord, TickOutcome, WorkflowRepository, WorldRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+
+struct FixtureSecrets;
+#[async_trait::async_trait]
+impl ModelSecrets for FixtureSecrets {
+    async fn api_key(&self, _provider: &str) -> Result<Option<String>, PortError> {
+        // 这些套件验证的是生产链路而不是鉴权本身，密钥存在即可。
+        Ok(Some("fixture-key".into()))
+    }
+}
 
 fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
@@ -60,7 +69,7 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
         clock: Arc::new(FakeClock::new(1_000)),
         ids: Arc::new(SequentialIds::new()),
         faults: Arc::new(novel_application::NoFault),
-        secrets: Arc::new(novel_application::NoModelSecrets),
+        secrets: Arc::new(FixtureSecrets),
         owner: "p9-context-worker".into(),
         lease_ms: 60_000,
         concurrency: 1,
@@ -121,6 +130,7 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
             novel_id: novel.id.clone(),
             target_chapter_id: target.id.clone(),
             provider: "mock".into(),
+            credential_ref: Some("mock".into()),
             model: "mock-model".into(),
             prompt_versions: prompts(),
             token_budget: Some(512),

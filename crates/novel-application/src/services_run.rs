@@ -43,6 +43,7 @@ impl RunUseCases for DirectorService {
             endpoint: String::new(),
             allow_localhost_http: false,
             step_routes: Default::default(),
+            credential_ref: None,
         };
 
         // 调用 DirectorService 的 open_run 方法
@@ -141,6 +142,7 @@ mod tests {
             endpoint: String::new(),
             allow_localhost_http: false,
             step_routes: Default::default(),
+            credential_ref: None,
         };
 
         assert_eq!(input.max_automatic_retries, 3);

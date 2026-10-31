@@ -69,6 +69,11 @@ impl ProviderError {
         Self::new(ProviderErrorCode::Validation, message, false)
     }
 
+    /// 没有可用密钥：这是「配置不完整」，不是可重试的临时失败。
+    pub fn credential_missing(message: impl Into<String>) -> Self {
+        Self::new(ProviderErrorCode::CredentialMissing, message, false)
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(ProviderErrorCode::NotFound, message, false)
     }

@@ -457,6 +457,7 @@ impl BatchService {
             endpoint: request.endpoint,
             allow_localhost_http: request.allow_localhost_http,
             step_routes: Default::default(),
+            credential_ref: None,
         };
         let outcome = director.open_run(input).await?;
         #[cfg(debug_assertions)]

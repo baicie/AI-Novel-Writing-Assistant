@@ -387,14 +387,24 @@ impl Worker {
         let prompt = draft_prompt(self, claimed, &chapter.title).await?;
         let summary = summarize(&prompt);
         let route = claimed.contract.effective_route("writer");
-        let api_key = self
-            .secrets
-            .api_key(route.credential_ref(
+        let credential_ref = route
+            .credential_ref_checked(
                 &claimed.contract.provider,
                 claimed.contract.credential_ref.as_deref(),
-            ))
+            )
+            .map_err(|error| AppError::validation(error.message.clone()))?;
+        let api_key = self
+            .secrets
+            .api_key(credential_ref)
             .await?
             .unwrap_or_default();
+        // 没有密钥时只允许本机 Ollama；远程来源缺密钥必须在这里被挡住，不能带着空密钥发出去。
+        crate::provider_service::ensure_credential(
+            route.protocol(claimed.contract.protocol.as_deref()),
+            route.endpoint(&claimed.contract.endpoint),
+            &api_key,
+        )
+        .map_err(|error| AppError::validation(error.message.clone()))?;
         let cancel = CancellationToken::new();
         self.cancels
             .lock()
@@ -618,14 +628,24 @@ impl Worker {
             });
         }
         let route = claimed.contract.effective_route("repair");
-        let api_key = self
-            .secrets
-            .api_key(route.credential_ref(
+        let credential_ref = route
+            .credential_ref_checked(
                 &claimed.contract.provider,
                 claimed.contract.credential_ref.as_deref(),
-            ))
+            )
+            .map_err(|error| AppError::validation(error.message.clone()))?;
+        let api_key = self
+            .secrets
+            .api_key(credential_ref)
             .await?
             .unwrap_or_default();
+        // 没有密钥时只允许本机 Ollama；远程来源缺密钥不能带着空密钥发出去。
+        crate::provider_service::ensure_credential(
+            route.protocol(claimed.contract.protocol.as_deref()),
+            route.endpoint(&claimed.contract.endpoint),
+            &api_key,
+        )
+        .map_err(|error| AppError::validation(error.message.clone()))?;
         let cancel = CancellationToken::new();
         self.cancels
             .lock()
@@ -1283,17 +1303,23 @@ async fn execute_structured(
     let route = claimed
         .contract
         .effective_route(task_type_for_step(step_id));
+    let credential_ref = route
+        .credential_ref_checked(
+            &claimed.contract.provider,
+            claimed.contract.credential_ref.as_deref(),
+        )
+        .map_err(|error| AppError::validation(error.message.clone()))?;
     let api_key = worker
         .secrets
-        .api_key(
-            claimed
-                .contract
-                .credential_ref
-                .as_deref()
-                .unwrap_or(&claimed.contract.provider),
-        )
+        .api_key(credential_ref)
         .await?
         .unwrap_or_default();
+    crate::provider_service::ensure_credential(
+        route.protocol(claimed.contract.protocol.as_deref()),
+        route.endpoint(&claimed.contract.endpoint),
+        &api_key,
+    )
+    .map_err(|error| AppError::validation(error.message.clone()))?;
     let cancel = CancellationToken::new();
     worker
         .cancels
