@@ -72,6 +72,15 @@ export function buildChapterGroups(chapters: Chapter[], volumes: ChapterNavVolum
     .map(([, group]) => group);
 }
 
+/**
+ * 切换章节前的保护判定：有未保存修改时必须得到用户明确同意。
+ * 抽成纯函数，便于确定性验证，也保证按钮与快捷键共用同一套规则。
+ */
+export function shouldBlockChapterSwitch(isDirty: boolean, confirm: (message: string) => boolean): boolean {
+  if (!isDirty) return false;
+  return !confirm("本章还有未保存的修改。切换后未保存的内容仍可从本地草稿恢复，确定切换吗？");
+}
+
 /** 章节搜索：编号或标题命中都算，空关键词返回全部。 */
 export function filterChapters(chapters: Chapter[], keyword: string): Chapter[] {
   const query = keyword.trim().toLowerCase();

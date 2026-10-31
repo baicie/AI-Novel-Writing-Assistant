@@ -1,7 +1,13 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Chapter } from "@ai-novel/shared/types/novel";
 import { Button } from "@/components/ui/button";
-import { buildChapterGroups, filterChapters, neighbourOf, type ChapterNavVolume } from "./chapterNavigatorModel";
+import {
+  buildChapterGroups,
+  filterChapters,
+  neighbourOf,
+  shouldBlockChapterSwitch,
+  type ChapterNavVolume,
+} from "./chapterNavigatorModel";
 
 interface ChapterNavigatorProps {
   chapters: Chapter[];
@@ -23,13 +29,33 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
   const groups = useMemo(() => buildChapterGroups(visible, volumes), [visible, volumes]);
   const { previous, next } = useMemo(() => neighbourOf(chapters, currentChapterId), [chapters, currentChapterId]);
 
-  const switchTo = (chapterId: string) => {
-    if (chapterId === currentChapterId) return;
-    if (isDirty && !window.confirm("本章还有未保存的修改。切换后未保存的内容仍可从本地草稿恢复，确定切换吗？")) {
-      return;
-    }
-    onSelectChapter(chapterId);
-  };
+  const switchTo = useCallback(
+    (chapterId: string) => {
+      if (chapterId === currentChapterId) return;
+      if (shouldBlockChapterSwitch(isDirty, (message) => window.confirm(message))) {
+        return;
+      }
+      onSelectChapter(chapterId);
+    },
+    [currentChapterId, isDirty, onSelectChapter],
+  );
+
+  // 键盘导航：Alt+←/→ 切到上一章/下一章，和按钮走同一套保护逻辑。
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.metaKey || event.ctrlKey) return;
+      if (event.key === "ArrowLeft" && previous) {
+        event.preventDefault();
+        switchTo(previous.id);
+      }
+      if (event.key === "ArrowRight" && next) {
+        event.preventDefault();
+        switchTo(next.id);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [next, previous, switchTo]);
 
   return (
     <div className="flex flex-col gap-2" data-testid="chapter-navigator">

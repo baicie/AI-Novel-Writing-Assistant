@@ -77,6 +77,16 @@ describe("章节工作台导航与统一工作区", () => {
     const hasEmptyHint = bodyText.includes("这本书还没有运行记录");
     expect(hasRunPanel || hasEmptyHint).toBe(true);
 
+    // 键盘导航：Alt+→ 等价于点「下一章」，同样只有一个当前态。
+    const beforeHash = await browser.execute(() => window.location.hash);
+    await browser.keys(["Alt", "ArrowRight"]);
+    await browser.pause(2500);
+    const afterHash = await browser.execute(() => window.location.hash);
+    if (afterHash !== beforeHash) {
+      const currentAfterKey = await $$('[data-testid="chapter-nav-item"][data-current="true"]');
+      expect(currentAfterKey.length).toBe(1);
+    }
+
     // 切到第二章：当前章标记要跟着走。
     const nextButton = await $('[data-testid="chapter-nav-next"]');
     if (await nextButton.isExisting()) {
@@ -88,4 +98,5 @@ describe("章节工作台导航与统一工作区", () => {
       expect(stillOneCurrent.length).toBe(1);
     }
   });
+
 });

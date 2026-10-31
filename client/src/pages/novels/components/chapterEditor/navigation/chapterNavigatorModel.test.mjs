@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildChapterGroups, filterChapters, neighbourOf } from "./chapterNavigatorModel.ts";
+import { buildChapterGroups, filterChapters, neighbourOf, shouldBlockChapterSwitch } from "./chapterNavigatorModel.ts";
 
 const chapters = [
   { id: "c3", title: "第三章", order: 3, content: "有正文", officialVersion: 2, volumeId: "v2" },
@@ -39,4 +39,20 @@ test("previous and next respect order boundaries", () => {
   assert.equal(neighbourOf(chapters, "c1").previous, null);
   assert.equal(neighbourOf(chapters, "c3").next, null);
   assert.deepEqual(neighbourOf(chapters, "missing"), { previous: null, next: null });
+});
+
+test("dirty chapter switch requires explicit confirmation", () => {
+  const refused = shouldBlockChapterSwitch(true, () => false);
+  assert.equal(refused, true, "用户拒绝时必须留在本章");
+
+  const accepted = shouldBlockChapterSwitch(true, () => true);
+  assert.equal(accepted, false, "用户同意后应当允许切换");
+
+  let asked = false;
+  const clean = shouldBlockChapterSwitch(false, () => {
+    asked = true;
+    return true;
+  });
+  assert.equal(clean, false);
+  assert.equal(asked, false, "没有未保存修改时不应打扰用户");
 });
