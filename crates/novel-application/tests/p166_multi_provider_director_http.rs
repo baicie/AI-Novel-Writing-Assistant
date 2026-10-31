@@ -1212,3 +1212,224 @@ async fn candidate_confirmation_is_idempotent_and_conflicting() {
         "确认动作不得触发新的模型生成请求"
     );
 }
+
+// ============================================================
+// R8.1-G5.3：不同 command_id 并发确认同一候选 → 只有一个有效提交。
+// ============================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_confirmations_with_different_commands_submit_once() {
+    let provider = MockProvider::start(vec![
+        story(),
+        cast(),
+        volume(),
+        chapters(),
+        "候选正文：并发第一版。".to_string(),
+        issues(),
+        "并发修复后的正文。".to_string(),
+        "{\"issues\":[]}".to_string(),
+    ])
+    .await;
+
+    let directory = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&directory.path().join("g5c.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let vault = Arc::new(TestVault::default());
+    let service = ProviderService::new(
+        kernel.clone() as Arc<dyn ProviderRegistry>,
+        vault.clone() as Arc<dyn CredentialVault>,
+        Arc::new(TestIntents),
+    );
+    service
+        .upsert_provider(
+            ProviderDraft {
+                id: "gw".into(),
+                display_name: Some("G5 并发网关".into()),
+                protocol: ProviderProtocol::OpenAiCompatible,
+                base_url: provider.base_url(),
+                allow_localhost_http: true,
+                is_builtin: false,
+                sort_order: 0,
+            },
+            CredentialAction::Replace("key-G5".into()),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    service
+        .upsert_model(
+            novel_domain::ModelProfile {
+                provider_id: "gw".into(),
+                model_id: "model".into(),
+                display_name: Some("model".into()),
+                capabilities: Default::default(),
+                source: novel_domain::ModelSource::User,
+                overridden: Default::default(),
+            },
+            false,
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    for task in ["planner", "writer", "review", "repair"] {
+        kernel
+            .set_binding_cas(
+                &novel_domain::ModelBinding {
+                    task_type: task.into(),
+                    provider_id: "gw".into(),
+                    model_id: "model".into(),
+                    reasoning_effort: None,
+                },
+                None,
+                1,
+            )
+            .await
+            .unwrap();
+    }
+    let step_routes = service.frozen_step_routes().await.unwrap();
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm: Arc::new(OpenAiCompatibleProvider::new()),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(TestSecrets(vault.clone())),
+        owner: "g5c-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime
+        .director
+        .create_novel("G5 并发书", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let mut prompts = BTreeMap::new();
+    prompts.insert("chapter_draft".to_string(), "chapter-draft-v1".to_string());
+    prompts.insert(
+        "consistency_review".to_string(),
+        "consistency-review-v1".to_string(),
+    );
+    prompts.insert(
+        "chapter_repair".to_string(),
+        "chapter-repair-v1".to_string(),
+    );
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "g5c-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id.clone(),
+            provider: "gw".into(),
+            model: "model".into(),
+            prompt_versions: prompts,
+            token_budget: Some(4096),
+            context_token_budget: None,
+            max_automatic_retries: 1,
+            repair_budget: Some(1),
+            endpoint: provider.endpoint(),
+            allow_localhost_http: true,
+            step_routes,
+            credential_ref: Some("gw#1".into()),
+        })
+        .await
+        .unwrap();
+
+    let (candidate_id, sha, content, version) =
+        drive_to_candidate_gate(&runtime, &novel.id, &opened.run_id).await;
+    let http_before = provider.records().len();
+
+    // 两个不同 command_id 基于同一候选同时确认，内容不同。
+    let first_content = format!("{content}（作者 A 的修改）");
+    let second_content = format!("{content}（作者 B 的修改）");
+    let first = runtime.director.confirm_candidate_after_edit(
+        "g5c-confirm-a",
+        &opened.run_id,
+        Some(version),
+        &candidate_id,
+        &sha,
+        &first_content,
+    );
+    let second = runtime.director.confirm_candidate_after_edit(
+        "g5c-confirm-b",
+        &opened.run_id,
+        Some(version),
+        &candidate_id,
+        &sha,
+        &second_content,
+    );
+    let (first_result, second_result) = tokio::join!(first, second);
+    let winners = [
+        (first_result.is_ok(), &first_content),
+        (second_result.is_ok(), &second_content),
+    ];
+    let ok_count = winners.iter().filter(|(ok, _)| *ok).count();
+    assert_eq!(
+        ok_count, 1,
+        "同一候选的并发确认只能有一个有效提交：{:?} {:?}",
+        first_result, second_result
+    );
+    let winner_content = winners
+        .iter()
+        .find(|(ok, _)| *ok)
+        .map(|(_, text)| text.to_string())
+        .unwrap();
+
+    // 推进到结束，正式正文必须等于赢家内容，且只提交一次。
+    for _ in 0..40 {
+        let detail = runtime
+            .director
+            .get_run_detail(&novel.id, &opened.run_id)
+            .await
+            .unwrap();
+        if detail.status == "succeeded" || detail.status == "failed" {
+            break;
+        }
+        if detail.status == "waiting_approval"
+            && detail
+                .legal_actions
+                .iter()
+                .any(|action| action == "approve" || action == "confirm")
+        {
+            let _ = runtime
+                .director
+                .approve(
+                    &format!("g5c-post-{}", detail.control_version),
+                    &opened.run_id,
+                )
+                .await;
+        }
+        let _ = runtime.worker.tick().await.unwrap();
+    }
+    let chapter_after = runtime
+        .director
+        .get_chapter(&novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        chapter_after.content, winner_content,
+        "正式正文必须是赢家的内容"
+    );
+    assert_eq!(
+        chapter_after.official_version, 1,
+        "并发确认只能让正式版本递增一次"
+    );
+    assert_eq!(
+        provider.records().len(),
+        http_before,
+        "确认过程不得触发新的模型请求"
+    );
+}
