@@ -72,10 +72,11 @@ describe("章节工作台导航与统一工作区", () => {
     await runTab.click();
     await browser.pause(2500);
     const runPanel = await $('[data-testid="run-recovery-tab"]');
-    const bodyText = await browser.execute(() => document.body.innerText);
+    const emptyPanel = await $('[data-testid="run-empty"]');
     const hasRunPanel = await runPanel.isExisting();
-    const hasEmptyHint = bodyText.includes("这本书还没有运行记录");
-    expect(hasRunPanel || hasEmptyHint).toBe(true);
+    const hasEmptyState = await emptyPanel.isExisting();
+    // 本章没有 Run 时必须是明确的空状态，而不是显示别的章节的运行。
+    expect(hasRunPanel || hasEmptyState).toBe(true);
 
     // 有运行面板时，「查看完整运行记录」必须是真实可点的深链。
     if (hasRunPanel) {

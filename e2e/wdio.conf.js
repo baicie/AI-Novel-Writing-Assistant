@@ -11,6 +11,7 @@ export const config = {
     "./provider-protocol-guard.e2e.js",
     "./author-journey.e2e.js",
     "./p17-workbench.e2e.js",
+    "./p17-cancel-navigation.e2e.js",
   ],
   maxInstances: 1,
   logLevel: "warn",

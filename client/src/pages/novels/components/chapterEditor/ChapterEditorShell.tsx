@@ -710,6 +710,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           onSelectChapter={onSelectChapter}
           runAttention={runAttention}
           onOpenRunTab={() => changeRightTab("run")}
+          isBusy={saveMutation.isPending || Boolean(draft.storageError)}
           workspace={workspace}
           workspaceStatus={workspaceStatus}
           wordCount={wordCount}

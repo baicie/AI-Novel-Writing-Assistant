@@ -2,15 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import { queryKeys } from "@/api/queryKeys";
 import {
   approveRun,
   cancelRun,
+  confirmCandidateAfterEdit,
   getRunDetail,
   listRuns,
+  regenerateRun,
+  rejectRun,
   resumeRun,
   resumeRunWithQualityDebt,
 } from "@/platform/desktopTransport";
-import { availableRunActions, formatRunStatus, isRecoverableStatus } from "./panelModel";
+import { availableRunActions, formatRunStatus, isRecoverableStatus, type RunActionOption } from "./panelModel";
 
 interface RunRecoveryTabProps {
   novelId: string;
@@ -22,8 +26,8 @@ function newCommandId(prefix: string): string {
 }
 
 /**
- * 「运行与恢复」：只读展示当前 Run 的真实状态，动作严格取自后端 legalActions，
- * 不在前端臆造入口，也不直接改数据库。
+ * 「运行与恢复」：只展示**当前章节**的 Run，动作严格映射到真实 Director 命令。
+ * 本章没有 Run 时给出明确空态，并引导到全书运行记录，绝不静默操作别的章节。
  */
 export default function RunRecoveryTab(props: RunRecoveryTabProps) {
   const { novelId, chapterId } = props;
@@ -33,15 +37,15 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
     queryKey: ["authoring-runs", novelId],
     queryFn: () => listRuns(novelId),
     refetchInterval: 5000,
+    enabled: Boolean(novelId && chapterId),
   });
 
   const chapterRuns = (runsQuery.data ?? []).filter((run) => run.chapterId === chapterId);
-  const latest = (chapterRuns.length > 0 ? chapterRuns : runsQuery.data ?? [])
-    .slice()
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  const latest = chapterRuns.slice().sort((left, right) => right.updatedAt - left.updatedAt)[0];
 
   const detailQuery = useQuery({
-    queryKey: ["authoring-run-detail", novelId, latest?.id ?? "none"],
+    // 章节 ID 进 key：快速切章时不同章节的详情互相隔离，旧响应不会写进新章节。
+    queryKey: ["authoring-run-detail", novelId, chapterId, latest?.id ?? "none"],
     queryFn: () => getRunDetail(novelId, latest!.id),
     enabled: Boolean(latest?.id),
     refetchInterval: 5000,
@@ -50,23 +54,50 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["authoring-runs", novelId] });
     void queryClient.invalidateQueries({ queryKey: ["authoring-run-detail", novelId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.novels.detail(novelId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.novels.chapterEditorWorkspace(novelId, chapterId) });
   };
 
   const actionMutation = useMutation({
-    mutationFn: async (action: string) => {
-      if (!latest) return;
-      const commandId = newCommandId(`chapter-workspace-${action}`);
-      if (action === "approve") return approveRun({ runId: latest.id, commandId });
-      if (action === "resume") return resumeRun({ runId: latest.id, commandId, acceptCandidate: false });
-      if (action === "resume_debt")
-        return resumeRunWithQualityDebt({
-          runId: latest.id,
-          commandId,
-          reason: "章节工作台里确认带质量提醒继续",
-        });
-      if (action === "regenerate") return resumeRun({ runId: latest.id, commandId, acceptCandidate: false });
-      if (action === "cancel") return cancelRun({ runId: latest.id, commandId });
-      return undefined;
+    mutationFn: async (action: RunActionOption) => {
+      if (!latest) throw new Error("还没有可操作的运行。");
+      const commandId = newCommandId(`chapter-workbench-${action.key}`);
+      const expectedVersion = detailQuery.data?.controlVersion ?? undefined;
+
+      switch (action.command) {
+        case "approve_run":
+          return approveRun({ runId: latest.id, commandId, expectedVersion });
+        case "reject_run":
+          return rejectRun({ runId: latest.id, commandId, expectedVersion });
+        case "regenerate_run":
+          return regenerateRun({ runId: latest.id, commandId, expectedVersion });
+        case "confirm_candidate_after_edit_run": {
+          const candidate = detailQuery.data?.latestCandidate;
+          if (!candidate?.id || !candidate.contentSha256 || !candidate.content) {
+            throw new Error("候选正文还没准备好，请刷新后再确认。");
+          }
+          return confirmCandidateAfterEdit({
+            runId: latest.id,
+            commandId,
+            expectedVersion,
+            baseCandidateId: candidate.id,
+            baseContentSha256: candidate.contentSha256,
+            content: candidate.content,
+          });
+        }
+        case "resume_run":
+          return resumeRun({ runId: latest.id, commandId, acceptCandidate: false });
+        case "resume_run_with_quality_debt":
+          return resumeRunWithQualityDebt({
+            runId: latest.id,
+            commandId,
+            reason: "章节工作台里确认带质量提醒继续",
+          });
+        case "cancel_run":
+          return cancelRun({ runId: latest.id, commandId });
+        default:
+          throw new Error("这个动作暂时不能在章节工作台执行。");
+      }
     },
     onSuccess: () => {
       refresh();
@@ -77,7 +108,7 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
   });
 
   if (runsQuery.isLoading) {
-    return <div className="px-1 py-4 text-sm text-muted-foreground">正在读取运行状态...</div>;
+    return <div className="px-1 py-4 text-sm text-muted-foreground">正在读取本章运行状态...</div>;
   }
   if (runsQuery.isError) {
     return (
@@ -91,26 +122,43 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
   }
   if (!latest) {
     return (
-      <div className="px-1 py-4 text-sm text-muted-foreground">
-        这本书还没有运行记录。先在「AI 修改」里发起一次创作，这里会显示进度与可执行的下一步。
+      <div className="space-y-2 px-1 py-4 text-sm text-muted-foreground" data-testid="run-empty">
+        <p>本章还没有运行记录。在「AI 修改」里发起一次改写或生成，这里会显示进度与可执行的下一步。</p>
+        <Link
+          to="/tasks"
+          data-testid="run-history-link"
+          className="inline-block text-xs underline-offset-4 hover:text-foreground hover:underline"
+        >
+          查看全书运行记录
+        </Link>
       </div>
     );
   }
 
   const detail = detailQuery.data;
-  const status = detail?.status ?? latest.state;
-  const actions = availableRunActions(detail?.legalActions);
-  const reason = detail?.pauseReason ?? detail?.failureReason ?? null;
+  // 详情必须属于本章：异步旧响应绝不驱动当前界面。
+  const detailMatches = Boolean(detail && detail.chapterId === chapterId && detail.id === latest.id);
+  const status = detailMatches ? detail!.status : latest.state;
+  const actions = detailMatches
+    ? availableRunActions({
+        legalActions: detail!.legalActions,
+        status: detail!.status,
+        gateId: detail!.gate?.id ?? null,
+        candidate: detail!.latestCandidate ?? null,
+        controlVersion: detail!.controlVersion,
+      })
+    : [];
+  const reason = detailMatches ? (detail!.pauseReason ?? detail!.failureReason ?? null) : null;
 
   return (
     <div className="flex flex-col gap-3 px-1 py-2" data-testid="run-recovery-tab">
       <div className="space-y-1">
         <div className="text-sm font-medium text-foreground" data-testid="run-status">
-          {detail?.chapterTitle || latest.chapterTitle}：{formatRunStatus(status)}
+          {formatRunStatus(status)}
         </div>
         <div className="text-xs text-muted-foreground">
-          {detail?.provider ?? latest.provider} / {detail?.model ?? latest.model}
-          {detail?.usage ? ` · 已调用 ${detail.usage.calls} 次` : ""}
+          {detailMatches ? detail!.provider : latest.provider} / {detailMatches ? detail!.model : latest.model}
+          {detailMatches ? ` · 已调用 ${detail!.usage.calls} 次` : ""}
         </div>
       </div>
 
@@ -131,9 +179,9 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
           <Button
             key={action.key}
             size="sm"
-            variant={action.key === "cancel" ? "outline" : "default"}
+            variant={action.destructive ? "outline" : "default"}
             disabled={actionMutation.isPending}
-            onClick={() => actionMutation.mutate(action.key)}
+            onClick={() => actionMutation.mutate(action)}
             data-testid={`run-action-${action.key}`}
           >
             {action.label}

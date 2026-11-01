@@ -9,6 +9,7 @@ interface ChapterEditorSidebarProps {
   onSelectChapter?: (chapterId: string) => void;
   runAttention?: Record<string, import("./navigation/chapterNavigatorModel").ChapterRunAttention>;
   onOpenRunTab?: () => void;
+  isBusy?: boolean;
   workspace: ChapterEditorWorkspaceResponse | null;
   workspaceStatus: "loading" | "ready" | "error";
   wordCount: number;
@@ -50,6 +51,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
     onSelectChapter,
     runAttention = {},
     onOpenRunTab,
+    isBusy = false,
     workspace,
     workspaceStatus,
     wordCount,
@@ -84,6 +86,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
               volumes={volumes}
               currentChapterId={chapter.id}
               isDirty={isDirty}
+              isBusy={isBusy}
               runAttention={runAttention}
               onOpenRunTab={onOpenRunTab}
               onSelectChapter={(nextId) => onSelectChapter?.(nextId)}

@@ -3,18 +3,21 @@ import test from "node:test";
 import {
   buildChapterGroups,
   buildRunAttention,
+  chapterNavigationIntent,
   filterChapters,
   formatChapterWordCount,
+  formatWordCount,
   isSaveShortcut,
   neighbourOf,
   runAttentionFor,
   shouldBlockChapterSwitch,
+  toChapterNavItem,
 } from "./chapterNavigatorModel.ts";
 
 const chapters = [
-  { id: "c3", title: "第三章", order: 3, content: "有正文", officialVersion: 2, volumeId: "v2" },
+  { id: "c3", title: "第三章", order: 3, content: "有正文内容", officialVersion: 2, volumeId: "v2" },
   { id: "c1", title: "第一章", order: 1, content: "", officialVersion: 0, volumeId: "v1" },
-  { id: "c2", title: "第二章", order: 2, content: "x", officialVersion: 1, volumeId: "v1" },
+  { id: "c2", title: "第二章", order: 2, content: "  \n\t ", officialVersion: 1, volumeId: "v1" },
 ];
 
 test("chapters are grouped by volume and ordered", () => {
@@ -27,11 +30,26 @@ test("chapters are grouped by volume and ordered", () => {
   assert.deepEqual(groups[1].chapters.map((chapter) => chapter.id), ["c3"]);
 });
 
+test("nav items keep real content facts instead of a cast stub", () => {
+  const item = toChapterNavItem(chapters[0]);
+  assert.equal(item.id, "c3");
+  assert.equal(item.wordCount, "有正文内容".length, "字数必须来自真实正文");
+  assert.equal(item.hasContent, true);
+  assert.equal(item.officialVersion, 2);
+
+  const blank = toChapterNavItem(chapters[1]);
+  assert.equal(blank.wordCount, 0, "纯空白的章节字数必须是 0");
+  assert.equal(blank.hasContent, false);
+  assert.equal(formatWordCount(item.wordCount), "5 字");
+  assert.equal(formatWordCount(blank.wordCount), "空");
+});
+
 test("chapters without a known volume fall back to a safe group", () => {
   const groups = buildChapterGroups([{ id: "c9", title: "", order: 9 }], []);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].label, "未分卷");
   assert.equal(groups[0].chapters[0].id, "c9");
+  assert.equal(groups[0].chapters[0].title, "未命名章节");
 });
 
 test("search matches by order or title and ignores blank keyword", () => {
@@ -48,22 +66,6 @@ test("previous and next respect order boundaries", () => {
   assert.equal(neighbourOf(chapters, "c1").previous, null);
   assert.equal(neighbourOf(chapters, "c3").next, null);
   assert.deepEqual(neighbourOf(chapters, "missing"), { previous: null, next: null });
-});
-
-test("dirty chapter switch requires explicit confirmation", () => {
-  const refused = shouldBlockChapterSwitch(true, () => false);
-  assert.equal(refused, true, "用户拒绝时必须留在本章");
-
-  const accepted = shouldBlockChapterSwitch(true, () => true);
-  assert.equal(accepted, false, "用户同意后应当允许切换");
-
-  let asked = false;
-  const clean = shouldBlockChapterSwitch(false, () => {
-    asked = true;
-    return true;
-  });
-  assert.equal(clean, false);
-  assert.equal(asked, false, "没有未保存修改时不应打扰用户");
 });
 
 test("run attention maps backend states to actionable levels", () => {
@@ -86,12 +88,29 @@ test("latest run per chapter decides the badge", () => {
   assert.deepEqual(attention, { c1: "action", c2: "running", c3: "done" });
 });
 
-test("save shortcut only matches cmd/ctrl + s without alt", () => {
-  assert.equal(isSaveShortcut({ key: "s", metaKey: true }), true);
-  assert.equal(isSaveShortcut({ key: "S", ctrlKey: true }), true);
-  assert.equal(isSaveShortcut({ key: "s" }), false);
-  assert.equal(isSaveShortcut({ key: "s", metaKey: true, altKey: true }), false);
-  assert.equal(isSaveShortcut({ key: "k", metaKey: true }), false);
+test("dirty chapter switch requires explicit confirmation", () => {
+  assert.equal(shouldBlockChapterSwitch(true, () => false), true, "用户拒绝时必须留在本章");
+  assert.equal(shouldBlockChapterSwitch(true, () => true), false, "用户同意后应当允许切换");
+  let asked = false;
+  const clean = shouldBlockChapterSwitch(false, () => {
+    asked = true;
+    return true;
+  });
+  assert.equal(clean, false);
+  assert.equal(asked, false, "没有未保存修改时不应打扰用户");
+});
+
+test("navigation intent only guards real chapter switches", () => {
+  assert.deepEqual(chapterNavigationIntent("c1", "c2", false), {
+    targetChapterId: "c1",
+    openRunTab: false,
+    requiresSwitchGuard: true,
+  });
+  assert.deepEqual(chapterNavigationIntent("c2", "c2", true), {
+    targetChapterId: "c2",
+    openRunTab: true,
+    requiresSwitchGuard: false,
+  });
 });
 
 test("chapter word count ignores blank content", () => {
@@ -99,4 +118,12 @@ test("chapter word count ignores blank content", () => {
   assert.equal(formatChapterWordCount(null), "空");
   assert.equal(formatChapterWordCount("   "), "空");
   assert.equal(formatChapterWordCount("少年入山"), "4 字");
+});
+
+test("save shortcut only matches cmd/ctrl + s without alt", () => {
+  assert.equal(isSaveShortcut({ key: "s", metaKey: true }), true);
+  assert.equal(isSaveShortcut({ key: "S", ctrlKey: true }), true);
+  assert.equal(isSaveShortcut({ key: "s" }), false);
+  assert.equal(isSaveShortcut({ key: "s", metaKey: true, altKey: true }), false);
+  assert.equal(isSaveShortcut({ key: "k", metaKey: true }), false);
 });
