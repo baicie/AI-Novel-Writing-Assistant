@@ -96,6 +96,14 @@ GitHub Pages 仍是静态托管，因此必须同时保留两层能力：
 
 为了同时兼容 GitHub Pages 和本地 Vite preview 的无尾斜杠访问，非首页路由需要同时写出目录版 `index.html` 和 `.html` 副本，例如 `dist/docs/introduction/index.html` 与 `dist/docs/introduction.html`。sitemap 应始终使用无 hash、无尾斜杠的真实路径。
 
+## 部署环境的已知阻塞
+
+仓库未在 GitHub Settings → Pages 中启用 Pages 站点时，`.github/workflows/site-pages.yml` 会在 `actions/configure-pages` 步骤失败，报错为 `Create Pages site failed: Resource not accessible by integration`。原因是工作流使用仓库内置 token，它没有代替管理员创建 Pages 站点的权限；这与站点代码、构建产物和文档 manifest 无关。
+
+判断这条失败属于环境问题而不是回归，看三点：失败步骤停在 `actions/configure-pages`；同一提交的 `Tauri CI` 仍然通过；失败自 2026-10-29 起在每次推送到 `main` 时稳定复现。
+
+处理顺序是先在仓库设置里把 Pages 的 Source 设为 GitHub Actions，再重新触发一次工作流确认。不要用 `continue-on-error`、删除工作流或跳过部署步骤来让检查转绿：站点能否发布是真实能力，转绿只是把缺失藏起来。在 Pages 启用之前，站点发布失败应作为已知环境阻塞记录和放行，不影响桌面端与后端流水线的判断。
+
 ## Related Modules
 
 - `site/`：公开介绍站源码与本地构建说明。
