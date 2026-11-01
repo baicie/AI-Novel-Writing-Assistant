@@ -549,8 +549,10 @@ mod rewrite_tests {
             "候选缺少正文时必须报错，而不是当成空候选"
         );
         assert!(
-            novel_llm::parse_structured_json::<RewriteModelOutput>("{\"macroAlignmentNote\":\"x\"}")
-                .is_err(),
+            novel_llm::parse_structured_json::<RewriteModelOutput>(
+                "{\"macroAlignmentNote\":\"x\"}"
+            )
+            .is_err(),
             "没有 candidates 字段必须报错"
         );
     }
