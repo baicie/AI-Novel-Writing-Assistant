@@ -10,6 +10,8 @@ interface ChapterEditorSidebarProps {
   runAttention?: Record<string, import("./navigation/chapterNavigatorModel").ChapterRunAttention>;
   onOpenRunTab?: () => void;
   isBusy?: boolean;
+  /** AI 候选稿已生成但还没有采用或放弃；切章会丢弃它，必须先确认。 */
+  hasPendingCandidate?: boolean;
   workspace: ChapterEditorWorkspaceResponse | null;
   workspaceStatus: "loading" | "ready" | "error";
   wordCount: number;
@@ -52,6 +54,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
     runAttention = {},
     onOpenRunTab,
     isBusy = false,
+    hasPendingCandidate = false,
     workspace,
     workspaceStatus,
     wordCount,
@@ -87,6 +90,7 @@ export default function ChapterEditorSidebar(props: ChapterEditorSidebarProps) {
               currentChapterId={chapter.id}
               isDirty={isDirty}
               isBusy={isBusy}
+              hasPendingCandidate={hasPendingCandidate}
               runAttention={runAttention}
               onOpenRunTab={onOpenRunTab}
               onSelectChapter={(nextId) => onSelectChapter?.(nextId)}

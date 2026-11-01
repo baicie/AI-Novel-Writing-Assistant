@@ -49,14 +49,16 @@ export type RunCommandName =
   | "resume_run_with_quality_debt"
   | "cancel_run";
 
+/**
+ * 一个可以真的执行的下一步。
+ *
+ * 这里不用布尔量声明「需要哪些参数」：那种声明不参与发请求，改了请求忘了改声明也测不出来。
+ * 每个命令实际发出的参数由 `buildRunCommandRequest` 按 `command` 派生，单测直接断言派生结果。
+ */
 export interface RunActionOption {
   key: RunActionKey;
   label: string;
   command: RunCommandName;
-  /** 需要候选稿 CAS 参数（candidateId / contentSha256 / expectedVersion）。 */
-  needsCandidate: boolean;
-  needsVersion: boolean;
-  needsReason: boolean;
   destructive: boolean;
 }
 
@@ -64,6 +66,12 @@ export interface RunCandidateSummary {
   id: string;
   content?: string | null;
   contentSha256?: string | null;
+}
+
+/** 候选正文齐备的形态：三项 CAS 参数都拿得到，才允许发确认命令。 */
+export interface RunReadyCandidate extends RunCandidateSummary {
+  content: string;
+  contentSha256: string;
 }
 
 export interface RunActionContext {
@@ -84,7 +92,7 @@ const LABELS: Record<RunActionKey, string> = {
   cancel: "取消这次创作",
 };
 
-function candidateReady(candidate?: RunCandidateSummary | null): boolean {
+function candidateReady(candidate?: RunCandidateSummary | null): candidate is RunReadyCandidate {
   return Boolean(candidate && candidate.id && candidate.contentSha256 && (candidate.content ?? "").length > 0);
 }
 
@@ -127,9 +135,6 @@ export function availableRunActions(context: RunActionContext): RunActionOption[
                   : key === "resume_quality_debt"
                     ? "resume_run_with_quality_debt"
                     : "cancel_run",
-      needsCandidate: key === "confirm_candidate",
-      needsVersion: key !== "cancel" && key !== "resume_quality_debt",
-      needsReason: key === "resume_quality_debt",
       destructive: key === "cancel" || key === "reject",
       ...overrides,
     });
@@ -166,6 +171,85 @@ export function availableRunActions(context: RunActionContext): RunActionOption[
     }
   }
   return options;
+}
+
+/**
+ * 每个动作实际发出的请求。参数形状与 `src-tauri/src/commands/run.rs` 的命令签名一一对应：
+ * - approve / reject / regenerate / confirm_candidate_after_edit 接 `expected_version`（Option）
+ * - resume 只接 `accept_candidate`，cancel 只接 run 与 command——两者都**不**接 `expected_version`
+ * - resume_run_with_quality_debt 必须带 reason
+ */
+export type RunCommandRequest =
+  | { command: "approve_run"; payload: { runId: string; commandId: string; expectedVersion?: number } }
+  | { command: "reject_run"; payload: { runId: string; commandId: string; expectedVersion?: number } }
+  | { command: "regenerate_run"; payload: { runId: string; commandId: string; expectedVersion?: number } }
+  | {
+      command: "confirm_candidate_after_edit_run";
+      payload: {
+        runId: string;
+        commandId: string;
+        expectedVersion?: number;
+        baseCandidateId: string;
+        baseContentSha256: string;
+        content: string;
+      };
+    }
+  | { command: "resume_run"; payload: { runId: string; commandId: string; acceptCandidate: boolean } }
+  | { command: "resume_run_with_quality_debt"; payload: { runId: string; commandId: string; reason: string } }
+  | { command: "cancel_run"; payload: { runId: string; commandId: string } };
+
+export interface RunCommandInput {
+  runId: string;
+  commandId: string;
+  controlVersion?: number | null;
+  candidate?: RunCandidateSummary | null;
+  /** 质量债恢复要写进运行记录的原因，由调用方给出。 */
+  qualityDebtReason: string;
+}
+
+/** 候选正文没齐备时抛这个：缺 CAS 参数就绝不发请求，避免覆盖别人改过的正文。 */
+export const CANDIDATE_NOT_READY_MESSAGE = "候选正文还没准备好，请刷新后再确认。";
+
+/**
+ * 把动作翻译成真实请求。这是「发什么参数」的唯一来源：
+ * 界面只负责把结果交给对应的 transport 函数，不再各自手写参数。
+ */
+export function buildRunCommandRequest(action: RunActionOption, input: RunCommandInput): RunCommandRequest {
+  const { runId, commandId } = input;
+  const expectedVersion = input.controlVersion ?? undefined;
+
+  switch (action.command) {
+    case "approve_run":
+      return { command: "approve_run", payload: { runId, commandId, expectedVersion } };
+    case "reject_run":
+      return { command: "reject_run", payload: { runId, commandId, expectedVersion } };
+    case "regenerate_run":
+      return { command: "regenerate_run", payload: { runId, commandId, expectedVersion } };
+    case "confirm_candidate_after_edit_run": {
+      const candidate = input.candidate;
+      if (!candidateReady(candidate)) throw new Error(CANDIDATE_NOT_READY_MESSAGE);
+      return {
+        command: "confirm_candidate_after_edit_run",
+        payload: {
+          runId,
+          commandId,
+          expectedVersion,
+          baseCandidateId: candidate.id,
+          baseContentSha256: candidate.contentSha256,
+          content: candidate.content,
+        },
+      };
+    }
+    case "resume_run":
+      return { command: "resume_run", payload: { runId, commandId, acceptCandidate: false } };
+    case "resume_run_with_quality_debt":
+      return {
+        command: "resume_run_with_quality_debt",
+        payload: { runId, commandId, reason: input.qualityDebtReason },
+      };
+    case "cancel_run":
+      return { command: "cancel_run", payload: { runId, commandId } };
+  }
 }
 
 const STATUS_TEXT: Record<string, string> = {

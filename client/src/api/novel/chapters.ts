@@ -164,17 +164,20 @@ export async function generateChapterExecutionContract(
 }
 
 /**
- * 【新增】章节 AI 修正 - 支持本地和云模式的路由包装函数
+ * 章节选区改写：桌面版走本地内核，网页版走服务端。
+ *
+ * 桌面版必须走 `rewriteChapterSelection`：桌面的 axios 适配层没有改写路由，
+ * 继续发 HTTP 只会拿到「暂未接入桌面本地内核」。
  */
 export async function previewChapterAiRevisionWithRouting(
   novelId: string,
   chapterId: string,
   payload: ChapterEditorAiRevisionRequest,
-) {
-  const { shouldUseLocalGeneration, handleLocalAiRevision } = await import("@/api/localCreation");
-  
-  if (shouldUseLocalGeneration(novelId)) {
-    return handleLocalAiRevision(novelId, chapterId, payload);
+): Promise<ApiResponse<ChapterEditorAiRevisionResponse>> {
+  const { hasDesktopShell } = await import("@/platform/desktopTransport");
+  if (hasDesktopShell()) {
+    const { rewriteChapterSelectionOnDesktop } = await import("./chapterSelectionRewrite");
+    return rewriteChapterSelectionOnDesktop(novelId, chapterId, payload);
   }
   return previewChapterAiRevision(novelId, chapterId, payload);
 }

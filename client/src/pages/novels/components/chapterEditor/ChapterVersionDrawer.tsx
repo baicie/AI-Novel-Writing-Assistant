@@ -6,6 +6,7 @@ import { queryKeys } from "@/api/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
+import { shouldBlockChapterSwitch } from "./navigation/chapterNavigatorModel";
 
 interface ChapterVersionDrawerProps {
   novelId: string;
@@ -15,6 +16,10 @@ interface ChapterVersionDrawerProps {
   onOpenChange: (open: boolean) => void;
   currentContent: string;
   isDirty: boolean;
+  /** 正文正在保存，或本地草稿写入失败。 */
+  isDraftWriteBusy?: boolean;
+  /** AI 候选稿已生成但还没有采用或放弃；载入版本会丢弃它，必须先确认。 */
+  hasPendingCandidate?: boolean;
   onLoadContent: (content: string, snapshotId: string) => void;
 }
 
@@ -44,6 +49,8 @@ export default function ChapterVersionDrawer(props: ChapterVersionDrawerProps) {
     onOpenChange,
     currentContent,
     isDirty,
+    isDraftWriteBusy = false,
+    hasPendingCandidate = false,
     onLoadContent,
   } = props;
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
@@ -79,7 +86,16 @@ export default function ChapterVersionDrawer(props: ChapterVersionDrawerProps) {
 
   const handleLoadContent = () => {
     if (!selectedSnapshot) return;
-    if (isDirty && !window.confirm("当前正文还有未保存的修改，载入版本会替换编辑区内容。继续吗？")) {
+    const blocked = shouldBlockChapterSwitch(
+      {
+        hasUnsavedContent: isDirty,
+        isDraftWriteBusy,
+        hasPendingCandidate,
+      },
+      (message) => window.confirm(message),
+      "load_version",
+    );
+    if (blocked) {
       return;
     }
     onLoadContent(selectedSnapshot.content, selectedSnapshot.id);

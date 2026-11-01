@@ -14,7 +14,13 @@ import {
   resumeRun,
   resumeRunWithQualityDebt,
 } from "@/platform/desktopTransport";
-import { availableRunActions, formatRunStatus, isRecoverableStatus, type RunActionOption } from "./panelModel";
+import {
+  availableRunActions,
+  buildRunCommandRequest,
+  formatRunStatus,
+  isRecoverableStatus,
+  type RunActionOption,
+} from "./panelModel";
 
 interface RunRecoveryTabProps {
   novelId: string;
@@ -24,6 +30,9 @@ interface RunRecoveryTabProps {
 function newCommandId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
+
+/** 写进运行记录的恢复原因，便于之后回看这一步是带着质量提醒继续的。 */
+const QUALITY_DEBT_REASON = "章节工作台里确认带质量提醒继续";
 
 /**
  * 「运行与恢复」：只展示**当前章节**的 Run，动作严格映射到真实 Director 命令。
@@ -61,42 +70,30 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
   const actionMutation = useMutation({
     mutationFn: async (action: RunActionOption) => {
       if (!latest) throw new Error("还没有可操作的运行。");
-      const commandId = newCommandId(`chapter-workbench-${action.key}`);
-      const expectedVersion = detailQuery.data?.controlVersion ?? undefined;
+      // 参数一律由 panelModel 派生，这里只负责把它交给对应的命令，不重复手写参数。
+      const request = buildRunCommandRequest(action, {
+        runId: latest.id,
+        commandId: newCommandId(`chapter-workbench-${action.key}`),
+        controlVersion: detailQuery.data?.controlVersion,
+        candidate: detailQuery.data?.latestCandidate ?? null,
+        qualityDebtReason: QUALITY_DEBT_REASON,
+      });
 
-      switch (action.command) {
+      switch (request.command) {
         case "approve_run":
-          return approveRun({ runId: latest.id, commandId, expectedVersion });
+          return approveRun(request.payload);
         case "reject_run":
-          return rejectRun({ runId: latest.id, commandId, expectedVersion });
+          return rejectRun(request.payload);
         case "regenerate_run":
-          return regenerateRun({ runId: latest.id, commandId, expectedVersion });
-        case "confirm_candidate_after_edit_run": {
-          const candidate = detailQuery.data?.latestCandidate;
-          if (!candidate?.id || !candidate.contentSha256 || !candidate.content) {
-            throw new Error("候选正文还没准备好，请刷新后再确认。");
-          }
-          return confirmCandidateAfterEdit({
-            runId: latest.id,
-            commandId,
-            expectedVersion,
-            baseCandidateId: candidate.id,
-            baseContentSha256: candidate.contentSha256,
-            content: candidate.content,
-          });
-        }
+          return regenerateRun(request.payload);
+        case "confirm_candidate_after_edit_run":
+          return confirmCandidateAfterEdit(request.payload);
         case "resume_run":
-          return resumeRun({ runId: latest.id, commandId, acceptCandidate: false });
+          return resumeRun(request.payload);
         case "resume_run_with_quality_debt":
-          return resumeRunWithQualityDebt({
-            runId: latest.id,
-            commandId,
-            reason: "章节工作台里确认带质量提醒继续",
-          });
+          return resumeRunWithQualityDebt(request.payload);
         case "cancel_run":
-          return cancelRun({ runId: latest.id, commandId });
-        default:
-          throw new Error("这个动作暂时不能在章节工作台执行。");
+          return cancelRun(request.payload);
       }
     },
     onSuccess: () => {

@@ -29,6 +29,7 @@
   "scripts": {
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test types/**/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"
   },

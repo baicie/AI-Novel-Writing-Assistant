@@ -37,6 +37,72 @@ export function insertChapterContinuation(content: string, offset: number, inser
   return text.slice(0, offset) + normalizeChapterText(insertion) + text.slice(offset);
 }
 
+/**
+ * Chunk ids and boundaries must match whatever produced the candidate, because
+ * `applySelectedChapterEditorDiff` rejects chunks that do not rebuild both texts
+ * exactly. Cloud and desktop therefore share this one implementation instead of
+ * each carrying its own differ.
+ */
+export function buildChapterEditorDiffChunks(original: string, rewritten: string): ChapterEditorDiffChunk[] {
+  const source = tokenizeForDiff(original);
+  const target = tokenizeForDiff(rewritten);
+  const sourceLength = source.length;
+  const targetLength = target.length;
+  const lcs: number[][] = Array.from({ length: sourceLength + 1 }, () => Array<number>(targetLength + 1).fill(0));
+
+  for (let sourceIndex = sourceLength - 1; sourceIndex >= 0; sourceIndex -= 1) {
+    for (let targetIndex = targetLength - 1; targetIndex >= 0; targetIndex -= 1) {
+      lcs[sourceIndex]![targetIndex] = source[sourceIndex] === target[targetIndex]
+        ? lcs[sourceIndex + 1]![targetIndex + 1]! + 1
+        : Math.max(lcs[sourceIndex + 1]![targetIndex]!, lcs[sourceIndex]![targetIndex + 1]!);
+    }
+  }
+
+  const chunks: ChapterEditorDiffChunk[] = [];
+  let sourceIndex = 0;
+  let targetIndex = 0;
+
+  while (sourceIndex < sourceLength && targetIndex < targetLength) {
+    if (source[sourceIndex] === target[targetIndex]) {
+      pushDiffChunk(chunks, "equal", source[sourceIndex]!);
+      sourceIndex += 1;
+      targetIndex += 1;
+      continue;
+    }
+    if (lcs[sourceIndex + 1]![targetIndex]! >= lcs[sourceIndex]![targetIndex + 1]!) {
+      pushDiffChunk(chunks, "delete", source[sourceIndex]!);
+      sourceIndex += 1;
+      continue;
+    }
+    pushDiffChunk(chunks, "insert", target[targetIndex]!);
+    targetIndex += 1;
+  }
+  while (sourceIndex < sourceLength) {
+    pushDiffChunk(chunks, "delete", source[sourceIndex]!);
+    sourceIndex += 1;
+  }
+  while (targetIndex < targetLength) {
+    pushDiffChunk(chunks, "insert", target[targetIndex]!);
+    targetIndex += 1;
+  }
+  return chunks;
+}
+
+/** Split on CJK characters, words, whitespace runs and punctuation so Chinese prose diffs per character. */
+function tokenizeForDiff(text: string): string[] {
+  return normalizeChapterText(text).match(/[\u4e00-\u9fff]|[A-Za-z0-9_]+|\s+|[^\sA-Za-z0-9_\u4e00-\u9fff]/g) ?? [];
+}
+
+function pushDiffChunk(chunks: ChapterEditorDiffChunk[], type: ChapterEditorDiffChunk["type"], text: string): void {
+  if (!text) return;
+  const last = chunks[chunks.length - 1];
+  if (last && last.type === type) {
+    last.text += text;
+    return;
+  }
+  chunks.push({ id: `chunk-${chunks.length + 1}`, type, text });
+}
+
 export interface ChapterEditorDiffChange {
   id: string;
   kind: "insert" | "delete" | "replace";

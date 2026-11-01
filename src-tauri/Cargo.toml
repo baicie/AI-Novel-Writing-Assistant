@@ -19,6 +19,7 @@ novel-context.workspace = true
 novel-domain.workspace = true
 novel-llm.workspace = true
 novel-platform = { workspace = true, features = ["os-keychain"] }
+novel-prompt.workspace = true
 novel-storage-sqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

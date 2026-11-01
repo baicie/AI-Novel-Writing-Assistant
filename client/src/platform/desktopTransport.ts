@@ -582,6 +582,44 @@ export function getChapterEditorWorkspace(input: {
   return invoke("get_chapter_editor_workspace", input);
 }
 
+/** 内核只回候选文本：候选 id 与 diff 由共享实现在前端生成，两边不会产生对不上的分片。 */
+export interface ChapterSelectionRewriteCandidate {
+  label: string;
+  content: string;
+  summary?: string;
+  rationale?: string;
+  riskNotes: string[];
+  semanticTags: string[];
+}
+
+export interface ChapterSelectionRewriteView {
+  candidates: ChapterSelectionRewriteCandidate[];
+  macroAlignmentNote?: string;
+}
+
+/**
+ * 选区改写：桌面端的局部改写走这一条命令，不建 Run、不写候选表、不动正文。
+ * 坐标用 UTF-16 偏移，和编辑器选区同一套口径；内核会校验片段仍与正文对得上。
+ */
+export function rewriteChapterSelection(input: {
+  requestId: string;
+  novelId: string;
+  chapterId: string;
+  selectionFrom: number;
+  selectionTo: number;
+  selectedText: string;
+  contentSnapshot: string;
+  operationLabel: string;
+  scopeLabel: string;
+  instruction?: string;
+  beforeContext: string;
+  afterContext: string;
+  chapterTitle: string;
+  model?: string;
+}): Promise<ChapterSelectionRewriteView> {
+  return invoke("rewrite_chapter_selection", { request: input });
+}
+
 export function updateChapterMeta(input: {
   novelId: string;
   chapterId: string;

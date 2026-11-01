@@ -23,7 +23,7 @@ import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
 import ChapterRightPanel from "./rightPanel/ChapterRightPanel";
 import { readStoredPanelTab, storePanelTab, type PanelTab } from "./rightPanel/panelModel";
-import { isSaveShortcut } from "./navigation/chapterNavigatorModel";
+import { hasPendingCandidate, isSaveShortcut, shouldBlockChapterSwitch } from "./navigation/chapterNavigatorModel";
 import ChapterEditorSidebar from "./ChapterEditorSidebar";
 import ChapterVersionDrawer from "./ChapterVersionDrawer";
 import ChapterTextEditor from "./ChapterTextEditor";
@@ -176,6 +176,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     () => session.candidates?.find((candidate) => candidate.id === session.activeCandidateId) ?? session.candidates?.[0] ?? null,
     [session.activeCandidateId, session.candidates],
   );
+  // 候选稿待确认：切章或离开正文编辑都会丢弃它，导航与离开守卫共用这一个判定。
+  const isCandidatePending = useMemo(() => hasPendingCandidate(session), [session]);
   const selectedDiagnosticCard = useMemo(
     () => workspace?.diagnosticCards.find((card) => card.id === selectedDiagnosticId) ?? null,
     [selectedDiagnosticId, workspace],
@@ -209,7 +211,16 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   };
 
   const leaveEditor = (action?: () => void) => {
-    if (isDirty && !window.confirm("本章还有未保存的修改，离开后仍可从草稿恢复。要离开正文编辑吗？")) {
+    const blocked = shouldBlockChapterSwitch(
+      {
+        hasUnsavedContent: isDirty,
+        isDraftWriteBusy,
+        hasPendingCandidate: isCandidatePending,
+      },
+      (message) => window.confirm(message),
+      "leave_editor",
+    );
+    if (blocked) {
       return;
     }
     action?.();
@@ -250,6 +261,10 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       toast.error(error instanceof Error ? error.message : "章节保存失败。");
     },
   });
+
+  // 正文写入还没落地：保存进行中，或本地草稿写入失败。
+  // 切章、离开正文编辑与载入版本三个出口共用这一个判定。
+  const isDraftWriteBusy = saveMutation.isPending || Boolean(draft.storageError);
 
   useEffect(() => {
     const handleSaveShortcut = (event: KeyboardEvent) => {
@@ -710,7 +725,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
           onSelectChapter={onSelectChapter}
           runAttention={runAttention}
           onOpenRunTab={() => changeRightTab("run")}
-          isBusy={saveMutation.isPending || Boolean(draft.storageError)}
+          isBusy={isDraftWriteBusy}
+          hasPendingCandidate={isCandidatePending}
           workspace={workspace}
           workspaceStatus={workspaceStatus}
           wordCount={wordCount}
@@ -842,6 +858,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         onOpenChange={setIsVersionDrawerOpen}
         currentContent={contentDraft}
         isDirty={isDirty}
+        isDraftWriteBusy={isDraftWriteBusy}
+        hasPendingCandidate={isCandidatePending}
         onLoadContent={handleLoadSnapshotContent}
       />
     </div>

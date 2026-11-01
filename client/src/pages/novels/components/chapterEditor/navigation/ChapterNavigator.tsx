@@ -19,6 +19,8 @@ interface ChapterNavigatorProps {
   isDirty?: boolean;
   /** 保存中或本地草稿异常时也按「需要确认」处理，避免切换打断写入。 */
   isBusy?: boolean;
+  /** AI 候选稿已生成但还没有采用或放弃；切章会丢弃它，必须先确认。 */
+  hasPendingCandidate?: boolean;
   runAttention?: Record<string, ChapterRunAttention>;
   onOpenRunTab?: () => void;
   onSelectChapter: (chapterId: string) => void;
@@ -35,6 +37,7 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
     currentChapterId,
     isDirty = false,
     isBusy = false,
+    hasPendingCandidate = false,
     runAttention = {},
     onOpenRunTab,
     onSelectChapter,
@@ -48,8 +51,13 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
   const navigateTo = useCallback(
     (targetChapterId: string, openRunTab: boolean) => {
       const intent = chapterNavigationIntent(targetChapterId, currentChapterId, openRunTab);
-      if (intent.requiresSwitchGuard && shouldBlockChapterSwitch(isDirty || isBusy, (message) => window.confirm(message))) {
-        // 用户取消：章节、页签、草稿、选择全部保持不变。
+      const guardState = {
+        hasUnsavedContent: isDirty,
+        isDraftWriteBusy: isBusy,
+        hasPendingCandidate,
+      };
+      if (intent.requiresSwitchGuard && shouldBlockChapterSwitch(guardState, (message) => window.confirm(message))) {
+        // 作者取消：章节、页签、草稿、选择全部保持不变。
         return;
       }
       if (intent.requiresSwitchGuard) {
@@ -59,7 +67,7 @@ export default function ChapterNavigator(props: ChapterNavigatorProps) {
         onOpenRunTab?.();
       }
     },
-    [currentChapterId, isBusy, isDirty, onOpenRunTab, onSelectChapter],
+    [currentChapterId, hasPendingCandidate, isBusy, isDirty, onOpenRunTab, onSelectChapter],
   );
 
   // 键盘导航：Alt+←/→ 切到上一章/下一章，和按钮走同一套保护逻辑。

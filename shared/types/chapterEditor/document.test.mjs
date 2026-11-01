@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applySelectedChapterEditorDiff,
+  buildChapterEditorDiffChunks,
   chapterParagraphs,
   groupChapterEditorDiffChanges,
   insertChapterContinuation,
@@ -51,4 +52,40 @@ test("chapter diff groups replacements so partial acceptance cannot duplicate so
   assert.equal(applySelectedChapterEditorDiff("她抬头看向门口。", candidate, chunks, new Set()), "她抬头看向门口。");
   assert.equal(applySelectedChapterEditorDiff("她抬头看向门口。", candidate, chunks, new Set(["change-1"])), "她抬头望向漆黑的门口。");
   assert.equal(applySelectedChapterEditorDiff("她抬头看向门口。", candidate, chunks, new Set(["change-2"])), "她抬头看向门口。\n");
+});
+
+test("built diff chunks always satisfy the apply path's reconstruction check", () => {
+  // buildChapterEditorDiffChunks 的产物必须能被 applySelectedChapterEditorDiff 接受：
+  // 这两个函数一个在生成侧、一个在采纳侧，分片口径不一致会让作者采纳时直接报错。
+  const cases = [
+    ["她抬头看向门口。", "她抬头望向漆黑的门口。"],
+    ["", "全新的一段正文"],
+    ["要删掉的旧段落", ""],
+    ["完全一致的文本", "完全一致的文本"],
+    ["第一段\n\n第二段", "第一段\n\n改写后的第二段\n\n新增第三段"],
+    ["Mixed 中英 text 42", "Mixed 中英文 text 7"],
+  ];
+  for (const [original, candidate] of cases) {
+    const chunks = buildChapterEditorDiffChunks(original, candidate);
+    assert.equal(
+      chunks.filter((chunk) => chunk.type !== "insert").map((chunk) => chunk.text).join(""),
+      original,
+      `删除+相同必须还原原文：${JSON.stringify(original)}`,
+    );
+    assert.equal(
+      chunks.filter((chunk) => chunk.type !== "delete").map((chunk) => chunk.text).join(""),
+      candidate,
+      `插入+相同必须还原候选：${JSON.stringify(candidate)}`,
+    );
+    // 全不选 = 原文，全选 = 候选。这是作者在 Diff 面板里的两个端点。
+    assert.equal(applySelectedChapterEditorDiff(original, candidate, chunks, new Set()), original);
+    const allChanges = new Set(groupChapterEditorDiffChanges(chunks).map((change) => change.id));
+    assert.equal(applySelectedChapterEditorDiff(original, candidate, chunks, allChanges), candidate);
+  }
+});
+
+test("diff chunk ids are unique so partial acceptance can address each change", () => {
+  const chunks = buildChapterEditorDiffChunks("她抬头看向门口。", "她抬头望向漆黑的门口。\n");
+  assert.equal(new Set(chunks.map((chunk) => chunk.id)).size, chunks.length, "分片 id 不能重复");
+  assert.ok(chunks.every((chunk) => ["equal", "insert", "delete"].includes(chunk.type)));
 });
