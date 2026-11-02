@@ -30,7 +30,7 @@ import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
 import ChapterRightPanel from "./rightPanel/ChapterRightPanel";
 import { readStoredPanelTab, storePanelTab, type PanelTab } from "./rightPanel/panelModel";
-import { hasPendingCandidate, isSaveShortcut, shouldBlockChapterSwitch } from "./navigation/chapterNavigatorModel";
+import { hasPendingCandidate, isResultForCurrentChapter, isSaveShortcut, shouldBlockChapterSwitch } from "./navigation/chapterNavigatorModel";
 import ChapterEditorSidebar from "./ChapterEditorSidebar";
 import ChapterVersionDrawer from "./ChapterVersionDrawer";
 import ChapterTextEditor from "./ChapterTextEditor";
@@ -127,6 +127,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const queryClient = useQueryClient();
   const lastPreviewRequestRef = useRef<ReturnType<typeof buildAiRevisionRequest> | null>(null);
   const lastContinuationRequestRef = useRef<ChapterEditorCursorContinuationRequest | null>(null);
+  // 发起请求时所在的章节：晚到的响应必须与当前章节一致才能写入会话。
+  const previewChapterRef = useRef<string | null>(null);
+  const continuationChapterRef = useRef<string | null>(null);
   const qualityDebtDetails = useMemo(
     () => readChapterQualityDebtDetails(chapter?.riskFlags),
     [chapter?.riskFlags],
@@ -175,6 +178,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     setSavedOfficialVersion(chapter?.officialVersion ?? 0);
     lastPreviewRequestRef.current = null;
     lastContinuationRequestRef.current = null;
+    previewChapterRef.current = null;
+    continuationChapterRef.current = null;
   }, [chapter?.id]);
 
   useEffect(() => {
@@ -345,6 +350,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     },
     onMutate: (request) => {
       lastPreviewRequestRef.current = request;
+      // 记住发起时的章节：响应回来时章节可能已经切走，晚到的结果只能丢弃。
+      previewChapterRef.current = chapter?.id ?? null;
       const label = request.source === "freeform"
         ? (request.scope === "chapter" ? "正在生成整章自然语言修正方案" : "正在按你的意见改写片段")
         : request.presetOperation
@@ -369,6 +376,10 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       }));
     },
     onSuccess: (response: unknown) => {
+      // 慢响应可能在作者切章之后才回来：不能把上一章的候选写进当前章的编辑器。
+      if (!isResultForCurrentChapter(previewChapterRef.current, chapter?.id)) {
+        return;
+      }
       // 【类型处理】处理来自本地或云 API 的响应
       const data = (response as any)?.data;
       if (!data) {
@@ -397,6 +408,10 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       });
     },
     onError: (error) => {
+      // 上一章的失败同样不能出现在当前章的错误面板里。
+      if (!isResultForCurrentChapter(previewChapterRef.current, chapter?.id)) {
+        return;
+      }
       // 失败原因决定这条错误能不能说成「一定没扣费」：结果未知要单独呈现。
       const outcome = rewriteBillingOutcome(error);
       setSession((current) => ({
@@ -421,6 +436,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
     },
     onMutate: (request) => {
       lastContinuationRequestRef.current = request;
+      // 续写同样记录发起章节：晚到的候选不能落到别的章。
+      continuationChapterRef.current = chapter?.id ?? null;
       setSession((current) => ({
         ...current,
         mode: "continuation",
@@ -439,6 +456,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       }));
     },
     onSuccess: (response: unknown) => {
+      if (!isResultForCurrentChapter(continuationChapterRef.current, chapter?.id)) {
+        return;
+      }
       // 【类型处理】处理来自本地或云 API 的响应
       const data = (response as any)?.data;
       if (!data) {
@@ -461,6 +481,9 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       setCursorToolbarPosition(null);
     },
     onError: (error) => {
+      if (!isResultForCurrentChapter(continuationChapterRef.current, chapter?.id)) {
+        return;
+      }
       setSession((current) => ({
         ...current,
         status: "error",

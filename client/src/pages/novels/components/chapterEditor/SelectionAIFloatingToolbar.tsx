@@ -31,12 +31,14 @@ export default function SelectionAIFloatingToolbar(props: SelectionAIFloatingToo
 
   return (
     <div
+      data-testid="selection-ai-toolbar"
       className="absolute z-20 w-[320px] rounded-2xl border border-border/70 bg-background/95 p-2 shadow-xl backdrop-blur"
       style={{ top: position.top, left: position.left }}
     >
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
+          data-testid="selection-ai-polish"
           disabled={disabled}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => onRunOperation("polish")}

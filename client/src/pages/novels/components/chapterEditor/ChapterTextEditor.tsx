@@ -119,7 +119,7 @@ function renderLoadingPreview(
 ) {
   const isInsertion = preview.from === preview.to && preview.originalText.length === 0;
   return (
-    <div ref={surfaceRef} className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
+    <div ref={surfaceRef} data-testid="chapter-editor-body" className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
       <TextBlock text={previewContent.before} className="text-foreground" />
 
       <div className="space-y-3">
@@ -155,7 +155,7 @@ function renderBlockPreview(
     // The review panel surfaces the validation error; keep the full candidate visible as context.
   }
   return (
-    <div ref={surfaceRef} className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
+    <div ref={surfaceRef} data-testid="chapter-editor-body" className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
       <TextBlock text={previewContent.before} className="text-foreground" />
 
       <div className="space-y-3">
@@ -413,6 +413,7 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
           {preview?.mode === "inline" && previewContent ? (
             <div
               ref={surfaceRef}
+              data-testid="chapter-editor-body"
               className={`${INLINE_PREVIEW_BODY_CLASS_NAME} ${SURFACE_INNER_PADDING_CLASS_NAME} min-h-full rounded-2xl bg-muted/15 p-4 text-foreground`}
             >
               {previewContent.before}
@@ -426,14 +427,16 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
           ) : readOnly ? (
             <div
               ref={surfaceRef}
+              data-testid="chapter-editor-body"
               className={`min-h-full rounded-2xl bg-muted/10 p-4 text-foreground ${SURFACE_INNER_PADDING_CLASS_NAME}`}
             >
               <TextBlock text={normalizedContent} />
             </div>
           ) : editor ? (
             <Plate editor={editor} onSelectionChange={updateSelection} onValueChange={handleValueChange}>
-              <div ref={surfaceRef} className="min-h-full">
+              <div ref={surfaceRef} className="min-h-full" data-testid="chapter-editor-body">
                 <PlateContent
+                  data-testid="chapter-editor-content"
                   className={`${EDITOR_BODY_CLASS_NAME} ${SURFACE_INNER_PADDING_CLASS_NAME} min-h-full rounded-2xl bg-muted/10 p-4 outline-none [&_p]:text-foreground`}
                   onFocus={() => {
                     isUserEditingRef.current = true;

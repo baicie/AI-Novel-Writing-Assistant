@@ -28,6 +28,8 @@
     "allow-get-chapter-draft",
     "allow-list-chapter-drafts",
     "allow-get-chapter-editor-workspace",
+    "allow-rewrite-chapter-selection",
+    "allow-list-pending-selection-rewrites",
     "allow-delete-chapter",
     "allow-update-chapter-meta",
     "allow-export-novel",

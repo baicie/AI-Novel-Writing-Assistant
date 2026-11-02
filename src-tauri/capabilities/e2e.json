@@ -26,6 +26,8 @@
     "allow-get-model-setup",
     "allow-save-model-setup",
     "allow-has-api-key",
-    "allow-test-model-setup"
+    "allow-test-model-setup",
+    "allow-rewrite-chapter-selection",
+    "allow-list-pending-selection-rewrites"
   ]
 }

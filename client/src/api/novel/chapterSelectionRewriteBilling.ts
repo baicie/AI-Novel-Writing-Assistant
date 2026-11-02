@@ -60,11 +60,15 @@ export function isRewriteInFlight(pendingCount: number): boolean {
 /**
  * 失败文案必须带上计费语义：结果未知时不能只说「失败，请重试」。
  * 这里不改写内核给出的具体原因，只补上作者需要知道的后果。
+ *
+ * Tauri 抛出的错误是普通对象（`{ code, message, retryable }`），不是 `Error` 实例；
+ * 两种形状都要读到真实原因，否则界面只剩一句兜底文案，排查时看不到内核说了什么。
  */
 export function rewriteFailureMessage(error: unknown, outcome: RewriteBillingOutcome): string {
-  const base = error instanceof Error && error.message.trim().length > 0
-    ? error.message
-    : "AI 修正失败。";
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const fromRecord = typeof record.message === "string" ? record.message.trim() : "";
+  const fromError = error instanceof Error ? error.message.trim() : "";
+  const base = fromRecord || fromError || "AI 修正失败。";
   if (outcome === "unknown") {
     return `${base} 这次请求可能已经发送到模型服务，结果无法确认；确认后再决定是否重新生成。`;
   }

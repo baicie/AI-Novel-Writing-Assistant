@@ -12,6 +12,7 @@ export const config = {
     "./author-journey.e2e.js",
     "./p17-workbench.e2e.js",
     "./p17-cancel-navigation.e2e.js",
+    "./p17-selection-rewrite.e2e.js",
   ],
   maxInstances: 1,
   logLevel: "warn",
@@ -26,9 +27,11 @@ export const config = {
     {
       browserName: "tauri",
       "tauri:options": {
+        // 默认优先用带 e2e 特性的产物：普通产物没有注册 wdio 插件，
+        // 用它会在 onPrepare 阶段等待 WebDriver 直到超时。
         application:
           process.env.P16_E2E_APP ??
-          "./target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop",
+          "./target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio E2E.app/Contents/MacOS/novel-desktop",
       },
     },
   ],

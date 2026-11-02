@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   requiresRetryConfirmation,
   rewriteBillingOutcome,
+  rewriteFailureMessage,
   rewriteRetryWarning,
 } from "./chapterSelectionRewriteBilling.ts";
 
@@ -34,6 +35,20 @@ test("未知错误不能默认成免费重试", () => {
   assert.equal(rewriteBillingOutcome(undefined), "billed_failure");
   assert.equal(rewriteBillingOutcome("plain string"), "billed_failure");
   assert.equal(rewriteBillingOutcome({ message: "no code" }), "billed_failure");
+});
+
+test("Tauri 普通对象错误要读到真实原因，而不是只剩兜底文案", () => {
+  // Tauri invoke 拒绝时抛的是普通对象，不是 Error 实例。
+  const message = rewriteFailureMessage(
+    { code: "VALIDATION", message: "还没有填写模型密钥。" },
+    "never_sent",
+  );
+  assert.match(message, /还没有填写模型密钥/);
+  assert.doesNotMatch(message, /AI 修正失败/);
+  // Error 实例仍然按原消息展示。
+  assert.match(rewriteFailureMessage(new Error("网络断开"), "never_sent"), /网络断开/);
+  // 两者都没有时才用兜底文案。
+  assert.match(rewriteFailureMessage(null, "never_sent"), /AI 修正失败/);
 });
 
 test("重新生成必须经过明确确认的场景", () => {
