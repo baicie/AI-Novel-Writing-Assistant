@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ChapterEditorDiagnosticCard,
@@ -51,6 +51,11 @@ import {
   getParagraphWindow,
   normalizeChapterContent,
   useChapterDraft,
+  buildEditPositionRecord,
+  readEditPosition,
+  resolveEditPositionRestore,
+  writeEditPosition,
+  writeRecentEditTarget,
 } from "./document";
 
 const EMPTY_SESSION: ChapterEditorSessionState = {
@@ -703,9 +708,47 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const canRunSelectionRevision = Boolean(getSelectionTarget());
   const headerSaveLabel = getSaveStatusLabel(saveStatus, isDirty);
   const gridClassName = "xl:grid-cols-[320px_minmax(0,1fr)_400px]";
-  const storage = typeof window === "undefined" ? null : window.sessionStorage;
+  // 页签偏好按书持久化：重启桌面版后仍停在上次的页签上。
+  const storage = typeof window === "undefined" ? null : window.localStorage;
   const [rightTab, setRightTab] = useState<PanelTab>(() => readStoredPanelTab(novelId, storage));
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  // 编辑位置：从偏好缓存读取上次离开时的光标与滚动位置，文档恢复完成后再应用。
+  const [restorePosition, setRestorePosition] = useState<{ cursorOffset: number; scrollTop: number } | null>(null);
+  useEffect(() => {
+    const current = chapter;
+    if (!current?.id) {
+      setRestorePosition(null);
+      return;
+    }
+    const record = readEditPosition(novelId, typeof window === "undefined" ? null : window.localStorage);
+    setRestorePosition(
+      resolveEditPositionRestore({
+        record,
+        chapterId: current.id,
+        officialVersion: current.officialVersion ?? 0,
+        // 正文恢复完成后编辑器才会应用；这里用初始正文长度做第一道校验。
+        contentLength: normalizeChapterContent(current.content ?? "").length,
+      }),
+    );
+  }, [chapter, novelId]);
+  // 位置上报只依赖章节身份；正文长度通过 ref 读取，避免每次输入都重建回调
+  // 进而让编辑器里的位置监听反复解绑重绑。
+  const contentLengthRef = useRef(0);
+  contentLengthRef.current = normalizeChapterContent(contentDraft).length;
+  const rememberPosition = useCallback((position: { cursorOffset: number; scrollTop: number }) => {
+    if (!chapter?.id) return;
+    writeRecentEditTarget({ novelId, chapterId: chapter.id, updatedAt: Date.now() });
+    writeEditPosition(
+      buildEditPositionRecord({
+        novelId,
+        chapterId: chapter.id,
+        cursorOffset: position.cursorOffset,
+        scrollTop: position.scrollTop,
+        officialVersion: chapter.officialVersion ?? 0,
+        contentLength: contentLengthRef.current,
+      }),
+    );
+  }, [chapter?.id, chapter?.officialVersion, novelId]);
   const saveShortcutRef = useRef<() => void>(() => {});
   saveShortcutRef.current = () => {
     if (!chapter || !isDirty || saveMutation.isPending) return;
@@ -849,6 +892,8 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
                 setSelectedDiagnosticId(null);
               }
             }}
+            restorePosition={restorePosition}
+            onPositionChange={rememberPosition}
             preview={previewPayload}
             focusRange={session.status === "idle"
               ? selection

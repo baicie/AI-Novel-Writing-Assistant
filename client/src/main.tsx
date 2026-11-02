@@ -43,6 +43,8 @@ if (typeof startRoute === "string" && startRoute.startsWith("/") && window.locat
   window.location.hash = `#${startRoute}`;
 }
 
+// 不在这里自动跳到上次章节：应用启动应停在首页，
+// 由首页的「继续上次写作」入口把作者带回上次的位置，避免启动就被带走。
 if (hasDesktopShell()) {
   const runtimeConfig = (window as Window & { __AI_NOVEL_RUNTIME__?: unknown }).__AI_NOVEL_RUNTIME__;
   void reportClientRuntime({

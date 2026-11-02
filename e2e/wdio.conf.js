@@ -13,8 +13,13 @@ export const config = {
     "./p17-workbench.e2e.js",
     "./p17-cancel-navigation.e2e.js",
     "./p17-selection-rewrite.e2e.js",
+    "./p17-edit-position.e2e.js",
   ],
+  // 这些用例共用同一份本地数据目录与同一个应用窗口：
+  // 并行跑会让两个实例争抢 SQLite 与窗口，产生与代码无关的失败。
+  // wdio 9 只认 root 级的 maxInstances，capability 内的同名字段不会限制 worker 数。
   maxInstances: 1,
+  maxInstancesPerCapability: 1,
   logLevel: "warn",
   waitforTimeout: 15000,
   connectionRetryTimeout: 120000,

@@ -169,12 +169,7 @@ describe("选区改写的完整作者旅程（桌面原生）", () => {
     secondChapterId = seeded.second;
 
     // 同一份应用数据会跨运行复用：其它 spec 可能留下指向死端口的 writer 绑定。
-    // 先清掉这类残留，再让 save_model_setup 把来源、模型与 writer 绑定一起写回 mock。
-    const bindings = await invoke("list_model_bindings").catch(() => []);
-    const staleWriter = (bindings || []).find((item) => item.taskType === "writer" && item.providerId !== "default");
-    if (staleWriter) {
-      await invoke("delete_provider_profile", { providerId: staleWriter.providerId, force: true }).catch(() => undefined);
-    }
+    // 直接写模型设置：它会把来源、模型与 writer 绑定一起登记到注册表。
     await invoke("save_model_setup", {
       request: {
         endpoint: baseUrl,
@@ -184,12 +179,46 @@ describe("选区改写的完整作者旅程（桌面原生）", () => {
       },
     });
 
+    // 注册表同步是尽力而为：绑定缺失或被别的 spec 改走时，这里显式补写。
+    // 绑定要求来源与模型都已经在注册表里，所以顺序是先确认模型、再写绑定。
+    const bindings = await invoke("list_model_bindings").catch(() => []);
+    const writerBinding = (bindings || []).find((item) => item.taskType === "writer");
+    if (!writerBinding || writerBinding.providerId !== "default" || writerBinding.modelId !== "e2e-mock-model") {
+      await invoke("upsert_provider_model", {
+        request: {
+          providerId: "default",
+          modelId: "e2e-mock-model",
+          displayName: "E2E Mock",
+          expectedRevision: null,
+        },
+      }).catch(() => undefined);
+      await invoke("upsert_model_binding", {
+        request: {
+          taskType: "writer",
+          providerId: "default",
+          modelId: "e2e-mock-model",
+          reasoningEffort: null,
+          expectedRevision: null,
+        },
+      });
+    }
+
+    // 前面的 spec 可能把 writer 绑定指向别处：这里确认它真的落在本用例的 mock 上。
+    const route = await invoke("get_effective_model_route", { taskType: "writer" });
+    if (!route || route.endpoint !== baseUrl) {
+      throw new Error(`writer 路由没有指向 mock：${JSON.stringify(route)}；期望 ${baseUrl}`);
+    }
+
     // 清掉上次运行留下的请求记录，保证请求次数断言可重复。
     mock.state.requests.length = 0;
   });
 
-  after(() => {
+  after(async () => {
     mock.server?.close();
+    // 清掉本用例写入的「最近写作」记录：同一进程里的后续 spec 不该被带到这一章。
+    await browser.execute(
+      "(() => { try { Object.keys(window.localStorage).filter((key) => key.indexOf('ai-novel:edit-position:') === 0).forEach((key) => window.localStorage.removeItem(key)); } catch {} })()",
+    ).catch(() => undefined);
   });
 
   it("生成候选不改正文，模型请求带上选区与上下文", async () => {
