@@ -29,6 +29,26 @@
 - 正文保存入口同时支持按钮和 `Ctrl/Cmd+S`；快捷保存只提交当前草稿，不触发 AI 诊断，保存成功后应刷新本章版本查询，确保刚创建的保护快照马上可见。
 - 从历史版本载入正文后，首次保存必须先为当前已保存正文创建手动保护快照，再写入载入内容；普通编辑保存不创建额外快照，避免版本回看操作造成当前正文不可追溯。
 
+### 选区改写的计费状态（P17.2）
+
+选区改写不建 Run、不写候选表、不动正文，因此它不能借用 RunContract 的计费语义。桌面端用 `chapter_selection_rewrite_attempt` 表记录每次请求走到哪一步：
+
+| 状态 | 含义 | 能否免确认重试 |
+| --- | --- | --- |
+| `not_sent` | 密钥、校验或路由在发送前拒绝 | 可以 |
+| `sending` | 已登记、请求进行中；进程崩溃会停在这里 | 不可以 |
+| `failed` | 已发出并拿到明确失败，或模型返回了不可用结果 | 不可以，重试会再次计费 |
+| `unknown` | 超时、连接中断等无法确认结果的情况 | 不可以 |
+| `succeeded` | 已拿到候选 | 不需要 |
+
+规则：
+
+- 同一条 `requestId` 在 `sending` / `unknown` / `succeeded` 状态下再次进入会被拒为 `CONFLICT`，从源头阻止双击或界面重试造成重复计费。
+- 内核用 `AppErrorCode::MODEL_RESULT_UNKNOWN` 表达结果未知，前端只能据此判断「可能已计费」，不能靠错误文案猜测。
+- 重新生成前若存在未确认请求或上次结果是 `unknown`，必须先经过作者确认；提示文案要说明「可能已经发送、重新生成会再次调用模型」。
+- 未确认请求按 `novel_id + chapter_id` 隔离，不能跨章提示，也不能阻止其它章节继续写作。
+- 该表只存状态、时间与简短原因，不存正文、提示词、端点或凭据。
+
 ## Failure Modes
 
 - 只比较章节 ID：旧窗口会覆盖新正文。应使用 `expectedUpdatedAt` 并在冲突后保留本地草稿。
@@ -40,11 +60,15 @@
 - 把每个 diff token 都当成独立接受项：替换通常同时包含删除和新增，拆开接受会重复或残留原文。应先聚合为插入、删除或替换三个原子变更，再执行局部写回。
 - 把整本小说版本恢复当成本章撤销：会覆盖其他章节和规划。章节编辑器只允许查看本章版本并载入草稿，真正写入仍走带 `expectedUpdatedAt` 的章节保存链路。
 - 载入旧版本后直接覆盖当前正文：如果首次保存没有先保护当前内容，作者无法回到载入前的版本。应记录载入来源，并让首次保存先创建章节范围内的手动快照。
+- 把超时或连接中断描述成「失败，请重试」：请求可能已经到达模型服务，直接重试会重复计费。应标记为结果未知，并在重试前要求确认。
+- 用固定的二维 LCS 对比整章改写：长章节会耗尽内存或长时间阻塞编辑器。应先按码点裁掉公共前后缀，再在预算内做精确对比；超出预算时退化为段落级对齐或整段替换，并通过 `degraded` 明确告知作者，不能悄悄给出错位的细粒度对比。
 
 ## Related Modules
 
 - `client/src/pages/novels/components/chapterEditor/document/`
 - `client/src/pages/novels/components/chapterEditor/ChapterEditorShell.tsx`
+- `client/src/api/novel/chapterSelectionRewriteBilling.ts`（计费状态语义）
+- `crates/novel-storage-sqlite/src/selection_rewrite.rs`（请求尝试记录）
 - `server/src/services/novel/chapterEditor/context/`
 - `server/src/services/novel/novelCoreCrudService.ts`
 - `server/src/services/novel/director/runtime/DirectorWorkspaceAnalyzer.ts`

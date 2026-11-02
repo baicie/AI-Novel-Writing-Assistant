@@ -56,6 +56,9 @@ impl IntoResponse for HttpError {
                     novel_application::AppErrorCode::IntegrityError => {
                         StatusCode::INTERNAL_SERVER_ERROR
                     }
+                    // 结果未知不是普通失败：网关按 502 交给调用方显式处理，
+                    // 让它带着明确的错误码回到界面，而不是被当成可自动重试的 5xx。
+                    novel_application::AppErrorCode::ModelResultUnknown => StatusCode::BAD_GATEWAY,
                 };
                 (
                     status,

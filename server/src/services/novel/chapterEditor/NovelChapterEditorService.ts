@@ -26,7 +26,7 @@ import {
   chapterEditorContinuationPreviewPrompt,
   type ChapterEditorContinuationPromptInput,
 } from "../../../prompting/prompts/novel/chapterEditor/continuePreview.prompts";
-import { buildChapterEditorDiffChunks } from "./chapterEditorDiff";
+import { buildChapterEditorDiff, withDiffComplexityNote } from "./chapterEditorDiff";
 import { ChapterEditorWorkspaceService } from "./ChapterEditorWorkspaceService";
 import {
   buildCharacterStateSummary,
@@ -181,16 +181,23 @@ export class NovelChapterEditorService {
     });
 
     const candidates = dedupeCandidates(
-      result.output.candidates.slice(0, 3).map((candidate, index) => ({
-        id: randomUUID(),
-        label: candidate.label?.trim() || `方案 ${index + 1}`,
-        content: candidate.content.trim(),
-        summary: candidate.summary?.trim() || null,
-        rationale: candidate.rationale?.trim() || null,
-        riskNotes: candidate.riskNotes?.filter((item) => item.trim().length > 0) ?? [],
-        semanticTags: candidate.semanticTags?.filter((tag) => tag.trim().length > 0) ?? [],
-        diffChunks: buildChapterEditorDiffChunks(targetRange.text, candidate.content.trim()),
-      })),
+      result.output.candidates.slice(0, 3).map((candidate, index) => {
+        const content = candidate.content.trim();
+        const diff = buildChapterEditorDiff(targetRange.text, content);
+        return {
+          id: randomUUID(),
+          label: candidate.label?.trim() || `方案 ${index + 1}`,
+          content,
+          summary: candidate.summary?.trim() || null,
+          rationale: candidate.rationale?.trim() || null,
+          riskNotes: withDiffComplexityNote(
+            candidate.riskNotes?.filter((item) => item.trim().length > 0) ?? [],
+            diff.degraded,
+          ),
+          semanticTags: candidate.semanticTags?.filter((tag) => tag.trim().length > 0) ?? [],
+          diffChunks: diff.chunks,
+        };
+      }),
     );
 
     if (candidates.length < 2) {
@@ -286,7 +293,7 @@ export class NovelChapterEditorService {
         rationale: candidate.rationale?.trim() || null,
         riskNotes: candidate.riskNotes?.filter((item) => item.trim().length > 0) ?? [],
         semanticTags: candidate.semanticTags?.filter((tag) => tag.trim().length > 0) ?? [],
-        diffChunks: buildChapterEditorDiffChunks("", candidate.content.trim()),
+        diffChunks: buildChapterEditorDiff("", candidate.content.trim()).chunks,
       })),
     );
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ChapterEditorDiagnosticCard,
   ChapterEditorCursorContinuationRequest,
@@ -16,8 +16,15 @@ import {
 } from "@ai-novel/shared/types/chapterQualityLoop";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { createNovelSnapshot, previewChapterAiRevisionWithRouting, previewChapterCursorContinuationWithRouting, resolveChapterAuditIssue, reviewNovelChapter, updateNovelChapter } from "@/api/novel";
-import { queryKeys } from "@/api/queryKeys";
-import { Button } from "@/components/ui/button";
+import {
+  rewriteFailureMessage,
+  rewriteBillingOutcome,
+  rewriteRetryWarning,
+  requiresRetryConfirmation,
+  type RewriteBillingOutcome,
+} from "@/api/novel/chapterSelectionRewriteBilling";
+import { listPendingSelectionRewrites } from "@/platform/desktopTransport";
+import { queryKeys } from "@/api/queryKeys";import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { useLLMStore } from "@/store/llmStore";
 import ChapterEditorDirectorPanel from "./ChapterEditorDirectorPanel";
@@ -137,6 +144,15 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   const [isVersionDrawerOpen, setIsVersionDrawerOpen] = useState(false);
   const [loadedSnapshotId, setLoadedSnapshotId] = useState<string | null>(null);
   const [savedOfficialVersion, setSavedOfficialVersion] = useState(chapter?.officialVersion ?? 0);
+
+  // 本章仍处于「可能已计费、结果未确认」的改写：重新生成前要提示。
+  const pendingRewritesQuery = useQuery({
+    queryKey: queryKeys.novels.pendingSelectionRewrites(novelId, chapter?.id ?? ""),
+    queryFn: () => listPendingSelectionRewrites({ novelId, chapterId: chapter?.id ?? "" }),
+    enabled: Boolean(chapter?.id),
+    refetchOnWindowFocus: true,
+  });
+  const pendingRewriteCount = pendingRewritesQuery.data?.length ?? 0;
 
   const draft = useChapterDraft({
     novelId,
@@ -349,6 +365,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         candidates: [],
         activeCandidateId: null,
         errorMessage: undefined,
+        billingOutcome: undefined,
       }));
     },
     onSuccess: (response: unknown) => {
@@ -370,16 +387,28 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         activeCandidateId: data.activeCandidateId ?? data.candidates[0]?.id ?? null,
         requestLabel: current.requestLabel,
         errorMessage: undefined,
+        billingOutcome: undefined,
       }));
       setSelection(null);
       setSelectionToolbarPosition(null);
+      // 成功后把「待确认改写」刷新掉，避免下一次重新生成继续提示旧请求。
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.novels.pendingSelectionRewrites(novelId, chapter?.id ?? ""),
+      });
     },
     onError: (error) => {
+      // 失败原因决定这条错误能不能说成「一定没扣费」：结果未知要单独呈现。
+      const outcome = rewriteBillingOutcome(error);
       setSession((current) => ({
         ...current,
         status: "error",
-        errorMessage: error instanceof Error ? error.message : "AI 修正失败，请重试。",
+        errorMessage: rewriteFailureMessage(error, outcome),
+        billingOutcome: outcome,
       }));
+      // 未确认的记录此刻才落库，刷新后重新生成按钮才能给出准确提示。
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.novels.pendingSelectionRewrites(novelId, chapter?.id ?? ""),
+      });
     },
   });
 
@@ -565,6 +594,13 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
   };
 
   const handleRegenerate = () => {
+    // 上一次结果未知、可能已计费，或本章还有未确认的请求时，重新生成必须先确认；
+    // 不允许在作者不知情的情况下再发一次可能产生费用的请求。
+    if (requiresRetryConfirmation(session.billingOutcome ?? null, pendingRewriteCount > 0)) {
+      const warning = rewriteRetryWarning(session.billingOutcome ?? "unknown")
+        ?? rewriteRetryWarning("billed_failure");
+      if (warning && !window.confirm(warning)) return;
+    }
     if (session.mode === "continuation" && lastContinuationRequestRef.current) {
       continuationMutation.mutate(lastContinuationRequestRef.current);
       return;
@@ -706,6 +742,18 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
       ) : null}
       {isDirty && draft.localDraftStatus === "saved" ? (
         <p data-testid="chapter-local-draft-saved" className="shrink-0 text-xs text-muted-foreground">本地草稿已安全保存；正式正文尚未保存。</p>
+      ) : null}
+      {pendingRewriteCount > 0 ? (
+        <div
+          data-testid="chapter-selection-rewrite-unknown"
+          className="flex shrink-0 items-start gap-3 rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <span>
+            上一次选区改写没有拿到可确认的结果，可能已经发送到模型服务并产生费用。
+            重新生成会再次调用模型；如果只是想换一种改法，可以先确认模型服务状态，再决定是否重新生成。
+          </span>
+        </div>
       ) : null}
       <div className="flex shrink-0 items-center justify-end gap-2 xl:hidden">
         <button

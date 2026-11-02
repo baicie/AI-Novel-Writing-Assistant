@@ -29,6 +29,7 @@ mod native_tasks;
 mod ports;
 mod provider_service;
 mod runtime;
+mod selection_rewrite;
 mod services_chapter;
 mod services_integration_test;
 mod services_novel;
@@ -84,9 +85,10 @@ pub use provider_service::{
     CredentialVault, FrozenRoute, FrozenRouteStatus, FrozenStepRoute, GenerationTarget,
     LegacyModelTarget, PendingCredentialIntent, ProviderDraft, ProviderError, ProviderErrorCode,
     ProviderRegistry, ProviderService, ProviderView, ResolvedModelRoute, RouteSnapshotRows,
-    apply_route_to_run, resolve_generation_target,
+    allow_keyless, apply_route_to_run, ensure_credential, resolve_generation_target,
 };
 pub use runtime::{Runtime, RuntimeDeps};
+pub use selection_rewrite::{SelectionRewriteAttemptState, SelectionRewriteAttemptView};
 pub use setup::SetupService;
 pub use structured_memory::{
     NewStructuredFact, StructuredFactView, StructuredMemoryRepository, StructuredMemoryService,

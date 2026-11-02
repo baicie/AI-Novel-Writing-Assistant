@@ -11,7 +11,11 @@ import type {
   ChapterEditorOperation,
   ChapterEditorTargetRange,
 } from "@ai-novel/shared/types/novel";
-import { buildChapterEditorDiffChunks, normalizeChapterText } from "@ai-novel/shared/types/chapterEditor/document";
+import {
+  buildChapterEditorDiff,
+  normalizeChapterText,
+  withDiffComplexityNote,
+} from "@ai-novel/shared/types/chapterEditor/document";
 
 /** 面向作者的改写意图标签：进提示词，模型据此决定改法。 */
 export const REWRITE_OPERATION_LABELS: Record<ChapterEditorOperation, string> = {
@@ -130,15 +134,19 @@ export function toEditorCandidates(
     const content = normalizeChapterText(candidate.content).trim();
     if (content.length === 0 || seen.has(content)) continue;
     seen.add(content);
+    const diff = buildChapterEditorDiff(originalText, content);
     result.push({
       id: newId(),
       label: candidate.label?.trim() || `方案 ${result.length + 1}`,
       content,
       summary: candidate.summary?.trim() || null,
       rationale: candidate.rationale?.trim() || null,
-      riskNotes: (candidate.riskNotes ?? []).map((note) => note.trim()).filter((note) => note.length > 0),
+      riskNotes: withDiffComplexityNote(
+        (candidate.riskNotes ?? []).map((note) => note.trim()).filter((note) => note.length > 0),
+        diff.degraded,
+      ),
       semanticTags: (candidate.semanticTags ?? []).map((tag) => tag.trim()).filter((tag) => tag.length > 0),
-      diffChunks: buildChapterEditorDiffChunks(originalText, content),
+      diffChunks: diff.chunks,
     });
   }
   return result;

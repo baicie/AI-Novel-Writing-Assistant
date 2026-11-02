@@ -7,7 +7,9 @@ export type AppErrorCode =
   | "CANCELLED"
   | "MODEL_RATE_LIMIT"
   | "STORAGE_CORRUPT"
-  | "INTEGRITY_ERROR";
+  | "INTEGRITY_ERROR"
+  /** 请求可能已经到达模型服务，但没有拿到可确认的结果。 */
+  | "MODEL_RESULT_UNKNOWN";
 
 export interface AppError {
   code: AppErrorCode;
@@ -618,6 +620,24 @@ export function rewriteChapterSelection(input: {
   model?: string;
 }): Promise<ChapterSelectionRewriteView> {
   return invoke("rewrite_chapter_selection", { request: input });
+}
+
+/** 可能已计费、结果未确认的改写请求：界面在重新生成前要提示。 */
+export interface PendingSelectionRewrite {
+  requestId: string;
+  novelId: string;
+  chapterId: string;
+  state: "sending" | "not_sent" | "failed" | "unknown" | "succeeded";
+  errorSummary?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function listPendingSelectionRewrites(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<PendingSelectionRewrite[]> {
+  return invoke("list_pending_selection_rewrites", input);
 }
 
 export function updateChapterMeta(input: {
