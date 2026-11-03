@@ -40,7 +40,9 @@ async fn upgrade_from_0024_creates_the_attempt_table_without_touching_existing_d
 
     // 升级到最新：新表出现，旧数据仍在。
     let upgraded = SqliteKernel::open(&db_path).await.unwrap();
-    let novel = NovelRepository::get_novel(&upgraded, "novel-old").await.unwrap();
+    let novel = NovelRepository::get_novel(&upgraded, "novel-old")
+        .await
+        .unwrap();
     assert_eq!(novel.title, "升级前的书", "升级不能影响已有业务数据");
 
     upgraded
