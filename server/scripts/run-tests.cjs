@@ -77,11 +77,47 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// `node:sqlite` 在 Node 22 是实验特性，需要显式开启；Node 24 起默认可用；
+// Node 20 完全没有这个内置模块。这里按能力探测决定是否加参数：
+// - 已能 require：不加参数；
+// - 加参数后可 require：加 --experimental-sqlite；
+// - 都不行：直接失败并说明原因，绝不静默跳过依赖 SQLite 的用例。
+const SQLITE_TESTS = ["automaticAttempt.test.js", "pipelineExecutionLease.test.js"];
+const usesSqlite = files.some((file) => SQLITE_TESTS.includes(path.basename(file)));
+
+function probeSqlite(extraFlags) {
+  const probe = spawnSync(process.execPath, [...extraFlags, "-e", 'require("node:sqlite")'], {
+    cwd: serverRoot,
+    stdio: "ignore",
+  });
+  return probe.status === 0;
+}
+
+const nodeFlags = [];
+if (usesSqlite && !probeSqlite([])) {
+  if (probeSqlite(["--experimental-sqlite"])) {
+    nodeFlags.push("--experimental-sqlite");
+  } else {
+    console.error(
+      [
+        `当前 Node ${process.versions.node} 无法加载 node:sqlite，依赖它的测试不能被静默跳过：`,
+        ...SQLITE_TESTS.map((name) => `  - ${name}`),
+        "请使用 Node 24（默认支持），或 Node 22 且支持 --experimental-sqlite 的版本。",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+}
+
 // File isolation prevents cache replacements and root hooks from leaking across tests.
-const result = spawnSync(process.execPath, ["--test", "--test-concurrency=4", ...files.map((file) => path.relative(serverRoot, file))], {
-  cwd: serverRoot,
-  stdio: "inherit",
-});
+const result = spawnSync(
+  process.execPath,
+  [...nodeFlags, "--test", "--test-concurrency=4", ...files.map((file) => path.relative(serverRoot, file))],
+  {
+    cwd: serverRoot,
+    stdio: "inherit",
+  },
+);
 
 if (result.error) {
   console.error(`Unable to start tests: ${result.error.message}`);
