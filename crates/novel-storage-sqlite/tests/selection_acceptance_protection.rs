@@ -144,7 +144,10 @@ async fn concurrent_writers_cannot_overwrite_each_other() {
     let after = NovelRepository::get_chapter(&kernel, "novel-1", "chapter-1")
         .await
         .unwrap();
-    assert_eq!(after.content, "窗口 A 的修改", "后到的旧写入不能覆盖先到的修改");
+    assert_eq!(
+        after.content, "窗口 A 的修改",
+        "后到的旧写入不能覆盖先到的修改"
+    );
     assert_eq!(after.official_version, 2);
 }
 
