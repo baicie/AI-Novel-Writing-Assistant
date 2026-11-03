@@ -182,6 +182,40 @@ test("director simplification baseline adjustments carry evidence", () => {
   }
 });
 
+/**
+ * 一次 `git cat-file --batch` 读完基准分支上的所有源码。
+ *
+ * 逐个 `git show` 会为每个文件起一个 git 进程；上百个文件时这个用例要跑几分钟，
+ * 慢到没人愿意在提交前跑，守卫也就形同虚设。批量读取让校验保持在秒级。
+ */
+function readBaseTreeTexts(ref, repoPaths) {
+  const input = repoPaths.map((repoPath) => `${ref}:${repoPath}\n`).join("");
+  const output = execFileSync("git", ["cat-file", "--batch"], {
+    cwd: repoRoot,
+    input,
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  const texts = new Map();
+  let offset = 0;
+  for (const repoPath of repoPaths) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd === -1) {
+      break;
+    }
+    // 每个对象一行包头：`<sha> blob <size>`；缺失对象则是 `<输入> missing`。
+    const [sha, type, sizeText] = output.toString("utf8", offset, headerEnd).split(" ");
+    offset = headerEnd + 1;
+    if (!sha || type !== "blob" || !/^\d+$/.test(sizeText ?? "")) {
+      continue;
+    }
+    const size = Number(sizeText);
+    texts.set(repoPath, output.toString("utf8", offset, offset + size));
+    offset += size + 1; // 内容后跟一个换行
+  }
+  return texts;
+}
+
 // 防止「基线滞后后悄悄抬阈值」：基线值必须与基准分支的实际计数一致。
 // 也就是说，上调基线只能反映基准分支上已经存在的债务，不能用来给新代码开绿灯。
 test("director simplification baseline matches the base branch", () => {
@@ -203,6 +237,14 @@ test("director simplification baseline matches the base branch", () => {
   }
 
   const baseline = readBaseline();
+  const baseTexts = readBaseTreeTexts(
+    baselineRef,
+    [...filesByDir.values()]
+      .flatMap((fileSet) => [...fileSet])
+      .filter((repoPath) => SOURCE_EXTENSIONS.has(path.extname(repoPath)))
+      .filter((repoPath) => Object.values(METRICS).some((metric) => metric.dirs.some((dir) => repoPath.startsWith(`${dir}/`))))
+      .sort(),
+  );
 
   for (const name of Object.keys(METRICS)) {
     const metric = METRICS[name];
@@ -213,15 +255,8 @@ test("director simplification baseline matches the base branch", () => {
       for (const repoPath of baseFileSet) {
         if (!repoPath.startsWith(`${dir}/`) || !SOURCE_EXTENSIONS.has(path.extname(repoPath))) continue;
         if (excludePrefixes.some((prefix) => repoPath.startsWith(prefix))) continue;
-        let text;
-        try {
-          text = execFileSync("git", ["show", `${baselineRef}:${repoPath}`], {
-            cwd: repoRoot,
-            encoding: "utf8",
-            maxBuffer: 64 * 1024 * 1024,
-            stdio: ["ignore", "pipe", "ignore"],
-          });
-        } catch {
+        const text = baseTexts.get(repoPath);
+        if (text === undefined) {
           continue;
         }
         baseTotal += (text.match(new RegExp(metric.pattern.source, "g")) ?? []).length;

@@ -82,8 +82,15 @@ if (files.length === 0) {
 // - 已能 require：不加参数；
 // - 加参数后可 require：加 --experimental-sqlite；
 // - 都不行：直接失败并说明原因，绝不静默跳过依赖 SQLite 的用例。
-const SQLITE_TESTS = ["automaticAttempt.test.js", "pipelineExecutionLease.test.js"];
-const usesSqlite = files.some((file) => SQLITE_TESTS.includes(path.basename(file)));
+//
+// 需要 SQLite 的用例从文件内容识别，而不是维护一份文件名清单：
+// 新加的用例不用改这里，也就不会因为漏登记而在 Node 22 上莫名失败。
+function requiresSqlite(file) {
+  return /\bnode:sqlite\b/.test(fs.readFileSync(file, "utf8"));
+}
+
+const sqliteTests = files.filter(requiresSqlite).map((file) => path.basename(file));
+const usesSqlite = sqliteTests.length > 0;
 
 function probeSqlite(extraFlags) {
   const probe = spawnSync(process.execPath, [...extraFlags, "-e", 'require("node:sqlite")'], {
@@ -101,7 +108,7 @@ if (usesSqlite && !probeSqlite([])) {
     console.error(
       [
         `当前 Node ${process.versions.node} 无法加载 node:sqlite，依赖它的测试不能被静默跳过：`,
-        ...SQLITE_TESTS.map((name) => `  - ${name}`),
+        ...sqliteTests.map((name) => `  - ${name}`),
         "请使用 Node 24（默认支持），或 Node 22 且支持 --experimental-sqlite 的版本。",
       ].join("\n"),
     );

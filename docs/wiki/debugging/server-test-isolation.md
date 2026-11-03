@@ -9,6 +9,7 @@
 - `server/scripts/run-tests.cjs` 使用 Node 测试运行器按文件隔离进程，并限制并发为 4。快速模式与集成模式区别在于选择的文件，不能通过共享进程换取加载速度。
 - 文件参数以服务端工作目录为基准传相对路径。Windows 命令行存在长度限制，较长的 worktree 路径会使完整套件的绝对路径参数无法启动；启动失败必须输出 `spawnSync.error`，不能只返回一个空日志的失败码。
 - 需要真实 SQLite、执行迁移或启动数据库夹具的场景必须进入 `integrationTests`。是否属于集成测试取决于实际副作用；`gateService.test.js` 这类无 SQLite 后缀的文件也可能属于集成测试。
+- 依赖 `node:sqlite` 的用例由运行器按文件内容（`/\bnode:sqlite\b/`）识别，而不是靠一份人工维护的文件名清单。Node 22 需要 `--experimental-sqlite`，Node 24 默认可用，Node 20 没有该模块；运行器先做能力探测再决定是否加参数，两者都不可用时直接报错并列出受影响用例。新增用例不必登记，也不会被静默跳过。判断依据是「能不能加载」，不是「Node 版本号是多少」。
 - 快速测试中的数据库调用必须通过测试端口隔离；不能用开发库补齐遗漏的桩。Prisma 模块加载本身可能初始化 SQLite 文件和运行参数，运行验证前应显式指定临时 `DATABASE_URL` 与运行目录。
 - Prisma delegate 方法是代理对象，使用 `tests/legacyDirector/databasePorts.js` 的 `stubDatabaseMethod` 保存原方法并通过 `t.after` 恢复。普通模块导出的函数可使用 `t.mock.method`，禁止在文件顶层永久修改模块缓存或导出。
 - 替身仅隔离外部读写，业务断言仍应验证真实服务的结果、调用范围及内容保护。不能删除断言或把集成测试移出所有测试分组来获得通过。
