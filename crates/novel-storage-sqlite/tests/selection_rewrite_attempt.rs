@@ -180,3 +180,97 @@ async fn stored_attempts_never_carry_prompt_or_chapter_text() {
         ]
     );
 }
+
+// ---- 进程重启：未知计费状态必须跨进程保留 ----
+
+#[tokio::test]
+async fn unknown_attempts_survive_a_real_database_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("rewrite.sqlite");
+
+    // 第一个进程：登记请求后崩溃（停在 sending）。
+    {
+        let kernel = SqliteKernel::open(&db_path).await.unwrap();
+        kernel
+            .begin_selection_rewrite("req-crash", "novel-1", "chapter-1", 10)
+            .await
+            .unwrap();
+        // 这里不调用任何收尾方法，模拟进程被直接终止。
+    }
+
+    // 第二个进程：重新打开同一个数据库。
+    let reopened = SqliteKernel::open(&db_path).await.unwrap();
+    let attempt = reopened
+        .selection_rewrite_attempt("req-crash")
+        .await
+        .unwrap()
+        .expect("重启后仍然读得到这条请求");
+    assert_eq!(attempt.state, SelectionRewriteAttemptState::Sending);
+    assert!(
+        attempt.state.may_have_been_billed(),
+        "停在 sending 的请求在重启后必须继续按「可能已计费」处理"
+    );
+
+    // 重启后的进程不能自动重发同一条请求。
+    let blocked = reopened
+        .begin_selection_rewrite("req-crash", "novel-1", "chapter-1", 20)
+        .await
+        .expect_err("重启不能让未知状态消失");
+    assert!(matches!(blocked, PortError::Conflict(_)));
+
+    // 界面在重启后仍然能看到这条待确认记录。
+    let pending = reopened
+        .list_unknown_selection_rewrites("novel-1", "chapter-1")
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].request_id, "req-crash");
+}
+
+#[tokio::test]
+async fn an_explicit_retry_requires_a_new_request_id_after_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = kernel(&dir).await;
+
+    kernel
+        .begin_selection_rewrite("req-a", "novel-1", "chapter-1", 10)
+        .await
+        .unwrap();
+    kernel
+        .mark_selection_rewrite_unknown("req-a", "模型请求超时", 11)
+        .await
+        .unwrap();
+
+    // 作者确认后重试：必须换一个新的请求编号，原记录保持未知。
+    kernel
+        .begin_selection_rewrite("req-b", "novel-1", "chapter-1", 12)
+        .await
+        .expect("换新编号后允许再次发起");
+    kernel
+        .mark_selection_rewrite_succeeded("req-b", 13)
+        .await
+        .unwrap();
+
+    // 原来的未知记录不会被新请求「洗白」：仍要保留，供作者判断可能的费用。
+    let original = kernel
+        .selection_rewrite_attempt("req-a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(original.state, SelectionRewriteAttemptState::Unknown);
+
+    let new_attempt = kernel
+        .selection_rewrite_attempt("req-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(new_attempt.state, SelectionRewriteAttemptState::Succeeded);
+
+    // 未知记录仍在待确认列表里，直到作者显式处理。
+    let pending = kernel
+        .list_unknown_selection_rewrites("novel-1", "chapter-1")
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].request_id, "req-a");
+}

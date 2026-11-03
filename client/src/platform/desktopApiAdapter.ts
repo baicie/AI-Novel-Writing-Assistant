@@ -13,6 +13,7 @@ import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
 import { providerClient } from "./providerTransport";
 import { needsPlaintextHttpPermission } from "./desktopModelRules";
+import { isEditorSnapshotRequest } from "./desktopPrimitives";
 import {
   appError,
   asRecord,
@@ -706,18 +707,25 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
     }
   }
   // 桌面内核用章节修订记录保护历史，没有「整书快照」这一层。
-  // 采纳候选前的快照请求必须在这里明确降级，不能掉进 unsupported：
-  // 否则每一次采纳都会在写正文之前返回 501，候选永远写不进去。
+  // 编辑器内的保护性调用（采纳候选、载入版本前）必须在这里明确降级，
+  // 否则会在写正文之前返回 501，候选永远写不进去。
+  //
+  // 但降级只对这类内部保护调用生效：作者主动点「创建快照」时，
+  // 桌面端并没有等价能力，必须如实报不可用，不能伪造一个成功的快照。
   const snapshot = path.match(/^\/novels\/([^/]+)\/snapshots$/);
   if (snapshot && method === "post") {
     const label = String(asRecord(config.data).label ?? "");
-    return ok({
-      id: `chapter-revisions:${decodeURIComponent(snapshot[1]!)}`,
-      triggerType: "manual",
-      label,
-      protectionScope: "chapter-revision",
-      createdAt: iso(Date.now()),
-    });
+    if (isEditorSnapshotRequest(label)) {
+      return ok({
+        id: `chapter-revisions:${decodeURIComponent(snapshot[1]!)}`,
+        triggerType: "manual",
+        label,
+        // 明确告诉调用方这次保护由章节修订承担，不是整书快照。
+        protectionScope: "chapter-revision",
+        createdAt: iso(Date.now()),
+      });
+    }
+    return unsupported(config);
   }
   const workspace = path.match(/^\/novels\/([^/]+)\/chapters\/([^/]+)\/editor\/workspace$/);
   if (workspace && method === "get") {
