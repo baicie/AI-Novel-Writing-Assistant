@@ -50,23 +50,12 @@ export function rewriteBillingOutcome(error: unknown): RewriteBillingOutcome {
   if (fromSentState) {
     return fromSentState;
   }
-  // 模型已经返回但输出不可用：已经调用过模型，不能当成发送前校验失败。
-  if (record.code === "MODEL_RESULT_UNUSABLE") {
-    return "billed_failure";
-  }
+  // 没有机器可读的发送状态时，不能假设请求一定没发出去。
+  // 旧结构里的 VALIDATION 既可能来自发送前校验，也可能来自已发送后的解析失败，
+  // 无法区分时只能按「可能已计费」处理；确定未发送的错误必须带 NOT_SENT。
   if (record.code === "MODEL_RESULT_UNKNOWN") {
     return "unknown";
   }
-  // 发送前的校验、凭据与共用的路由校验：这些错误不会产生模型费用。
-  if (
-    record.code === "VALIDATION"
-    || record.code === "NOT_FOUND"
-    || record.code === "STORAGE_CORRUPT"
-    || record.code === "INTEGRITY_ERROR"
-  ) {
-    return "never_sent";
-  }
-  // 竞争、限流等发生在请求发出之后：保留「可能计费」的保守表述。
   return "billed_failure";
 }
 

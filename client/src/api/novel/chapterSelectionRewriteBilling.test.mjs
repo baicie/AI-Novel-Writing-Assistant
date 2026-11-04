@@ -56,8 +56,9 @@ test("发送状态优先于错误码，无法确认时保守按可能计费处�
     rewriteBillingOutcome({ code: "VALIDATION", details: { sentState: "SOMETHING_NEW" } }),
     "billed_failure",
   );
-  // 旧错误没有状态字段时，回退到错误码。
-  assert.equal(rewriteBillingOutcome({ code: "VALIDATION" }), "never_sent");
+  // 旧错误没有状态字段时不能假设免费：VALIDATION 也可能是已发送后的解析失败。
+  assert.equal(rewriteBillingOutcome({ code: "VALIDATION" }), "billed_failure");
+  assert.equal(rewriteBillingOutcome({ code: "NOT_FOUND" }), "billed_failure");
   assert.equal(rewriteBillingOutcome({ code: "MODEL_RESULT_UNUSABLE" }), "billed_failure");
 });
 
@@ -74,11 +75,21 @@ test("与内核序列化契约一致：错误码与发送状态都能直接读",
   assert.equal(rewriteBillingOutcome(notSent), "never_sent");
 });
 
-test("发送前的校验与凭据错误可以免确认重试", () => {
-  for (const code of ["VALIDATION", "NOT_FOUND", "STORAGE_CORRUPT", "INTEGRITY_ERROR"]) {
-    assert.equal(rewriteBillingOutcome({ code }), "never_sent", `${code} 属于发送前拒绝`);
+test("带 NOT_SENT 的发送前错误可以免确认重试", () => {
+  for (const code of ["VALIDATION", "NOT_FOUND", "STORAGE_CORRUPT", "INTEGRITY_ERROR", "CONFLICT"]) {
+    assert.equal(
+      rewriteBillingOutcome({ code, details: { sentState: "NOT_SENT" } }),
+      "never_sent",
+      `${code} 带 NOT_SENT 时属于发送前拒绝`,
+    );
   }
   assert.equal(rewriteRetryWarning("never_sent"), null, "没发出去的请求不需要计费提示");
+});
+
+test("没有发送状态的旧错误结构不能声称免费", () => {
+  // 旧内核可能把「已发送但解析失败」报成 VALIDATION；无法区分时按可能计费处理。
+  assert.equal(rewriteBillingOutcome({ code: "VALIDATION" }), "billed_failure");
+  assert.match(rewriteRetryWarning("billed_failure") ?? "", /可能已经产生费用/);
 });
 
 test("竞争与限流按可能已计费处理，不能声称免费", () => {
