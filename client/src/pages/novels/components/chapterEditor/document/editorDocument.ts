@@ -157,6 +157,38 @@ export function getCursorOffsetFromValue(
   return point ? getAbsoluteOffsetFromPoint(value, point) : null;
 }
 
+/**
+ * 把扁平文本偏移还原成编辑器坐标（`getCursorOffsetFromValue` 的逆运算）。
+ *
+ * 段落之间用 `\n\n` 连接，所以偏移落在分隔符上时归到下一段段首：
+ * 那里是作者真正能放光标的位置，落到上一段末尾会视觉上错位。
+ * 偏移超出正文时返回 null，由调用方决定放弃恢复，而不是夹到末尾。
+ */
+export function pointFromCursorOffset(
+  value: Value,
+  offset: number,
+): EditorPointLike | null {
+  const nodes = value as Descendant[];
+  if (!Number.isInteger(offset) || offset < 0 || nodes.length === 0) {
+    return null;
+  }
+
+  let remaining = offset;
+  for (let index = 0; index < nodes.length; index += 1) {
+    const length = nodeToText(nodes[index]).length;
+    // 最后一段的末尾也是合法光标位置（作者可以在文末继续写）。
+    if (remaining <= length) {
+      return { path: [index, 0], offset: remaining };
+    }
+    remaining -= length + 2;
+    // 落在两段之间的 `\n\n` 上：归到下一段段首。
+    if (remaining <= 0) {
+      return index + 1 < nodes.length ? { path: [index + 1, 0], offset: 0 } : { path: [index, 0], offset: length };
+    }
+  }
+  return null;
+}
+
 export function buildSelectionRangeFromValue(
   value: Value,
   selection: EditorSelectionLike | null | undefined,

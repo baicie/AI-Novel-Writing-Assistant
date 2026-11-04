@@ -6,7 +6,7 @@ pub use export::{ExportChapter, ExportNovel, chapter_markdown, novel_json, write
 pub use logging::init_logging;
 pub use novel_llm::redact_secrets;
 pub use secrets::configure_secret_fallback;
-pub use secrets::{MemorySecretStore, SecretStore};
+pub use secrets::{MemorySecretStore, SecretError, SecretStore};
 
 #[cfg(feature = "os-keychain")]
 pub use secrets::OsSecretStore;

@@ -54,3 +54,13 @@ export function taskStatusForRun(
       return "queued";
   }
 }
+
+/**
+ * 桌面端是否把这次「创建快照」请求降级为章节修订保护。
+ *
+ * 只有编辑器内部的保护性调用（采纳候选、载入版本前）才降级；
+ * 作者主动创建整书快照时内核没有等价能力，必须走「未迁移」而不是伪造成功。
+ */
+export function isEditorSnapshotRequest(label: unknown): boolean {
+  return typeof label === "string" && label.startsWith("chapter-editor:");
+}

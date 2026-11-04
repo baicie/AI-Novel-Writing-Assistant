@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rewrite-chapter-selection"
+description = "Enables the rewrite_chapter_selection command without any pre-configured scope."
+commands.allow = ["rewrite_chapter_selection"]
+
+[[permission]]
+identifier = "deny-rewrite-chapter-selection"
+description = "Denies the rewrite_chapter_selection command without any pre-configured scope."
+commands.deny = ["rewrite_chapter_selection"]

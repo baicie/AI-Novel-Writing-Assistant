@@ -63,8 +63,7 @@ export function formatWordCount(words: number): string {
   return words > 0 ? `${words} 字` : "空";
 }
 
-export function toChapterNavItem(chapter: Chapter): ChapterNavItem {
-  const raw = chapter as Chapter & { volumeId?: string | null };
+export function toChapterNavItem(chapter: Chapter): ChapterNavItem {  const raw = chapter as Chapter & { volumeId?: string | null };
   const content = chapter.content ?? "";
   const wordCount = content.trim().length;
   return {
@@ -292,4 +291,20 @@ export function shouldBlockChapterSwitch(
   const confirmation = chapterSwitchConfirmation(state, intent);
   if (!confirmation) return false;
   return !confirm(confirmation.message);
+}
+
+/**
+ * 异步结果是否仍属于当前章节。
+ *
+ * 作者可以在 AI 请求进行中切章：晚到的候选或错误如果直接写进会话，
+ * 会出现在另一章的编辑器里，甚至被采纳到错误位置。
+ * `origin` 是发起请求时记下的章节，`current` 是响应到达时的章节。
+ */
+export function isResultForCurrentChapter(
+  origin: string | null | undefined,
+  current: string | null | undefined,
+): boolean {
+  // 两边都没有章节时没有可污染的目标；否则必须严格相等。
+  if (!origin && !current) return true;
+  return origin === current;
 }

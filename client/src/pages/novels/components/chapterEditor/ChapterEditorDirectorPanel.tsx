@@ -241,13 +241,13 @@ export default function ChapterEditorDirectorPanel(props: ChapterEditorDirectorP
         ) : null}
 
         {session.status === "loading" ? (
-          <div className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-4 text-sm text-muted-foreground">
+          <div data-testid="chapter-revision-loading" className="rounded-2xl border border-dashed border-border/70 bg-muted/10 p-4 text-sm text-muted-foreground">
             AI 正在结合章节宏观定位和你的修改要求生成 2 到 3 个候选版本。
           </div>
         ) : null}
 
         {session.status === "error" ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+          <div data-testid="chapter-revision-error" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
             {session.errorMessage || "候选生成失败，请重试。"}
           </div>
         ) : null}
@@ -284,6 +284,8 @@ export default function ChapterEditorDirectorPanel(props: ChapterEditorDirectorP
                 <Button
                   key={candidate.id}
                   size="sm"
+                  data-testid="chapter-revision-candidate"
+                  data-candidate-id={candidate.id}
                   variant={candidate.id === session.activeCandidateId ? "default" : "outline"}
                   onClick={() => onSelectCandidate(candidate.id)}
                 >
@@ -340,10 +342,13 @@ export default function ChapterEditorDirectorPanel(props: ChapterEditorDirectorP
                     return (
                       <label
                         key={change.id}
+                        data-testid="chapter-revision-change"
+                        data-change-id={change.id}
                         className={`flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2.5 transition-colors ${checked ? "bg-emerald-50/80" : "bg-background/60 opacity-70"}`}
                       >
                         <input
                           type="checkbox"
+                          data-testid="chapter-revision-change-toggle"
                           className="mt-1 h-4 w-4 accent-emerald-600"
                           checked={checked}
                           onChange={() => onToggleDiffChange(change.id)}
@@ -364,13 +369,13 @@ export default function ChapterEditorDirectorPanel(props: ChapterEditorDirectorP
       </div>
 
       <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 border-t border-border/70 px-4 py-4">
-        <Button size="sm" variant="outline" onClick={onReject} disabled={isIdle || session.status === "loading" || isApplying}>
+        <Button size="sm" variant="outline" data-testid="chapter-revision-reject" onClick={onReject} disabled={isIdle || session.status === "loading" || isApplying}>
           拒绝全部
         </Button>
-        <Button size="sm" variant="outline" onClick={onRegenerate} disabled={isIdle || session.status === "loading" || isApplying}>
+        <Button size="sm" variant="outline" data-testid="chapter-revision-regenerate" onClick={onRegenerate} disabled={isIdle || session.status === "loading" || isApplying}>
           再生成
         </Button>
-        <Button size="sm" onClick={onAccept} disabled={session.status !== "ready" || !activeCandidate || isApplying || selectedDiffCount === 0 || !hasSelectedChanges}>
+        <Button size="sm" data-testid="chapter-revision-accept" onClick={onAccept} disabled={session.status !== "ready" || !activeCandidate || isApplying || selectedDiffCount === 0 || !hasSelectedChanges}>
           {isApplying ? "应用中..." : selectedDiffCount === diffChanges.length ? "接受全部" : "接受已选"}
         </Button>
       </div>

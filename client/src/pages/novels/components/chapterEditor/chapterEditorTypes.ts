@@ -9,6 +9,7 @@ import type {
   ChapterEditorRevisionScope,
   ChapterEditorWorkspaceResponse,
 } from "@ai-novel/shared/types/novel";
+import type { RewriteBillingOutcome } from "@/api/novel/chapterSelectionRewriteBilling";
 
 export interface ChapterEditorSelectionRange {
   from: number;
@@ -29,6 +30,11 @@ export interface ChapterEditorSessionState extends Partial<ChapterEditorAiRevisi
   errorMessage?: string;
   mode: "revision" | "continuation";
   continuationOperation?: ChapterEditorCursorOperation;
+  /**
+   * 上一次改写失败时能确认到的计费状态。
+   * 结果未知时界面必须提示可能已产生费用，并在重新生成前要求作者确认。
+   */
+  billingOutcome?: RewriteBillingOutcome;
 }
 
 export interface ChapterEditorCursorRequestBuilderInput {

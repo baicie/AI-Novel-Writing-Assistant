@@ -9,6 +9,7 @@ import {
   formatChapterWordCount,
   formatWordCount,
   hasPendingCandidate,
+  isResultForCurrentChapter,
   isSaveShortcut,
   neighbourOf,
   runAttentionFor,
@@ -442,4 +443,19 @@ test("1000-chapter grouping and search finish well inside an interactive budget"
     chapters.filter((chapter) => String(chapter.order).includes("7")).map((chapter) => chapter.id).sort(),
   );
   assert.ok(elapsed < budgetMs, `1000 章的分组与搜索耗时 ${elapsed.toFixed(1)}ms，超过 ${budgetMs}ms 上界`);
+});
+
+// ---- P17.2 Phase 3：跨章异步结果不能污染当前章节 ----
+
+test("late AI responses only land in the chapter that started them", () => {
+  // 正常情况：同一章发起、同一章返回。
+  assert.equal(isResultForCurrentChapter("c1", "c1"), true);
+  // 作者在等待期间切到第二章：第一章的候选不能写进第二章。
+  assert.equal(isResultForCurrentChapter("c1", "c2"), false, "跨章响应必须丢弃");
+  // 切回同一章后返回：仍然属于当前章。
+  assert.equal(isResultForCurrentChapter("c1", "c1"), true);
+  // 编辑器已经卸载：没有目标章节，不能写入。
+  assert.equal(isResultForCurrentChapter("c1", null), false);
+  // 没有记录发起章节时按不一致处理，宁可丢弃也不猜。
+  assert.equal(isResultForCurrentChapter(null, "c2"), false);
 });

@@ -13,6 +13,7 @@ import {
   normalizeChapterContent,
   normalizeEditorText,
   normalizeValuePayload,
+  pointFromCursorOffset,
   toPlainText,
   toPlateValue,
 } from "./document";
@@ -51,6 +52,10 @@ interface ChapterTextEditorProps {
   onCursorChange: (offset: number | null, position: SelectionToolbarPosition | null) => void;
   preview?: ChapterEditorPreview | null;
   focusRange?: Pick<ChapterEditorSelectionRange, "from" | "to"> | null;
+  /** 上次离开时的编辑位置；文档恢复完成后才应用，避免把光标放到旧坐标上。 */
+  restorePosition?: { cursorOffset: number; scrollTop: number } | null;
+  /** 位置变化时上报，由 Shell 决定是否写入偏好缓存。 */
+  onPositionChange?: (position: { cursorOffset: number; scrollTop: number }) => void;
 }
 
 const EDITOR_BODY_CLASS_NAME = "prose prose-sm max-w-none min-w-0 overflow-hidden break-words text-[15px] leading-8 dark:prose-invert [&_code]:break-all [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words";
@@ -119,7 +124,7 @@ function renderLoadingPreview(
 ) {
   const isInsertion = preview.from === preview.to && preview.originalText.length === 0;
   return (
-    <div ref={surfaceRef} className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
+    <div ref={surfaceRef} data-testid="chapter-editor-body" className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
       <TextBlock text={previewContent.before} className="text-foreground" />
 
       <div className="space-y-3">
@@ -155,7 +160,7 @@ function renderBlockPreview(
     // The review panel surfaces the validation error; keep the full candidate visible as context.
   }
   return (
-    <div ref={surfaceRef} className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
+    <div ref={surfaceRef} data-testid="chapter-editor-body" className={`space-y-4 rounded-2xl bg-muted/10 p-4 ${SURFACE_INNER_PADDING_CLASS_NAME}`}>
       <TextBlock text={previewContent.before} className="text-foreground" />
 
       <div className="space-y-3">
@@ -179,13 +184,43 @@ function renderBlockPreview(
 }
 
 export default function ChapterTextEditor(props: ChapterTextEditorProps) {
-  const { value, readOnly = false, onChange, onSelectionChange, onCursorChange, preview, focusRange = null } = props;
+  const {
+    value,
+    readOnly = false,
+    onChange,
+    onSelectionChange,
+    onCursorChange,
+    preview,
+    focusRange = null,
+    restorePosition = null,
+    onPositionChange,
+  } = props;
   const [editorSeed, setEditorSeed] = useState(0);
   const [internalText, setInternalText] = useState(() => normalizeChapterContent(value));
   const [paragraphMarkerOffsets, setParagraphMarkerOffsets] = useState<Array<{ index: number; top: number }>>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const isUserEditingRef = useRef(false);
+  const lastPositionRef = useRef<{ cursorOffset: number; scrollTop: number }>({ cursorOffset: 0, scrollTop: 0 });
+  const restoreAppliedRef = useRef(false);
+  const positionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 光标或滚动任一变化都上报：只监听滚动会漏掉「只点了光标没滚动」的情况。 */
+  const schedulePositionReport = useCallback(() => {
+    if (positionTimerRef.current) clearTimeout(positionTimerRef.current);
+    positionTimerRef.current = setTimeout(() => {
+      positionTimerRef.current = null;
+      const scroll = scrollRef.current;
+      const next = {
+        cursorOffset: lastPositionRef.current.cursorOffset,
+        scrollTop: scroll ? scroll.scrollTop : lastPositionRef.current.scrollTop,
+      };
+      lastPositionRef.current = next;
+      onPositionChangeRef.current?.(next);
+    }, 400);
+  }, []);
+  const onPositionChangeRef = useRef(onPositionChange);
+  onPositionChangeRef.current = onPositionChange;
 
   const editor = usePlateEditor(
     {
@@ -211,6 +246,42 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
     }
   }, [onCursorChange, onSelectionChange, preview, readOnly]);
 
+  // 恢复上次的编辑位置：必须等编辑器用当前正文重建完成（editorSeed 已变）之后再设置，
+  // 否则 Plate 会沿用重建前的文档，按旧坐标放光标会落到错误的位置。
+  useEffect(() => {
+    if (!editor || restoreAppliedRef.current || !restorePosition) return;
+    if (readOnly || preview) return;
+    if (normalizeChapterContent(value) !== internalText) return;
+    restoreAppliedRef.current = true;
+    const point = pointFromCursorOffset(editor.children as Value, restorePosition.cursorOffset);
+    if (point) {
+      try {
+        editor.tf.select(point as never);
+        editor.tf.focus();
+      } catch {
+        // 坐标不再适用时安静放弃：位置恢复不能阻断正文编辑。
+      }
+    }
+    const scroll = scrollRef.current;
+    if (scroll) scroll.scrollTop = restorePosition.scrollTop;
+    lastPositionRef.current = {
+      cursorOffset: restorePosition.cursorOffset,
+      scrollTop: restorePosition.scrollTop,
+    };
+  }, [editor, editorSeed, internalText, preview, readOnly, restorePosition, value]);
+
+  // 记录光标与滚动：作者停止操作 400ms 后上报，避免每次按键都写偏好缓存。
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const onScroll = () => schedulePositionReport();
+    scroll.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroll.removeEventListener("scroll", onScroll);
+      if (positionTimerRef.current) clearTimeout(positionTimerRef.current);
+    };
+  }, [schedulePositionReport]);
+
   const updateSelection = useCallback(() => {
     if (!editor || preview || readOnly) {
       onSelectionChange(null, null);
@@ -227,6 +298,11 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
         const offset = getCursorOffsetFromValue(editor.children as Value, point);
         const container = containerRef.current;
         const position = container ? buildToolbarPosition(container, range) : null;
+        if (offset !== null) {
+          // 光标是位置恢复的主坐标：它变化时也要调度上报，不能只在滚动时记录。
+          lastPositionRef.current = { ...lastPositionRef.current, cursorOffset: offset };
+          schedulePositionReport();
+        }
         onSelectionChange(null, null);
         onCursorChange(offset, position);
       } else {
@@ -258,7 +334,7 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
 
     onSelectionChange(selectionRange, position);
     onCursorChange(null, null);
-  }, [editor, onCursorChange, onSelectionChange, preview, readOnly]);
+  }, [editor, onCursorChange, onSelectionChange, preview, readOnly, schedulePositionReport]);
 
   const handleValueChange = useCallback((payload: unknown) => {
     const nextText = normalizeEditorText(toPlainText(normalizeValuePayload(payload)));
@@ -408,11 +484,12 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
         <div className="text-xs text-muted-foreground">{helperText}</div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div ref={scrollRef} data-testid="chapter-editor-scroll" className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="relative min-h-full">
           {preview?.mode === "inline" && previewContent ? (
             <div
               ref={surfaceRef}
+              data-testid="chapter-editor-body"
               className={`${INLINE_PREVIEW_BODY_CLASS_NAME} ${SURFACE_INNER_PADDING_CLASS_NAME} min-h-full rounded-2xl bg-muted/15 p-4 text-foreground`}
             >
               {previewContent.before}
@@ -426,14 +503,16 @@ export default function ChapterTextEditor(props: ChapterTextEditorProps) {
           ) : readOnly ? (
             <div
               ref={surfaceRef}
+              data-testid="chapter-editor-body"
               className={`min-h-full rounded-2xl bg-muted/10 p-4 text-foreground ${SURFACE_INNER_PADDING_CLASS_NAME}`}
             >
               <TextBlock text={normalizedContent} />
             </div>
           ) : editor ? (
             <Plate editor={editor} onSelectionChange={updateSelection} onValueChange={handleValueChange}>
-              <div ref={surfaceRef} className="min-h-full">
+              <div ref={surfaceRef} className="min-h-full" data-testid="chapter-editor-body">
                 <PlateContent
+                  data-testid="chapter-editor-content"
                   className={`${EDITOR_BODY_CLASS_NAME} ${SURFACE_INNER_PADDING_CLASS_NAME} min-h-full rounded-2xl bg-muted/10 p-4 outline-none [&_p]:text-foreground`}
                   onFocus={() => {
                     isUserEditingRef.current = true;

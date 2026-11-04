@@ -1,5 +1,5 @@
 ﻿{
-  "measuredAt": "2026-09-24",
+  "measuredAt": "2026-11-03",
   "plan": "docs/plans/auto-director-simplification-execution-plan.md",
   "metrics": {
     "adHocCurrentTaskLookups": 0,
@@ -11,7 +11,18 @@
     "runModeBranches": 45,
     "inProcessBackgroundScheduling": 13,
     "stepRuntimeServiceLocator": 54,
-    "clientStatusDerivation": 205,
+    "clientStatusDerivation": 217,
     "legacyRuntimeTableAccess": 1
-  }
+  },
+  "adjustments": [
+    {
+      "metric": "clientStatusDerivation",
+      "from": 205,
+      "to": 217,
+      "measuredAt": "2026-11-03",
+      "baselineCommit": "eff69f22",
+      "reason": "基线自 2026-09-24 起未再更新，期间导演状态展示相关的前端改动合法增长到 217。已在 eff69f22 上独立测量确认：base 与当时 HEAD 的计数与 perFile 分布完全一致（217），说明这 12 处增量全部早于 P17.2 分支，不属于本轮引入。本轮新增的状态语义位于 client/src/api/（校验范围之外），未增加计数。",
+      "evidence": "server/tools/measure-client-status-derivation.cjs 对 eff69f22 与当前 HEAD 输出完全相同的 total 与 perFile"
+    }
+  ]
 }

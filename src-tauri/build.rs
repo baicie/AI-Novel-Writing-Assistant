@@ -17,6 +17,8 @@ fn main() {
         "get_chapter_draft",
         "list_chapter_drafts",
         "get_chapter_editor_workspace",
+        "rewrite_chapter_selection",
+        "list_pending_selection_rewrites",
         "delete_chapter",
         "update_chapter_meta",
         "export_novel",

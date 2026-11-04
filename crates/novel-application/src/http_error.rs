@@ -58,6 +58,12 @@ pub fn map_error_to_http(error: AppError) -> HttpErrorResponse {
         AppErrorCode::Cancelled => (HttpStatusCode::BadRequest, "CANCELLED"),
         AppErrorCode::ModelRateLimit => (HttpStatusCode::InternalServerError, "RATE_LIMIT"),
         AppErrorCode::StorageCorrupt => (HttpStatusCode::InternalServerError, "STORAGE_ERROR"),
+        AppErrorCode::ModelResultUnknown => {
+            (HttpStatusCode::InternalServerError, "MODEL_RESULT_UNKNOWN")
+        }
+        AppErrorCode::ModelResultUnusable => {
+            (HttpStatusCode::InternalServerError, "MODEL_RESULT_UNUSABLE")
+        }
     };
 
     let error_response = ErrorResponse::new(error_code, &error.message);

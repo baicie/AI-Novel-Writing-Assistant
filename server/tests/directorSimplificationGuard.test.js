@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -150,6 +151,124 @@ if (process.env.DIRECTOR_GUARD_PRINT === "1") {
 test("director simplification baseline covers every metric", () => {
   const baseline = readBaseline();
   assert.deepEqual(Object.keys(baseline.metrics).sort(), Object.keys(METRICS).sort());
+});
+
+// 基线一旦滞后，ratchet 就不再防回归：它只会拦住「再涨」，却让人误以为指标已经收敛。
+// 这里要求基线必须处在可解释的状态：要么没调整过，要么每条调整都带证据。
+test("director simplification baseline adjustments carry evidence", () => {
+  const baseline = readBaseline();
+  assert.equal(typeof baseline.measuredAt, "string", "基线必须记录测量日期");
+  assert.match(baseline.measuredAt, /^\d{4}-\d{2}-\d{2}$/);
+
+  const adjustments = baseline.adjustments ?? [];
+  assert.ok(Array.isArray(adjustments), "adjustments 必须是数组");
+  for (const entry of adjustments) {
+    assert.ok(Object.prototype.hasOwnProperty.call(METRICS, entry.metric), `未知指标：${entry.metric}`);
+    assert.equal(
+      baseline.metrics[entry.metric],
+      entry.to,
+      `指标 ${entry.metric} 的调整记录与当前值不一致：记录 ${entry.to}，基线 ${baseline.metrics[entry.metric]}`,
+    );
+    assert.ok(entry.from < entry.to, `指标 ${entry.metric} 的上调必须真的抬高基线`);
+    assert.match(entry.measuredAt, /^\d{4}-\d{2}-\d{2}$/, "每次调整都要记录测量日期");
+    assert.ok(
+      typeof entry.reason === "string" && entry.reason.length >= 40,
+      `指标 ${entry.metric} 的调整必须写明原因（至少 40 字），否则无法区分真实债务与误计数`,
+    );
+    assert.ok(
+      typeof entry.evidence === "string" && entry.evidence.length > 0,
+      `指标 ${entry.metric} 的调整必须给出可复核的证据`,
+    );
+  }
+});
+
+/**
+ * 一次 `git cat-file --batch` 读完基准分支上的所有源码。
+ *
+ * 逐个 `git show` 会为每个文件起一个 git 进程；上百个文件时这个用例要跑几分钟，
+ * 慢到没人愿意在提交前跑，守卫也就形同虚设。批量读取让校验保持在秒级。
+ */
+function readBaseTreeTexts(ref, repoPaths) {
+  const input = repoPaths.map((repoPath) => `${ref}:${repoPath}\n`).join("");
+  const output = execFileSync("git", ["cat-file", "--batch"], {
+    cwd: repoRoot,
+    input,
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  const texts = new Map();
+  let offset = 0;
+  for (const repoPath of repoPaths) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd === -1) {
+      break;
+    }
+    // 每个对象一行包头：`<sha> blob <size>`；缺失对象则是 `<输入> missing`。
+    const [sha, type, sizeText] = output.toString("utf8", offset, headerEnd).split(" ");
+    offset = headerEnd + 1;
+    if (!sha || type !== "blob" || !/^\d+$/.test(sizeText ?? "")) {
+      continue;
+    }
+    const size = Number(sizeText);
+    texts.set(repoPath, output.toString("utf8", offset, offset + size));
+    offset += size + 1; // 内容后跟一个换行
+  }
+  return texts;
+}
+
+// 防止「基线滞后后悄悄抬阈值」：基线值必须与基准分支的实际计数一致。
+// 也就是说，上调基线只能反映基准分支上已经存在的债务，不能用来给新代码开绿灯。
+test("director simplification baseline matches the base branch", () => {
+  const baselineRef = process.env.DIRECTOR_GUARD_BASE_REF ?? "origin/main";
+  const filesByDir = new Map();
+  try {
+    for (const dir of new Set(Object.values(METRICS).flatMap((metric) => metric.dirs))) {
+      const listing = execFileSync("git", ["ls-tree", "-r", "--name-only", baselineRef, dir], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      filesByDir.set(dir, new Set(listing.split("\n").filter(Boolean)));
+    }
+  } catch {
+    // 没有可比基准（浅克隆、脱机或尚未 fetch）时不伪装通过，也不算失败。
+    console.log(`skip: 无法读取基准分支 ${baselineRef}，跳过基线一致性校验`);
+    return;
+  }
+
+  const baseline = readBaseline();
+  const baseTexts = readBaseTreeTexts(
+    baselineRef,
+    [...filesByDir.values()]
+      .flatMap((fileSet) => [...fileSet])
+      .filter((repoPath) => SOURCE_EXTENSIONS.has(path.extname(repoPath)))
+      .filter((repoPath) => Object.values(METRICS).some((metric) => metric.dirs.some((dir) => repoPath.startsWith(`${dir}/`))))
+      .sort(),
+  );
+
+  for (const name of Object.keys(METRICS)) {
+    const metric = METRICS[name];
+    const excludePrefixes = metric.excludePrefixes ?? [];
+    let baseTotal = 0;
+    for (const dir of metric.dirs) {
+      const baseFileSet = filesByDir.get(dir) ?? new Set();
+      for (const repoPath of baseFileSet) {
+        if (!repoPath.startsWith(`${dir}/`) || !SOURCE_EXTENSIONS.has(path.extname(repoPath))) continue;
+        if (excludePrefixes.some((prefix) => repoPath.startsWith(prefix))) continue;
+        const text = baseTexts.get(repoPath);
+        if (text === undefined) {
+          continue;
+        }
+        baseTotal += (text.match(new RegExp(metric.pattern.source, "g")) ?? []).length;
+      }
+    }
+    assert.equal(
+      baseline.metrics[name],
+      baseTotal,
+      `指标 ${name} 的基线 ${baseline.metrics[name]} 与基准分支 ${baselineRef} 的实际值 ${baseTotal} 不一致。` +
+        "若基准分支已经降低，请在同一提交下调基线锁定成果；若基准分支升高，请先确认那是已合入的债务，再带证据上调基线。",
+    );
+  }
 });
 
 for (const name of Object.keys(METRICS)) {
