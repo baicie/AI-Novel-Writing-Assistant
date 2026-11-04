@@ -9,7 +9,9 @@ export type AppErrorCode =
   | "STORAGE_CORRUPT"
   | "INTEGRITY_ERROR"
   /** 请求可能已经到达模型服务，但没有拿到可确认的结果。 */
-  | "MODEL_RESULT_UNKNOWN";
+  | "MODEL_RESULT_UNKNOWN"
+  /** 模型已经返回，但输出无法使用（非法 JSON、空候选）：这次调用可能已计费。 */
+  | "MODEL_RESULT_UNUSABLE";
 
 export interface AppError {
   code: AppErrorCode;

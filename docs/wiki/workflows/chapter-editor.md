@@ -44,7 +44,9 @@
 规则：
 
 - 同一条 `requestId` 在 `sending` / `unknown` / `succeeded` 状态下再次进入会被拒为 `CONFLICT`，从源头阻止双击或界面重试造成重复计费。
-- 内核用 `AppErrorCode::MODEL_RESULT_UNKNOWN` 表达结果未知，前端只能据此判断「可能已计费」，不能靠错误文案猜测。
+- 内核在错误里同时给出机器可读的 `details.sentState`：`NOT_SENT` / `SENT_BUT_UNUSABLE` / `RESULT_UNKNOWN`。前端优先按它判断「能不能免确认重试」，不能靠中文文案猜测；字段缺失时才回退错误码。
+- 错误码与发送状态一一对应：`VALIDATION`（发送前拒绝）、`MODEL_RESULT_UNUSABLE`（已发送且模型返回，但非法 JSON 或空候选）、`MODEL_RESULT_UNKNOWN`（结果无法确认）。模型已经返回的输出问题不能复用 `VALIDATION`，否则界面会把一次已计费的调用当成免费重试。
+- 任何无法识别的发送状态都按「可能已计费」处理；`unknown` 仍然禁止自动重发。
 - 重新生成前若存在未确认请求或上次结果是 `unknown`，必须先经过作者确认；提示文案要说明「可能已经发送、重新生成会再次调用模型」。
 - 未确认请求按 `novel_id + chapter_id` 隔离，不能跨章提示，也不能阻止其它章节继续写作。
 - 该表只存状态、时间与简短原因，不存正文、提示词、端点或凭据。

@@ -18,6 +18,62 @@ test("超时与连接中断归为结果未知，而不是「一定没扣费」",
   assert.doesNotMatch(warning, /没有产生费用|不会计费/);
 });
 
+// ---- P17.2 RC1 P1：模型已返回但输出不可用 ----
+
+test("模型已返回但输出不可用时，必须提示再次调用可能收费", () => {
+  const error = {
+    code: "MODEL_RESULT_UNUSABLE",
+    message: "模型返回的改写结果无法解析。这次调用已经产生费用；重新生成会再次调用模型。",
+    retryable: false,
+    details: { sentState: "SENT_BUT_UNUSABLE" },
+  };
+  const outcome = rewriteBillingOutcome(error);
+  assert.equal(outcome, "billed_failure", "已经调用过模型，不能按「没发出去」处理");
+
+  const message = rewriteFailureMessage(error, outcome);
+  assert.match(message, /可能已经产生费用/, "失败提示必须说明这次调用可能已计费");
+  assert.match(message, /再次调用模型/, "提示必须说明重新生成会再次调用模型");
+  assert.match(rewriteRetryWarning(outcome) ?? "", /再次调用模型/);
+  assert.equal(requiresRetryConfirmation(outcome, false), true, "重新生成必须先确认");
+});
+
+test("发送状态优先于错误码，无法确认时保守按可能计费处理", () => {
+  // 旧内核可能用 VALIDATION 表示「已发送但不可用」：状态字段要能覆盖错误码。
+  assert.equal(
+    rewriteBillingOutcome({ code: "VALIDATION", details: { sentState: "SENT_BUT_UNUSABLE" } }),
+    "billed_failure",
+  );
+  assert.equal(
+    rewriteBillingOutcome({ code: "VALIDATION", details: { sentState: "NOT_SENT" } }),
+    "never_sent",
+  );
+  assert.equal(
+    rewriteBillingOutcome({ code: "MODEL_RESULT_UNKNOWN", details: { sentState: "RESULT_UNKNOWN" } }),
+    "unknown",
+  );
+  // 认不出的状态不能当成免费：保守提示可能计费。
+  assert.equal(
+    rewriteBillingOutcome({ code: "VALIDATION", details: { sentState: "SOMETHING_NEW" } }),
+    "billed_failure",
+  );
+  // 旧错误没有状态字段时，回退到错误码。
+  assert.equal(rewriteBillingOutcome({ code: "VALIDATION" }), "never_sent");
+  assert.equal(rewriteBillingOutcome({ code: "MODEL_RESULT_UNUSABLE" }), "billed_failure");
+});
+
+test("与内核序列化契约一致：错误码与发送状态都能直接读", () => {
+  // 形状来自 src-tauri/src/commands/editor.rs 的 AppError 序列化。
+  const serialized = JSON.parse(
+    '{"code":"MODEL_RESULT_UNUSABLE","message":"模型没有给出可用的改写候选。","retryable":false,"details":{"sentState":"SENT_BUT_UNUSABLE"}}',
+  );
+  assert.equal(rewriteBillingOutcome(serialized), "billed_failure");
+
+  const notSent = JSON.parse(
+    '{"code":"VALIDATION","message":"还没有填写模型密钥。","retryable":false,"details":{"sentState":"NOT_SENT"}}',
+  );
+  assert.equal(rewriteBillingOutcome(notSent), "never_sent");
+});
+
 test("发送前的校验与凭据错误可以免确认重试", () => {
   for (const code of ["VALIDATION", "NOT_FOUND", "STORAGE_CORRUPT", "INTEGRITY_ERROR"]) {
     assert.equal(rewriteBillingOutcome({ code }), "never_sent", `${code} 属于发送前拒绝`);

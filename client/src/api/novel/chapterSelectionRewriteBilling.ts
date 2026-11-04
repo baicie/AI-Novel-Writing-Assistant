@@ -16,14 +16,44 @@ export type RewriteBillingOutcome =
   /** 服务端明确报错或返回不可用结果，这次可能已经计费。 */
   | "billed_failure";
 
+/** 内核写进 `error.details.sentState` 的发送状态。 */
+const SENT_STATE_OUTCOMES: Record<string, RewriteBillingOutcome> = {
+  NOT_SENT: "never_sent",
+  SENT_BUT_UNUSABLE: "billed_failure",
+  RESULT_UNKNOWN: "unknown",
+};
+
+/** 读取机器可读的发送状态；缺失或形状不对时返回 null，交给错误码兜底。 */
+function sentStateOutcome(record: Record<string, unknown>): RewriteBillingOutcome | null {
+  const details = record.details;
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+  const sentState = (details as Record<string, unknown>).sentState;
+  if (typeof sentState !== "string") {
+    return null;
+  }
+  // 认不出的发送状态不能当成「没发出去」：按可能计费处理。
+  return SENT_STATE_OUTCOMES[sentState] ?? "billed_failure";
+}
+
 /**
  * 把内核错误归到计费语义上。
  *
- * 只有 `MODEL_RESULT_UNKNOWN` 是「无法确认」；其余错误都由内核在发送前或明确失败后返回，
- * 不能仅凭一句错误文案去猜。
+ * 优先读内核给出的 `details.sentState`：它描述的是「请求到底有没有发出去」，
+ * 与错误码和中文文案都解耦。只有旧错误没有这个字段时才回退到错误码。
+ * 任何无法确认的情况都按「可能已计费」处理，不能声称免费重试。
  */
 export function rewriteBillingOutcome(error: unknown): RewriteBillingOutcome {
   const record = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const fromSentState = sentStateOutcome(record);
+  if (fromSentState) {
+    return fromSentState;
+  }
+  // 模型已经返回但输出不可用：已经调用过模型，不能当成发送前校验失败。
+  if (record.code === "MODEL_RESULT_UNUSABLE") {
+    return "billed_failure";
+  }
   if (record.code === "MODEL_RESULT_UNKNOWN") {
     return "unknown";
   }

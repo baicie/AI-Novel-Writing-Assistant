@@ -279,10 +279,16 @@ pub async fn rewrite_chapter_selection(
 ) -> Result<ChapterSelectionRewriteView, AppError> {
     let request_id = request.request_id.trim().to_string();
     if request_id.is_empty() {
-        return Err(AppError::validation("这次改写缺少请求编号。"));
+        return Err(with_sent_state(
+            AppError::validation("这次改写缺少请求编号。"),
+            RewriteSentState::NeverSent,
+        ));
     }
     if request.selected_text.trim().is_empty() {
-        return Err(AppError::validation("请先选中要改写的正文。"));
+        return Err(with_sent_state(
+            AppError::validation("请先选中要改写的正文。"),
+            RewriteSentState::NeverSent,
+        ));
     }
 
     // 选区必须仍然指向作者看到的那段文字：坐标漂移时拒绝改写，
@@ -292,10 +298,16 @@ pub async fn rewrite_chapter_selection(
         request.selection_from,
         request.selection_to,
     )
-    .ok_or_else(|| AppError::validation("选区超出正文范围，请重新选中后再试。"))?;
+    .ok_or_else(|| {
+        with_sent_state(
+            AppError::validation("选区超出正文范围，请重新选中后再试。"),
+            RewriteSentState::NeverSent,
+        )
+    })?;
     if actual != request.selected_text {
-        return Err(AppError::conflict(
-            "正文片段已变化，请重新选中内容后再生成改写。",
+        return Err(with_sent_state(
+            AppError::conflict("正文片段已变化，请重新选中内容后再生成改写。"),
+            RewriteSentState::NeverSent,
         ));
     }
 
@@ -304,10 +316,16 @@ pub async fn rewrite_chapter_selection(
         .runtime
         .director
         .get_chapter(&request.novel_id, &request.chapter_id)
-        .await?;
+        .await
+        .map_err(|error| with_sent_state(error, RewriteSentState::NeverSent))?;
 
     let asset = novel_prompt::resolve("chapter_selection_rewrite", "chapter-selection-rewrite-v1")
-        .map_err(|_| AppError::integrity("缺少选区改写的提示词版本。"))?;
+        .map_err(|_| {
+            with_sent_state(
+                AppError::integrity("缺少选区改写的提示词版本。"),
+                RewriteSentState::NeverSent,
+            )
+        })?;
     let mut vars = std::collections::BTreeMap::new();
     vars.insert(
         "operation_label".to_string(),
@@ -338,19 +356,25 @@ pub async fn rewrite_chapter_selection(
             request.chapter_title.trim().to_string()
         },
     );
-    let prompt = novel_prompt::render(asset.template, &vars)
-        .map_err(|_| AppError::integrity("选区改写的提示词渲染失败。"))?;
+    let prompt = novel_prompt::render(asset.template, &vars).map_err(|_| {
+        with_sent_state(
+            AppError::integrity("选区改写的提示词渲染失败。"),
+            RewriteSentState::NeverSent,
+        )
+    })?;
 
     // 走和其它生成一致的受控路由：任务类型 writer，拿不到绑定时回退到历史模型设置。
     let route = crate::commands::provider::service(&state)
         .resolve_route("writer")
         .await
-        .map_err(crate::commands::provider::to_app_error)?;
+        .map_err(crate::commands::provider::to_app_error)
+        .map_err(|error| with_sent_state(error, RewriteSentState::NeverSent))?;
     let legacy = state
         .kernel
         .load_model_setup()
         .await
-        .map_err(AppError::from)?
+        .map_err(AppError::from)
+        .map_err(|error| with_sent_state(error, RewriteSentState::NeverSent))?
         .map(|setup| novel_application::LegacyModelTarget {
             endpoint: setup.endpoint,
             model: setup.model,
@@ -359,8 +383,11 @@ pub async fn rewrite_chapter_selection(
         });
     let target =
         novel_application::resolve_generation_target(route, legacy, request.model.as_deref())
-            .map_err(crate::commands::provider::to_app_error)?;
-    let api_key = read_credential(state.secrets.as_ref(), &target.credential_ref).await?;
+            .map_err(crate::commands::provider::to_app_error)
+            .map_err(|error| with_sent_state(error, RewriteSentState::NeverSent))?;
+    let api_key = read_credential(state.secrets.as_ref(), &target.credential_ref)
+        .await
+        .map_err(|error| with_sent_state(error, RewriteSentState::NeverSent))?;
 
     // 先登记再发送：进程中途退出时记录会停在 sending，
     // 下次同一条请求编号回来就能看出「可能已经计费」，而不是当成从未发生。
@@ -375,10 +402,14 @@ pub async fn rewrite_chapter_selection(
         )
         .await
         .map_err(|error| {
-            AppError::conflict(match error {
-                novel_application::PortError::Conflict(message) => message,
-                other => other.to_string(),
-            })
+            with_sent_state(
+                AppError::conflict(match error {
+                    novel_application::PortError::Conflict(message) => message,
+                    other => other.to_string(),
+                }),
+                // 这次请求在登记阶段就被拒，没有发出；上一次的未知记录另有提示。
+                RewriteSentState::NeverSent,
+            )
         })?;
 
     let view = match execute_rewrite(
@@ -414,7 +445,7 @@ pub async fn rewrite_chapter_selection(
                         .mark_selection_rewrite_unknown(&request_id, &failure.error.message, now)
                         .await
                 }
-                RewriteSentState::Failed => {
+                RewriteSentState::SentButUnusable => {
                     state
                         .kernel
                         .mark_selection_rewrite_failed(&request_id, &failure.error.message, now)
@@ -444,10 +475,27 @@ pub async fn rewrite_chapter_selection(
 enum RewriteSentState {
     /// 请求没有发出：校验、凭据或路由在发送前就拒绝了。
     NeverSent,
-    /// 已发出且拿到明确失败：可能已计费，但结果不是未知。
-    Failed,
+    /// 已发出且模型返回，但结果不可用：可能已计费，结果本身不是未知。
+    SentButUnusable,
     /// 可能已到达模型服务，但没有可确认的结果。
     ResultUnknown,
+}
+
+impl RewriteSentState {
+    /// 跨进程给界面读的发送状态：不依赖任何中文文案。
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NeverSent => "NOT_SENT",
+            Self::SentButUnusable => "SENT_BUT_UNUSABLE",
+            Self::ResultUnknown => "RESULT_UNKNOWN",
+        }
+    }
+}
+
+/// 把发送状态写进错误的机器可读字段；界面优先读它，而不是猜错误码或文案。
+fn with_sent_state(mut error: AppError, state: RewriteSentState) -> AppError {
+    error.details = Some(serde_json::json!({ "sentState": state.as_str() }));
+    error
 }
 
 #[derive(Debug)]
@@ -460,15 +508,18 @@ impl RewriteFailure {
     fn never_sent(error: AppError) -> Self {
         Self {
             sent_state: RewriteSentState::NeverSent,
-            error,
+            error: with_sent_state(error, RewriteSentState::NeverSent),
         }
     }
 
     /// 请求已经发出、且拿到了模型返回，但结果不可用：这次调用已经产生费用。
     fn sent_but_unusable(message: impl Into<String>) -> Self {
         Self {
-            sent_state: RewriteSentState::Failed,
-            error: AppError::validation(message),
+            sent_state: RewriteSentState::SentButUnusable,
+            error: with_sent_state(
+                AppError::model_result_unusable(message),
+                RewriteSentState::SentButUnusable,
+            ),
         }
     }
 
@@ -479,18 +530,23 @@ impl RewriteFailure {
             novel_llm::LlmError::Unavailable { billed: true, .. } => {
                 RewriteSentState::ResultUnknown
             }
-            // 其余都发生在发送失败、鉴权失败或响应解析阶段，结果是明确的失败。
-            _ => RewriteSentState::Failed,
+            // 本地预算在发送前就拒绝：确定没有发出。
+            novel_llm::LlmError::BudgetExceeded(_) => RewriteSentState::NeverSent,
+            // 其余发生在请求已到达服务端之后（鉴权、限流、端点拒绝、响应解析）。
+            // 拿不到确认的计费结果时按「可能已计费」处理，不能允许无提示重试。
+            _ => RewriteSentState::SentButUnusable,
         };
-        let app_error = if sent_state == RewriteSentState::ResultUnknown {
-            AppError::model_result_unknown(format!(
+        let app_error = match sent_state {
+            RewriteSentState::ResultUnknown => AppError::model_result_unknown(format!(
                 "{error}。这次改写可能已经发送到模型服务，结果无法确认；请先检查后再决定是否重新生成。"
-            ))
-        } else {
-            AppError::validation(error.to_string())
+            )),
+            RewriteSentState::SentButUnusable => AppError::model_result_unusable(format!(
+                "{error}。这次改写已经发送到模型服务，可能已经产生费用；重新生成会再次调用模型。"
+            )),
+            RewriteSentState::NeverSent => AppError::validation(error.to_string()),
         };
         Self {
-            error: app_error,
+            error: with_sent_state(app_error, sent_state),
             sent_state,
         }
     }
@@ -976,6 +1032,11 @@ mod rewrite_tests {
         }
     }
 
+    /// 读错误的机器可读发送状态：与前端使用的是同一字段。
+    fn sent_state_of(error: &AppError) -> Option<&str> {
+        error.details.as_ref()?.get("sentState")?.as_str()
+    }
+
     async fn rewrite_failure_for(error: novel_llm::LlmError) -> RewriteFailure {
         let provider = FailingProvider { error };
         let target = novel_application::GenerationTarget {
@@ -1046,8 +1107,8 @@ mod rewrite_tests {
             let failure = rewrite_failure_for(error).await;
             assert_eq!(
                 failure.sent_state,
-                RewriteSentState::Failed,
-                "{label} 应当是可确认的失败"
+                RewriteSentState::SentButUnusable,
+                "{label} 发生在请求到达服务端之后，不能算从未发送"
             );
             assert_ne!(
                 failure.error.code,
@@ -1132,6 +1193,103 @@ mod rewrite_tests {
             "要说明这次调用已经产生费用：{}",
             failure.error.message
         );
+    }
+
+    /// 模型已经返回但输出不可用：错误必须是机器可读的 `MODEL_RESULT_UNUSABLE`，
+    /// 不能再复用发送前校验的 `VALIDATION`，否则界面会当成「没发出去、可以免费重试」。
+    #[tokio::test]
+    async fn unusable_model_output_reports_sent_but_unusable_contract() {
+        /// 固定返回一段文本的 Provider：用来覆盖「已发送、但结果不可用」的解析边界。
+        struct FixedTextProvider(&'static str);
+
+        #[async_trait::async_trait]
+        impl novel_llm::LlmProvider for FixedTextProvider {
+            fn capabilities(&self) -> novel_llm::ProviderCapabilities {
+                novel_llm::ProviderCapabilities {
+                    streaming: false,
+                    structured_output: false,
+                    tool_call: false,
+                    reasoning: false,
+                    context_limit: 0,
+                }
+            }
+
+            async fn generate(
+                &self,
+                _request: LlmRequest,
+                _tokens: tokio::sync::mpsc::Sender<String>,
+                _cancel: CancellationToken,
+            ) -> Result<novel_llm::LlmResponse, novel_llm::LlmError> {
+                Ok(novel_llm::LlmResponse {
+                    text: self.0.to_string(),
+                    usage: novel_llm::TokenUsage::unknown(),
+                })
+            }
+        }
+
+        let target = novel_application::GenerationTarget {
+            allow_localhost_http: false,
+            ..ollama_target("https://ollama.example.com".into())
+        };
+        for (label, text) in [
+            ("非法 JSON", "这不是 JSON"),
+            ("缺少 candidates", "{\"macroAlignmentNote\":\"x\"}"),
+            ("空候选", "{\"candidates\":[]}"),
+            ("只有空白候选", "{\"candidates\":[{\"content\":\"   \"}]}"),
+        ] {
+            let failure = execute_rewrite(
+                &FixedTextProvider(text),
+                &target,
+                "sk-remote".into(),
+                "改写请求".into(),
+                "req-unusable".into(),
+            )
+            .await
+            .expect_err("模型输出不可用时必须失败");
+            assert_eq!(
+                failure.sent_state,
+                RewriteSentState::SentButUnusable,
+                "{label} 发生在模型返回之后，不能算从未发送"
+            );
+            assert_eq!(
+                failure.error.code,
+                novel_application::AppErrorCode::ModelResultUnusable,
+                "{label} 必须使用独立的机器可读错误码"
+            );
+            assert_eq!(
+                sent_state_of(&failure.error),
+                Some("SENT_BUT_UNUSABLE"),
+                "{label} 的发送状态要能跨进程传到界面"
+            );
+            assert!(!failure.error.retryable, "{label} 不能被标记为可自动重试");
+        }
+    }
+
+    /// 跨 Rust / 前端的错误契约：三个发送状态都有稳定的机器可读表示。
+    #[test]
+    fn rewrite_error_contract_carries_machine_readable_sent_state() {
+        let cases = [
+            (
+                RewriteFailure::never_sent(AppError::validation("还没有填写模型密钥。")),
+                "VALIDATION",
+                "NOT_SENT",
+            ),
+            (
+                RewriteFailure::sent_but_unusable("模型没有给出可用的改写候选。"),
+                "MODEL_RESULT_UNUSABLE",
+                "SENT_BUT_UNUSABLE",
+            ),
+            (
+                RewriteFailure::from_llm_error(novel_llm::LlmError::Timeout),
+                "MODEL_RESULT_UNKNOWN",
+                "RESULT_UNKNOWN",
+            ),
+        ];
+        for (failure, expected_code, expected_sent_state) in cases {
+            let json = serde_json::to_value(&failure.error).expect("错误必须能序列化给前端");
+            assert_eq!(json["code"], expected_code);
+            assert_eq!(json["details"]["sentState"], expected_sent_state);
+        }
     }
 
     /// 凭据库不可用与「没填密钥」是两种状态，不能互相冒充。

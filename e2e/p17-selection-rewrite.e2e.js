@@ -23,6 +23,8 @@ function createMockModel() {
     requests: [],
     /** 下一次生成要返回的候选正文；为空时用默认候选。 */
     nextCandidates: null,
+    /** 下一次生成返回的原始文本；用来模拟「模型返回了，但输出不可用」。 */
+    nextRawContent: null,
     /** 让下一次请求挂起，用来验证「进行中」与重试保护。 */
     holdNext: null,
   };
@@ -56,12 +58,19 @@ function createMockModel() {
 }
 
 function respond(res, state) {
-  const candidates = state.nextCandidates ?? [
-    { label: "克制", content: "他停在门口，没有说话。\n\n风从缝里挤进来，灯影晃了一下。" },
-    { label: "收紧", content: "他停在门口。\n\n风挤进来，灯影一晃。" },
-  ];
-  state.nextCandidates = null;
-  const content = JSON.stringify({ candidates, macroAlignmentNote: "贴合本章压抑的气氛。" });
+  let content;
+  if (state.nextRawContent != null) {
+    // 模型调用成功返回，但内容不是可解析的候选：用于验证「已计费但不可用」的提示。
+    content = state.nextRawContent;
+    state.nextRawContent = null;
+  } else {
+    const candidates = state.nextCandidates ?? [
+      { label: "克制", content: "他停在门口，没有说话。\n\n风从缝里挤进来，灯影晃了一下。" },
+      { label: "收紧", content: "他停在门口。\n\n风挤进来，灯影一晃。" },
+    ];
+    state.nextCandidates = null;
+    content = JSON.stringify({ candidates, macroAlignmentNote: "贴合本章压抑的气氛。" });
+  }
   // OpenAI 兼容协议按 SSE 读取；这里返回一条完整的 delta 与结束标记。
   res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -358,6 +367,36 @@ describe("选区改写的完整作者旅程（桌面原生）", () => {
     // 进行中按钮应被禁用：连点不会触发第二次请求。
     await polish.click().catch(() => undefined);
     await browser.pause(2500);
+    expect(mock.state.requests.length).toBe(before + 1);
+  });
+
+  it("模型返回不可用输出时提示可能已计费，且不改正文", async () => {
+    // 上一条用例停在候选对比视图，先拒绝全部回到可编辑状态。
+    await $('[data-testid="chapter-revision-reject"]').click();
+    await browser.pause(1500);
+
+    const before = mock.state.requests.length;
+    const beforeChapter = await invoke("get_chapter", { novelId, chapterId: firstChapterId });
+    // 真实 HTTP mock：请求会到达模型服务并记账，只是返回内容不可解析。
+    mock.state.nextRawContent = "这不是可解析的改写结果";
+
+    await selectEditorText("灯还亮着，桌上摊着半张地图。");
+    const toolbar = await $('[data-testid="selection-ai-toolbar"]');
+    await toolbar.waitForExist({ timeout: 10000 });
+    await $('[data-testid="selection-ai-polish"]').click();
+
+    const panel = await $('[data-testid="chapter-revision-error"]');
+    await panel.waitForExist({ timeout: 20000 });
+    const message = await panel.getText();
+    // 模型已被调用：提示必须说明可能已计费、重新生成会再次调用模型。
+    expect(message).toContain("可能已经产生费用");
+    expect(message).toContain("再次调用模型");
+    expect(message).not.toContain("没有产生费用");
+
+    // 真实 IPC 读回官方正文：失败的改写不能改动正文或正式版本。
+    const official = await invoke("get_chapter", { novelId, chapterId: firstChapterId });
+    expect(official.content).toBe(beforeChapter.content);
+    expect(official.officialVersion).toBe(beforeChapter.officialVersion);
     expect(mock.state.requests.length).toBe(before + 1);
   });
 });

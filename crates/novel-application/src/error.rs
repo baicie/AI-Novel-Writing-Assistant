@@ -14,6 +14,9 @@ pub enum AppErrorCode {
     /// 请求可能已经到达模型服务，但没有拿到可确认的结果。
     /// 与普通失败区分开：界面不能把它描述成「一定没扣费」，也不能自动重发。
     ModelResultUnknown,
+    /// 模型已经返回，但输出无法使用（非法 JSON、空候选）。
+    /// 这次调用已经发出并可能计费；界面不能按「发送前校验失败」处理。
+    ModelResultUnusable,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +57,11 @@ impl AppError {
     /// 结果未知：可能已经计费，调用方不能自动重试，只能请作者显式确认。
     pub fn model_result_unknown(message: impl Into<String>) -> Self {
         Self::new(AppErrorCode::ModelResultUnknown, message, false)
+    }
+
+    /// 已发送且模型返回，但结果不可用：同样可能已经计费。
+    pub fn model_result_unusable(message: impl Into<String>) -> Self {
+        Self::new(AppErrorCode::ModelResultUnusable, message, false)
     }
 }
 

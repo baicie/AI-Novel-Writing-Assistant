@@ -61,6 +61,9 @@ pub fn map_error_to_http(error: AppError) -> HttpErrorResponse {
         AppErrorCode::ModelResultUnknown => {
             (HttpStatusCode::InternalServerError, "MODEL_RESULT_UNKNOWN")
         }
+        AppErrorCode::ModelResultUnusable => {
+            (HttpStatusCode::InternalServerError, "MODEL_RESULT_UNUSABLE")
+        }
     };
 
     let error_response = ErrorResponse::new(error_code, &error.message);
