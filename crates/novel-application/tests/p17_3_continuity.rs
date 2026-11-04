@@ -441,6 +441,41 @@ async fn chapter_version_change_marks_fact_stale_and_candidate_expired() {
 }
 
 #[tokio::test]
+async fn ambiguous_candidate_requires_manual_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = kernel(&dir).await;
+    seed_novel(kernel.as_ref(), "n", 5).await;
+    add_character(kernel.as_ref(), "n", "c1", "林动").await;
+    save_chapter(kernel.as_ref(), "n", "n-ch2", 2, 0).await;
+    add_candidate(
+        kernel.as_ref(),
+        "n",
+        "n-ch2",
+        1,
+        "cand-ambiguous",
+        "状态：受伤",
+        Some("c1"),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE memory_extraction_candidate SET ambiguous = 1, entity_id = NULL WHERE id = 'cand-ambiguous'",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+
+    let service = ChapterContinuityService::new(kernel.clone(), kernel.clone(), kernel.clone());
+    let projection = service.project("n", "n-ch3").await.unwrap();
+    let candidate = projection
+        .candidates
+        .iter()
+        .find(|candidate| candidate.id == "cand-ambiguous")
+        .expect("歧义候选必须展示，供作者指定人物");
+    assert!(candidate.ambiguous);
+    assert!(!candidate.can_confirm, "同名/未绑定人物的候选不能直接确认");
+}
+
+#[tokio::test]
 async fn story_fact_without_source_is_marked_unavailable() {
     let dir = tempfile::tempdir().unwrap();
     let kernel = kernel(&dir).await;
