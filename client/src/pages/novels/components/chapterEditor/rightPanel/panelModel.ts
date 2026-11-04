@@ -8,9 +8,9 @@ export interface CastItem {
   currentGoal?: string | null;
 }
 
-export type PanelTab = "revise" | "review" | "cast" | "run";
+export type PanelTab = "revise" | "review" | "cast" | "context" | "run";
 
-const PANEL_TABS: PanelTab[] = ["revise", "review", "cast", "run"];
+const PANEL_TABS: PanelTab[] = ["revise", "review", "cast", "context", "run"];
 
 /** 页签选择要跨章节保持：同一本书里切章不该把作者丢回默认页签。 */
 export function readStoredPanelTab(novelId: string, storage?: Storage | null): PanelTab {

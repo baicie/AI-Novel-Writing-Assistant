@@ -923,6 +923,7 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
             chapterId={chapter?.id ?? ""}
             workspace={workspace}
             selectedDiagnosticId={selectedDiagnosticId}
+            onOpenChapter={(sourceChapterId) => leaveEditor(() => onSelectChapter?.(sourceChapterId))}
             world={world}
             characters={characters}
             onFocusDiagnostic={handleFocusDiagnostic}

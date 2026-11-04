@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use novel_application::{
-    NewStructuredFact, PortError, StructuredFactView, StructuredMemoryRepository,
+    NewStructuredFact, PortError, StructuredFactView, StructuredFactWithSource,
+    StructuredMemoryRepository,
 };
 use sqlx::{Row, Sqlite, Transaction};
 
@@ -26,61 +27,8 @@ fn view(row: &sqlx::sqlite::SqliteRow) -> Result<StructuredFactView, PortError> 
     })
 }
 
-fn relationship_value(fact: &StructuredFactView) -> (String, String, bool) {
-    let value = parse_value(&fact.value_json);
-    let target = value
-        .get("targetEntityId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let relation = value
-        .get("relation")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let active = value
-        .get("active")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    (target, relation, active)
-}
-
-/// Apply As-Of visibility to confirmed facts that already passed source validity.
-/// Single-valued types keep the latest fact; relationships keep the latest per
-/// directed pair/type and omit terminated relations. Aliases coexist.
-pub(crate) fn visible_facts_at(mut rows: Vec<StructuredFactView>) -> Vec<StructuredFactView> {
-    rows.sort_by(|left, right| {
-        right
-            .effective_chapter_order
-            .cmp(&left.effective_chapter_order)
-            .then_with(|| right.updated_at.cmp(&left.updated_at))
-            .then_with(|| right.created_at.cmp(&left.created_at))
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    let mut seen_single: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut seen_relation: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for fact in rows {
-        match fact.fact_type.as_str() {
-            "location" | "life_state" => {
-                let key = format!("{}:{}", fact.entity_id, fact.fact_type);
-                if seen_single.insert(key) {
-                    out.push(fact);
-                }
-            }
-            "alias" => out.push(fact),
-            "relationship" => {
-                let (target, relation, active) = relationship_value(&fact);
-                let key = format!("{}:{}:{}", fact.entity_id, target, relation);
-                if seen_relation.insert(key) && active {
-                    out.push(fact);
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
+/// As-Of 可见事实规则与投影共用同一份实现，避免两套口径。
+pub(crate) use novel_application::visible_facts_at;
 
 fn parse_value(raw: &str) -> serde_json::Value {
     serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
@@ -198,6 +146,42 @@ impl StructuredMemoryRepository for SqliteKernel {
             facts = visible_facts_at(facts);
         }
         Ok(facts)
+    }
+
+    async fn list_structured_facts_with_source(
+        &self,
+        novel_id: &str,
+        as_of_chapter_order: i64,
+        limit: i64,
+    ) -> Result<Vec<StructuredFactWithSource>, PortError> {
+        let rows = sqlx::query(
+            "SELECT f.*, c.sort_order AS source_chapter_order, c.title AS source_chapter_title,
+                    r.version AS source_current_version
+             FROM structured_story_fact f
+             LEFT JOIN chapter c ON c.id = f.source_chapter_id AND c.novel_id = f.novel_id
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE f.novel_id = ? AND f.effective_chapter_order <= ?
+             ORDER BY f.effective_chapter_order DESC, f.updated_at DESC, f.id DESC
+             LIMIT ?",
+        )
+        .bind(novel_id)
+        .bind(as_of_chapter_order)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(StructuredFactWithSource {
+                    fact: view(row)?,
+                    source_chapter_order: row.try_get("source_chapter_order").map_err(map_sql)?,
+                    source_chapter_title: row.try_get("source_chapter_title").map_err(map_sql)?,
+                    source_current_version: row
+                        .try_get("source_current_version")
+                        .map_err(map_sql)?,
+                })
+            })
+            .collect()
     }
 
     async fn confirm_structured_fact(

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-chapter-continuity"
+description = "Enables the get_chapter_continuity command without any pre-configured scope."
+commands.allow = ["get_chapter_continuity"]
+
+[[permission]]
+identifier = "deny-get-chapter-continuity"
+description = "Denies the get_chapter_continuity command without any pre-configured scope."
+commands.deny = ["get_chapter_continuity"]

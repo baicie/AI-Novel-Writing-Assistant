@@ -174,6 +174,10 @@ export interface StoryFactView {
   chapterOrder: number;
   sourceRevision?: string | null;
   status: string;
+  sourceChapterId?: string | null;
+  evidenceQuote?: string | null;
+  characterId?: string | null;
+  characterName?: string | null;
 }
 
 export function listStoryFacts(input: { novelId: string; beforeChapterOrder: number }): Promise<StoryFactView[]> {
@@ -260,6 +264,173 @@ export function resolveMemoryConflict(input: {
 
 export function updateMemoryCandidateValue(input: { candidateId: string; expectedVersion: number; value: string }): Promise<MemoryCandidateView> {
   return invoke("update_memory_candidate_value", input);
+}
+
+// ---- P17.3：章节连续性投影与上下文预览 ----
+
+export interface ContinuityWorld {
+  id: string;
+  name: string;
+  description: string;
+  overviewSummary: string;
+  status: string;
+  updatedAt: number;
+}
+
+export interface ContinuityCharacterState {
+  body: string;
+  chapterOrder?: number | null;
+  sourceChapterId?: string | null;
+  evidenceQuote?: string | null;
+  sourceRevision?: string | null;
+}
+
+export interface ContinuityCharacter {
+  id: string;
+  name: string;
+  role: string;
+  currentState?: ContinuityCharacterState | null;
+  latestChange?: string | null;
+  pendingCandidateCount: number;
+  factIds: string[];
+}
+
+export interface ContinuityFact {
+  id: string;
+  kind: string;
+  entityId?: string | null;
+  entityName?: string | null;
+  factType: string;
+  value: string;
+  valueJson?: string | null;
+  truthfulness: string;
+  effectiveChapterOrder: number;
+  sourceChapterId?: string | null;
+  sourceChapterOrder?: number | null;
+  sourceChapterTitle?: string | null;
+  sourceRevision?: number | null;
+  sourceCurrentVersion?: number | null;
+  evidenceQuote?: string | null;
+  status: string;
+}
+
+export interface ContinuityCandidate {
+  id: string;
+  chapterId: string;
+  chapterOrder?: number | null;
+  chapterTitle?: string | null;
+  chapterVersion: number;
+  currentChapterVersion?: number | null;
+  factType: string;
+  truthfulness: string;
+  entityName?: string | null;
+  entityId?: string | null;
+  value: string;
+  evidenceQuote: string;
+  status: string;
+  ambiguous: boolean;
+  version: number;
+  expired: boolean;
+  canConfirm: boolean;
+  createdAt: number;
+}
+
+export interface ContinuityConflictSide {
+  kind: string;
+  id: string;
+  value?: string | null;
+  sourceChapterId?: string | null;
+  sourceChapterOrder?: number | null;
+  sourceChapterTitle?: string | null;
+  evidenceQuote?: string | null;
+  status: string;
+  available: boolean;
+}
+
+export interface ContinuityConflict {
+  id: string;
+  conflictType: string;
+  entityKey: string;
+  chapterId: string;
+  chapterOrder: number;
+  status: string;
+  version: number;
+  description: string;
+  candidateIds: string[];
+  factIds: string[];
+  sides: ContinuityConflictSide[];
+}
+
+export interface ContinuityLimits {
+  structuredFactLimit: number;
+  factsTruncated: boolean;
+  candidateLimit: number;
+  candidatesTruncated: boolean;
+  conflictLimit: number;
+  conflictsTruncated: boolean;
+}
+
+export interface ChapterContinuityProjection {
+  novelId: string;
+  chapterId: string;
+  chapterOrder: number;
+  chapterVersion: number;
+  worlds: ContinuityWorld[];
+  characters: ContinuityCharacter[];
+  facts: ContinuityFact[];
+  staleFacts: ContinuityFact[];
+  candidates: ContinuityCandidate[];
+  conflicts: ContinuityConflict[];
+  limits: ContinuityLimits;
+}
+
+export interface ContextSourceTrace {
+  sourceType: string;
+  sourceId: string;
+  sourceVersion?: number | null;
+  sourceStatus: string;
+  selected: boolean;
+  exclusionReason?: string | null;
+  estimatedTokens: number;
+  contentHash?: string | null;
+}
+
+export interface ContextTrace {
+  assemblyVersion: string;
+  targetChapterId: string;
+  inputBudget: number;
+  outputReserve: number;
+  estimatedTokens: number;
+  contentHash: string;
+  sources: ContextSourceTrace[];
+}
+
+export interface ContextPreview {
+  trace: ContextTrace;
+  blockedReasons: string[];
+}
+
+export function getChapterContinuity(input: {
+  novelId: string;
+  chapterId: string;
+}): Promise<ChapterContinuityProjection> {
+  return invoke("get_chapter_continuity", input);
+}
+
+export function previewChapterContext(input: {
+  novelId: string;
+  chapterId: string;
+  inputBudget?: number;
+  outputReserve?: number;
+}): Promise<ContextPreview> {
+  return invoke("preview_chapter_context", input);
+}
+
+export function getRunContextTrace(input: {
+  novelId: string;
+  runId: string;
+}): Promise<ContextTrace | null> {
+  return invoke("get_run_context_trace", input);
 }
 
 export function upsertTimelineEvent(input: {

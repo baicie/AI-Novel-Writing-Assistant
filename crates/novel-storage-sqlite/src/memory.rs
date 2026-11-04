@@ -124,6 +124,56 @@ impl MemoryRepository for SqliteKernel {
         rows.iter().map(candidate_from_row).collect()
     }
 
+    async fn list_continuity_candidates(
+        &self,
+        novel_id: &str,
+        max_chapter_order: i32,
+        limit: i64,
+    ) -> Result<Vec<MemoryCandidateView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT c.id, c.job_id, c.novel_id, c.chapter_id, c.chapter_version,
+                    c.source_content_hash, c.fact_type, c.truthfulness, c.entity_name,
+                    c.entity_id, c.value, c.evidence_quote, c.evidence_start, c.confidence,
+                    c.status, c.ambiguous, c.version, c.decision_reason, c.created_at, c.updated_at
+             FROM memory_extraction_candidate c
+             JOIN chapter ch ON ch.id = c.chapter_id
+             WHERE c.novel_id = ? AND c.status IN ('proposed','deferred') AND ch.sort_order <= ?
+             ORDER BY ch.sort_order DESC, c.created_at DESC, c.id
+             LIMIT ?",
+        )
+        .bind(novel_id)
+        .bind(max_chapter_order)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter().map(candidate_from_row).collect()
+    }
+
+    async fn list_continuity_conflicts(
+        &self,
+        novel_id: &str,
+        max_chapter_order: i32,
+        limit: i64,
+    ) -> Result<Vec<MemoryConflictView>, PortError> {
+        let rows = sqlx::query(
+            "SELECT id, novel_id, conflict_type, entity_key, chapter_id, chapter_order,
+                    candidate_ids_json, fact_ids_json, status, version, description,
+                    created_at, updated_at
+             FROM memory_conflict
+             WHERE novel_id = ? AND status = 'open' AND chapter_order <= ?
+             ORDER BY chapter_order, created_at, id
+             LIMIT ?",
+        )
+        .bind(novel_id)
+        .bind(max_chapter_order)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter().map(conflict_from_row).collect()
+    }
+
     async fn confirm_memory_candidate(
         &self,
         candidate_id: &str,

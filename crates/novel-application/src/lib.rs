@@ -3,6 +3,7 @@
 mod app;
 mod batch;
 mod context;
+mod continuity;
 // 编排层函数按显式参数传值，便于调用方看到完整契约；拆结构体属于后续重构，先按模块允许。
 #[allow(clippy::too_many_arguments)]
 mod director;
@@ -45,8 +46,14 @@ pub use batch::{
     NewBatchRun,
 };
 pub use context::{
-    CONTEXT_ASSEMBLY_VERSION, ContextAssembly, ContextSourceTrace, ContextTrace,
-    DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, assemble_director_context,
+    CONTEXT_ASSEMBLY_VERSION, ContextAssembly, ContextPreview, ContextSourceTrace, ContextTrace,
+    DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, MAX_CONTEXT_TOKEN_BUDGET,
+    assemble_director_context, preview_director_context,
+};
+pub use continuity::{
+    CONTINUITY_CANDIDATE_LIMIT, CONTINUITY_CONFLICT_LIMIT, ChapterContinuityProjection,
+    ChapterContinuityService, ContinuityCandidate, ContinuityCharacter, ContinuityCharacterState,
+    ContinuityConflict, ContinuityConflictSide, ContinuityFact, ContinuityLimits, ContinuityWorld,
 };
 pub use director::{DirectorService, OpenRunInput};
 pub use dto::{
@@ -67,7 +74,7 @@ pub use native_tasks::{
     NativeTaskQuery, NativeTaskRepository, NativeTaskService, NativeTaskSummary,
 };
 pub use ports::{
-    CandidateBody, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
+    CandidateBody, ChapterHeader, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,
     DeleteChapterRecord, FaultInjector, Ids, IndexJobRepository, IndexJobView,
     KnowledgeDocumentBody, KnowledgeRepository, LeaseFence, LookupRepository, MemoryCandidateView,
     MemoryConflictView, MemoryExtractionJobView, MemoryRepository, ModelSecrets, NewArtifact,
@@ -91,7 +98,8 @@ pub use runtime::{Runtime, RuntimeDeps};
 pub use selection_rewrite::{SelectionRewriteAttemptState, SelectionRewriteAttemptView};
 pub use setup::SetupService;
 pub use structured_memory::{
-    NewStructuredFact, StructuredFactView, StructuredMemoryRepository, StructuredMemoryService,
+    NewStructuredFact, StructuredFactView, StructuredFactWithSource, StructuredMemoryRepository,
+    StructuredMemoryService, visible_facts_at,
 };
 pub use tasks::TaskCenterService;
 pub use usecase::{ChapterUseCases, NovelUseCases, PromoteOutcomeDto, RunUseCases};
