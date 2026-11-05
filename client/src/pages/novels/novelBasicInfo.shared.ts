@@ -373,6 +373,9 @@ export function buildNovelCreatePayload(basicForm: NovelBasicFormState) {
   const commercialTags = normalizeCommercialTags(basicForm.commercialTagsText);
   return {
     title: basicForm.title.trim(),
+    // 手动创建页填写的是专业创作字段；桌面本地内核必须创建专业项目，
+    // 否则会跳到尚未接入本地内核的简易书架。
+    creationExperience: "professional" as const,
     description: basicForm.description.trim() || undefined,
     targetAudience: basicForm.targetAudience.trim() || undefined,
     bookSellingPoint: basicForm.bookSellingPoint.trim() || undefined,
