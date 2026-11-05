@@ -1310,10 +1310,17 @@ async fn concurrent_causality_edges_cannot_form_a_cycle() {
         first.create_causality_edge(edge("race-edge-1", "edge-a", "edge-b")),
         second.create_causality_edge(edge("race-edge-2", "edge-b", "edge-a"))
     );
+    assert_eq!(
+        usize::from(left.is_ok()) + usize::from(right.is_ok()),
+        1,
+        "并发建边只能有一条成功"
+    );
+    let failure = if left.is_err() { &left } else { &right };
     assert!(
-        !(left.is_ok() && right.is_ok()),
-        "并发建边不能同时写入互相依赖的两条边"
+        matches!(failure, Err(PortError::Conflict(_))),
+        "锁冲突或环检测失败必须报告为冲突，不能伪装成成功：{failure:?}"
     );
     let edges = first.list_causality_edges("n1").await.unwrap();
-    assert_eq!(edges.len(), 1);
+    assert_eq!(edges.len(), 1, "失败操作不能留下半完成边");
+    assert!(edges[0].from_valid && edges[0].to_valid);
 }

@@ -1489,10 +1489,23 @@ impl NovelRepository for SqliteKernel {
                       COALESCE(e.evidence, p.evidence_json, mc.evidence_quote)
                         AS effective_evidence,
                       CASE
-                        WHEN e.id IS NULL THEN 1
-                        WHEN er.version = e.source_revision
-                             AND instr(er.content, e.evidence) > 0 THEN 1
-                        ELSE 0
+                        WHEN e.id IS NOT NULL THEN
+                          CASE WHEN er.version = e.source_revision
+                                    AND instr(er.content, e.evidence) > 0
+                               THEN 1 ELSE 0 END
+                        WHEN p.source_chapter_id IS NULL
+                             OR p.evidence_json IS NULL
+                             OR trim(p.evidence_json) = '' THEN 0
+                        ELSE (
+                          SELECT CASE
+                            WHEN pr.version = CAST(REPLACE(p.source_revision, 'memory:', '') AS INTEGER)
+                                 AND instr(pr.content, p.evidence_json) > 0 THEN 1
+                            ELSE 0
+                          END
+                          FROM chapter pc
+                          JOIN chapter_revision pr ON pr.id = pc.official_revision_id
+                          WHERE pc.id = p.source_chapter_id AND pc.novel_id = p.novel_id
+                        )
                       END AS source_valid
                FROM plot_base p
                LEFT JOIN plot_thread_event e ON e.id = (

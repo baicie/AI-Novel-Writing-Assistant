@@ -395,8 +395,17 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
             ))}
           </select>
         </div>
+        {workspace.timelineTruncated ? (
+          <div className="text-[11px] text-amber-800" data-testid="plot-timeline-partial">
+            时间线只加载最近 {workspace.timelineLimit} 条；筛选只作用于这些条目，更早记录未加载。
+          </div>
+        ) : null}
         {filteredTimeline.length === 0 ? (
-          <div className="text-xs text-muted-foreground">当前筛选下没有时间线条目。</div>
+          <div className="text-xs text-muted-foreground">
+            {workspace.timelineTruncated
+              ? `最近 ${workspace.timelineLimit} 条中没有匹配；更早记录未加载。`
+              : "当前筛选下没有时间线条目。"}
+          </div>
         ) : (
           <ul className="space-y-1">
             {filteredTimeline.map((entry: TimelineEntryView) => (
@@ -426,7 +435,9 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
           </ul>
         )}
         {workspace.timelineTruncated ? (
-          <div className="text-[11px] text-amber-800">时间线超过 {workspace.timelineLimit} 条，已优先显示最近条目。</div>
+          <div className="text-[11px] text-amber-800">
+            时间线只加载最近 {workspace.timelineLimit} 条；更早记录未加载。
+          </div>
         ) : null}
       </section>
 

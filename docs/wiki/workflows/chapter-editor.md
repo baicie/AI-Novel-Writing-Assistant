@@ -114,6 +114,9 @@
   不参与生命周期动作；`disputed` 的裁决仍走记忆冲突入口。
 - 旧 `plot_thread` 行没有事件历史时，`resolved` 只在 `resolved_chapter_order <= As-Of` 时显示；
   不能把当前状态直接回填到更早章节。没有证据的旧行显示 `stale`，作者可用新证据恢复。
+- `list_story_facts` 是可信事实读取面：事件来源失效、`stale`/`superseded`/`disputed` 状态、
+  以及没有来源证据或来源版本无法核对的旧行都不进入 Director 上下文；数据仍保留在工作台，
+  由作者补证据后恢复。不要用删除旧行的方式处理兼容。
 - 动作白名单按“展示状态”判断：存储里仍是 `resolved`/`deferred` 但来源失效时，作者仍可用
   `recover`/`payoff`/`abandon` 修复，不能因为存储值而拒绝所有动作。
 - 新动作的章节顺序必须不早于已有最新事件；否则新增事件会被更晚事件遮住，造成当前行状态与
