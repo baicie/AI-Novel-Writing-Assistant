@@ -68,6 +68,13 @@ async fn upgrade_from_0025_preserves_plot_threads_and_adds_lifecycle() {
         .unwrap();
         assert_eq!(exists, 1, "{table} must exist after upgrade");
     }
+    let index: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'plot_thread_event_plot'",
+    )
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(index, 1, "As-Of 折叠需要按 plot_id 的覆盖索引");
     drop(kernel);
 
     // 再次打开不重复执行迁移，也不丢历史行。

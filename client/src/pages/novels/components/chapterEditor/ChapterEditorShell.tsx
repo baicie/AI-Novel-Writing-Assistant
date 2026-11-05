@@ -233,6 +233,10 @@ export default function ChapterEditorShell(props: ChapterEditorShellProps) {
         ? queryClient.invalidateQueries({ queryKey: queryKeys.novels.chapterAuditReports(novelId, chapter.id) })
         : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: queryKeys.novels.latestStateSnapshot(novelId) }),
+      // 正文变化会让同一本书其他章节的 As-Of 伏笔/事实全部重新评估，不能只刷新当前章。
+      queryClient.invalidateQueries({ queryKey: ["novels", "plot-workspace", novelId] }),
+      queryClient.invalidateQueries({ queryKey: ["novels", "chapter-continuity", novelId] }),
+      queryClient.invalidateQueries({ queryKey: ["novels", "chapter-context-preview", novelId] }),
     ]);
   };
 

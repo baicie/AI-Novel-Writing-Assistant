@@ -26,6 +26,8 @@ const STATUS_LABELS: Record<string, string> = {
   abandoned: "已废弃",
   stale: "来源失效",
   superseded: "已失效",
+  disputed: "待确认",
+  confirmed: "已确认",
 };
 
 const TIMELINE_LABELS: Record<string, string> = {
@@ -70,7 +72,7 @@ function scenarioId(prefix: string): string {
 
 function statusBadgeClass(status: string): string {
   if (status === "resolved") return "bg-emerald-100 text-emerald-900";
-  if (status === "stale" || status === "superseded") return "bg-amber-100 text-amber-900";
+  if (status === "stale" || status === "superseded" || status === "disputed") return "bg-amber-100 text-amber-900";
   if (status === "abandoned") return "bg-muted text-muted-foreground";
   return "bg-sky-100 text-sky-900";
 }
@@ -270,7 +272,10 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
           <div className="text-xs text-muted-foreground">还没有伏笔。可以在当前章节埋设第一条。</div>
         ) : (
           workspace.threads.map((thread) => {
-            const actions = ACTIONS_BY_STATUS[thread.status] ?? [];
+            const behindLatest =
+              thread.latestEventChapterOrder != null
+              && workspace.chapterOrder < thread.latestEventChapterOrder;
+            const actions = behindLatest ? [] : (ACTIONS_BY_STATUS[thread.status] ?? []);
             return (
               <div key={thread.id} className="rounded-xl bg-muted/30 px-3 py-2" data-testid="plot-thread">
                 <div className="flex flex-wrap items-center gap-2">
@@ -285,13 +290,21 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
                   {thread.lastDevelopmentChapterOrder != null ? ` · 推进第 ${thread.lastDevelopmentChapterOrder} 章` : ""}
                   {thread.resolvedChapterOrder != null ? ` · 回收第 ${thread.resolvedChapterOrder} 章` : ""}
                   {thread.sourceChapterOrder != null ? ` · 来源第 ${thread.sourceChapterOrder} 章` : " · 来源不可用"}
+                  {thread.status === "stale" && thread.lifecycleStatus !== "stale"
+                    ? ` · 生命周期${STATUS_LABELS[thread.lifecycleStatus] ?? thread.lifecycleStatus}`
+                    : ""}
                 </div>
                 {thread.evidence ? (
                   <div className="mt-1 text-[11px] leading-5 text-muted-foreground">证据：{thread.evidence}</div>
                 ) : null}
+                {behindLatest ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    这条伏笔的最新动作在第 {thread.latestEventChapterOrder} 章；到那一章继续操作。
+                  </div>
+                ) : null}
                 {!thread.sourceValid || thread.status === "stale" ? (
                   <div className="mt-1 text-[11px] text-amber-800">
-                    来源章节已经变化或证据不存在；继续操作前请先填写当前正文的新证据。
+                    来源证据不可用；继续操作前请填写当前正文的新证据。
                   </div>
                 ) : null}
                 {actions.length > 0 ? (
@@ -391,7 +404,8 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                   <span>第 {entry.chapterOrder} 章</span>
                   <span>{TIMELINE_LABELS[entry.kind] ?? entry.kind}</span>
-                  <span>{entry.status}</span>
+                  <span>{STATUS_LABELS[entry.status] ?? entry.status}</span>
+                  {!entry.sourceValid ? <span className="text-amber-800">来源失效</span> : null}
                   {entry.chapterId && onOpenChapter ? (
                     <button
                       type="button"
@@ -431,6 +445,7 @@ export default function PlotWorkspaceTab(props: PlotWorkspaceTabProps) {
                   证据：{edge.evidence}
                   {edge.sourceChapterOrder != null ? ` · 第 ${edge.sourceChapterOrder} 章` : ""}
                   {!edge.sourceValid ? " · 来源已失效" : ""}
+                  {!edge.fromValid || !edge.toValid ? " · 引用对象失效" : ""}
                 </div>
               </li>
             ))}

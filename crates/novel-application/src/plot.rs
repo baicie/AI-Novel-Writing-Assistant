@@ -32,10 +32,17 @@ pub struct PlotThreadView {
     pub novel_id: String,
     pub title: String,
     pub body: String,
+    /// 作者看到的状态：来源失效时统一显示 stale。
     pub status: String,
+    /// 截至本章的生命周期状态（来源失效前的 resolved/developing 等）。
+    pub lifecycle_status: String,
+    /// 数据库中的原始状态；失效流程可能已把它改成 stale。
+    pub stored_status: String,
     pub opened_chapter_order: i32,
     pub last_development_chapter_order: Option<i32>,
     pub resolved_chapter_order: Option<i32>,
+    /// 最近一次生命周期动作所在的当前章节顺序；查看更早章节时界面不提供动作。
+    pub latest_event_chapter_order: Option<i32>,
     pub source_chapter_id: Option<String>,
     pub source_chapter_order: Option<i32>,
     pub source_chapter_title: Option<String>,
@@ -62,6 +69,8 @@ pub struct PlotThreadEventView {
     pub evidence: String,
     pub from_status: Option<String>,
     pub to_status: String,
+    /// 事件来源章节的当前正式版本是否仍等于记录版本，且证据仍在正文中。
+    pub source_valid: bool,
     pub created_at: i64,
 }
 
@@ -101,9 +110,12 @@ pub struct CausalityEdgeView {
     pub from_kind: String,
     pub from_id: String,
     pub from_label: Option<String>,
+    /// 起点/终点实体仍然存在且未被替代；章节删除或事实失效后为 false。
+    pub from_valid: bool,
     pub to_kind: String,
     pub to_id: String,
     pub to_label: Option<String>,
+    pub to_valid: bool,
     pub relation: String,
     pub evidence: String,
     pub source_chapter_id: String,
@@ -161,6 +173,17 @@ pub trait PlotRepository: Send + Sync {
         &self,
         novel_id: &str,
     ) -> Result<Vec<CausalityEdgeView>, PortError>;
+}
+
+/// 时间线按时间升序输入，保留最近 `limit` 条；返回是否发生截断。
+/// 截断必须丢弃最早条目，不能把“最近 500 条”做成“最旧 500 条”。
+pub fn truncate_to_most_recent<T>(items: &mut Vec<T>, limit: usize) -> bool {
+    if items.len() <= limit {
+        return false;
+    }
+    let drop_count = items.len() - limit;
+    items.drain(0..drop_count);
+    true
 }
 
 pub struct PlotService {
@@ -263,5 +286,24 @@ impl PlotService {
         novel_id: &str,
     ) -> Result<Vec<CausalityEdgeView>, crate::error::AppError> {
         Ok(self.repository.list_causality_edges(novel_id).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_to_most_recent;
+
+    #[test]
+    fn truncation_keeps_the_newest_entries() {
+        let mut entries: Vec<i32> = (1..=5).collect();
+        assert!(truncate_to_most_recent(&mut entries, 3));
+        assert_eq!(entries, vec![3, 4, 5]);
+
+        let mut exact: Vec<i32> = (1..=3).collect();
+        assert!(!truncate_to_most_recent(&mut exact, 3));
+        assert_eq!(exact, vec![1, 2, 3]);
+
+        let mut empty: Vec<i32> = Vec::new();
+        assert!(!truncate_to_most_recent(&mut empty, 3));
     }
 }

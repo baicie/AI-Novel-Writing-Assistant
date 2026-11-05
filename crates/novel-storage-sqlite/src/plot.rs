@@ -29,21 +29,22 @@ fn plot_view(row: &sqlx::sqlite::SqliteRow) -> Result<PlotThreadView, PortError>
         row.try_get("source_current_version").map_err(map_sql)?;
     let evidence: Option<String> = row.try_get("evidence_json").map_err(map_sql)?;
     let content: Option<String> = row.try_get("source_content").map_err(map_sql)?;
-    let evidence_present = evidence
-        .as_deref()
-        .is_some_and(|quote| content.as_deref().is_some_and(|text| text.contains(quote)));
+    let evidence_present = evidence.as_deref().is_some_and(|quote| {
+        !quote.trim().is_empty() && content.as_deref().is_some_and(|text| text.contains(quote))
+    });
     let source_valid =
         source_revision.is_some() && source_current_version == source_revision && evidence_present;
-    let stored_status: String = row.try_get("status").map_err(map_sql)?;
+    let lifecycle_status: String = row.try_get("lifecycle_status").map_err(map_sql)?;
+    let stored_status: String = row.try_get("stored_status").map_err(map_sql)?;
     // 最近一次生命周期事件的来源失效时，界面必须看到 stale，而不是悄悄退回更早的状态。
     let status = if !source_valid
         && matches!(
-            stored_status.as_str(),
+            lifecycle_status.as_str(),
             "open" | "developing" | "deferred" | "resolved"
         ) {
         "stale".to_string()
     } else {
-        stored_status
+        lifecycle_status.clone()
     };
     Ok(PlotThreadView {
         id: row.try_get("id").map_err(map_sql)?,
@@ -51,11 +52,14 @@ fn plot_view(row: &sqlx::sqlite::SqliteRow) -> Result<PlotThreadView, PortError>
         title: row.try_get("title").map_err(map_sql)?,
         body: row.try_get("body").map_err(map_sql)?,
         status,
+        lifecycle_status,
+        stored_status,
         opened_chapter_order: row.try_get("opened_chapter_order").map_err(map_sql)?,
         last_development_chapter_order: row
             .try_get("last_development_chapter_order")
             .map_err(map_sql)?,
         resolved_chapter_order: row.try_get("resolved_chapter_order").map_err(map_sql)?,
+        latest_event_chapter_order: row.try_get("latest_event_chapter_order").map_err(map_sql)?,
         source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,
         source_chapter_order: row.try_get("source_chapter_order").map_err(map_sql)?,
         source_chapter_title: row.try_get("source_chapter_title").map_err(map_sql)?,
@@ -121,8 +125,25 @@ async fn plot_by_id(
     plot_id: &str,
 ) -> Result<PlotThreadView, PortError> {
     let row = sqlx::query(
-        "SELECT p.id, p.novel_id, p.title, p.body, p.status, p.opened_chapter_order,
+        "SELECT p.id, p.novel_id, p.title, p.body,
+                COALESCE(
+                  (SELECT e5.to_status FROM plot_thread_event e5
+                   WHERE e5.plot_id = p.id ORDER BY e5.rowid DESC LIMIT 1),
+                  p.status
+                ) AS lifecycle_status,
+                p.status AS stored_status,
+                COALESCE(
+                  (SELECT c0.sort_order FROM plot_thread_event e0
+                   JOIN chapter c0 ON c0.id = e0.chapter_id
+                   WHERE e0.plot_id = p.id AND e0.kind = 'setup'
+                   ORDER BY e0.rowid LIMIT 1),
+                  p.opened_chapter_order
+                ) AS opened_chapter_order,
                 p.last_development_chapter_order, p.resolved_chapter_order,
+                (SELECT MAX(COALESCE(c4.sort_order, e4.chapter_order))
+                 FROM plot_thread_event e4
+                 LEFT JOIN chapter c4 ON c4.id = e4.chapter_id
+                 WHERE e4.plot_id = p.id) AS latest_event_chapter_order,
                 p.source_chapter_id, p.source_revision, p.evidence_json,
                 c.sort_order AS source_chapter_order, c.title AS source_chapter_title,
                 r.version AS source_current_version, r.content AS source_content,
@@ -238,8 +259,17 @@ impl PlotRepository for SqliteKernel {
             return plot_by_id(self, &input.novel_id, &input.plot_id).await;
         }
         let row = sqlx::query(
-            "SELECT status, version, opened_chapter_order, last_development_chapter_order
-             FROM plot_thread WHERE id = ? AND novel_id = ?",
+            "SELECT p.status, p.version, p.opened_chapter_order,
+                    p.last_development_chapter_order, p.source_revision, p.evidence_json,
+                    (SELECT c0.sort_order FROM plot_thread_event e0
+                     JOIN chapter c0 ON c0.id = e0.chapter_id
+                     WHERE e0.plot_id = p.id AND e0.kind = 'setup'
+                     ORDER BY e0.rowid LIMIT 1) AS setup_order,
+                    r.version AS source_current_version, r.content AS source_content
+             FROM plot_thread p
+             LEFT JOIN chapter c ON c.id = p.source_chapter_id AND c.novel_id = p.novel_id
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE p.id = ? AND p.novel_id = ?",
         )
         .bind(&input.plot_id)
         .bind(&input.novel_id)
@@ -247,15 +277,43 @@ impl PlotRepository for SqliteKernel {
         .await
         .map_err(map_sql)?
         .ok_or_else(|| PortError::NotFound("没有找到这条伏笔。".into()))?;
-        let from_status: String = row.try_get("status").map_err(map_sql)?;
+        let stored_status: String = row.try_get("status").map_err(map_sql)?;
         let version: i64 = row.try_get("version").map_err(map_sql)?;
-        let opened_order: i32 = row.try_get("opened_chapter_order").map_err(map_sql)?;
+        let stored_opened: i32 = row.try_get("opened_chapter_order").map_err(map_sql)?;
+        let setup_order: Option<i32> = row.try_get("setup_order").map_err(map_sql)?;
+        let opened_order = setup_order.unwrap_or(stored_opened);
         let last_development: Option<i32> = row
             .try_get("last_development_chapter_order")
             .map_err(map_sql)?;
         if version != input.expected_version {
             return Err(PortError::Conflict("伏笔已经变化，请刷新后再操作。".into()));
         }
+        // 存储状态与展示状态必须分开判断：旧数据或章节删除后，界面看到的是 stale，
+        // 但数据库里可能仍写着 resolved/deferred；作者必须能用新证据恢复，而不是被卡死。
+        let stored_source_revision: Option<String> =
+            row.try_get("source_revision").map_err(map_sql)?;
+        let stored_evidence: Option<String> = row.try_get("evidence_json").map_err(map_sql)?;
+        let source_current_version: Option<i64> =
+            row.try_get("source_current_version").map_err(map_sql)?;
+        let source_content: Option<String> = row.try_get("source_content").map_err(map_sql)?;
+        let parsed_revision = stored_revision(stored_source_revision.as_deref());
+        let source_valid = parsed_revision.is_some()
+            && parsed_revision == source_current_version
+            && stored_evidence.as_deref().is_some_and(|quote| {
+                !quote.trim().is_empty()
+                    && source_content
+                        .as_deref()
+                        .is_some_and(|text| text.contains(quote))
+            });
+        let effective_from = if !source_valid
+            && matches!(
+                stored_status.as_str(),
+                "open" | "developing" | "deferred" | "resolved"
+            ) {
+            "stale"
+        } else {
+            stored_status.as_str()
+        };
         let allowed: &[&str] = match input.action.as_str() {
             "develop" | "payoff" => &["open", "developing", "deferred", "stale"],
             "defer" => &["open", "developing"],
@@ -263,9 +321,9 @@ impl PlotRepository for SqliteKernel {
             "recover" => &["stale"],
             _ => return Err(PortError::Integrity("未知的伏笔动作。".into())),
         };
-        if !allowed.contains(&from_status.as_str()) {
+        if !allowed.contains(&effective_from) {
             return Err(PortError::Conflict(format!(
-                "当前伏笔状态 {from_status} 不能执行 {}。",
+                "当前伏笔状态 {effective_from} 不能执行 {}。",
                 input.action
             )));
         }
@@ -278,6 +336,23 @@ impl PlotRepository for SqliteKernel {
             opened_order,
         )
         .await?;
+        // 新动作必须发生在已有动作之后，否则新增事件会被更晚的事件遮住，
+        // 导致数据库里的当前状态与未来章节的 As-Of 折叠结果不一致。
+        let latest_event_order: Option<i32> = sqlx::query_scalar(
+            "SELECT MAX(COALESCE(c.sort_order, e.chapter_order))
+             FROM plot_thread_event e
+             LEFT JOIN chapter c ON c.id = e.chapter_id
+             WHERE e.plot_id = ?",
+        )
+        .bind(&input.plot_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_sql)?;
+        if latest_event_order.is_some_and(|latest| chapter_order < latest) {
+            return Err(PortError::Conflict(
+                "请在最近一次伏笔动作之后的章节继续操作。".into(),
+            ));
+        }
         let next_status = match input.action.as_str() {
             "develop" => "developing",
             "payoff" => "resolved",
@@ -290,16 +365,17 @@ impl PlotRepository for SqliteKernel {
             "develop" | "recover" => Some(last_development.unwrap_or(0).max(chapter_order)),
             _ => last_development,
         };
+        // 除回收外的动作清除旧的回收章节：恢复/废弃后的伏笔不能继续显示“回收第 N 章”。
         let next_resolved = if input.action == "payoff" {
             Some(chapter_order)
         } else {
             None
         };
-        sqlx::query(
+        let updated = sqlx::query(
             "UPDATE plot_thread
              SET status = ?, source_revision = ?, evidence_json = ?, source_chapter_id = ?,
                  last_development_chapter_order = ?, updated_at = ?, version = version + 1,
-                 resolved_chapter_order = CASE WHEN ? IS NULL THEN resolved_chapter_order ELSE ? END
+                 resolved_chapter_order = ?
              WHERE id = ? AND novel_id = ? AND version = ? AND status = ?",
         )
         .bind(next_status)
@@ -309,14 +385,16 @@ impl PlotRepository for SqliteKernel {
         .bind(next_development)
         .bind(input.now_ms)
         .bind(next_resolved)
-        .bind(next_resolved)
         .bind(&input.plot_id)
         .bind(&input.novel_id)
         .bind(version)
-        .bind(&from_status)
+        .bind(&stored_status)
         .execute(&mut *tx)
         .await
         .map_err(map_sql)?;
+        if updated.rows_affected() != 1 {
+            return Err(PortError::Conflict("伏笔已经变化，请刷新后再操作。".into()));
+        }
         sqlx::query(
             "INSERT INTO plot_thread_event
                (id, plot_id, novel_id, kind, chapter_id, chapter_order, source_revision, evidence,
@@ -331,7 +409,8 @@ impl PlotRepository for SqliteKernel {
         .bind(chapter_order)
         .bind(input.source_revision)
         .bind(&input.evidence)
-        .bind(&from_status)
+        // 记录数据库里真实的前一状态；来源失效只影响“展示状态”和动作白名单。
+        .bind(&stored_status)
         .bind(next_status)
         .bind(&input.command_id)
         .bind(&input.request_hash)
@@ -349,37 +428,79 @@ impl PlotRepository for SqliteKernel {
         as_of_chapter_order: i32,
     ) -> Result<Vec<PlotThreadView>, PortError> {
         let rows = sqlx::query(
-            "SELECT p.id, p.novel_id, p.title, p.body,
-                    COALESCE(e.to_status, p.status) AS status,
-                    p.opened_chapter_order,
-                    (SELECT MAX(e3.chapter_order) FROM plot_thread_event e3
+            // 章节顺序必须按当前目录重新计算：章节重排后，事件的 As-Of 位置跟着变。
+            // 同一章同一毫秒的多次动作按 rowid（真实写入顺序）折叠，避免用 commandId 猜先后。
+            "WITH plot_base AS (
+               SELECT p.*,
+                      COALESCE(
+                        (SELECT c0.sort_order FROM plot_thread_event e0
+                         JOIN chapter c0 ON c0.id = e0.chapter_id
+                         WHERE e0.plot_id = p.id AND e0.kind = 'setup'
+                         ORDER BY e0.rowid LIMIT 1),
+                        p.opened_chapter_order
+                      ) AS effective_opened
+               FROM plot_thread p
+               WHERE p.novel_id = ?
+             )
+             SELECT p.id, p.novel_id, p.title, p.body,
+                    CASE
+                      WHEN e.to_status IS NOT NULL THEN e.to_status
+                      WHEN p.status = 'resolved'
+                           AND (p.resolved_chapter_order IS NULL
+                                OR p.resolved_chapter_order > ?)
+                        THEN 'open'
+                      ELSE p.status
+                    END AS lifecycle_status,
+                    p.status AS stored_status,
+                    p.effective_opened AS opened_chapter_order,
+                    (SELECT MAX(COALESCE(c3.sort_order, e3.chapter_order))
+                     FROM plot_thread_event e3
+                     LEFT JOIN chapter c3 ON c3.id = e3.chapter_id
                      WHERE e3.plot_id = p.id AND e3.kind IN ('develop','recover')
-                       AND e3.chapter_order <= ?) AS last_development_chapter_order,
-                    CASE WHEN COALESCE(e.to_status, p.status) = 'resolved'
-                         THEN COALESCE(e.chapter_order, p.resolved_chapter_order)
-                         ELSE NULL END AS resolved_chapter_order,
+                       AND COALESCE(c3.sort_order, e3.chapter_order) <= ?)
+                      AS last_development_chapter_order,
+                    CASE
+                      WHEN e.to_status = 'resolved'
+                        THEN COALESCE(ec.sort_order, e.chapter_order, p.resolved_chapter_order)
+                      WHEN e.id IS NULL AND p.status = 'resolved'
+                           AND p.resolved_chapter_order IS NOT NULL
+                           AND p.resolved_chapter_order <= ?
+                        THEN p.resolved_chapter_order
+                      ELSE NULL
+                    END AS resolved_chapter_order,
+                    (SELECT MAX(COALESCE(c4.sort_order, e4.chapter_order))
+                     FROM plot_thread_event e4
+                     LEFT JOIN chapter c4 ON c4.id = e4.chapter_id
+                     WHERE e4.plot_id = p.id) AS latest_event_chapter_order,
                     COALESCE(e.chapter_id, p.source_chapter_id) AS source_chapter_id,
                     COALESCE(CAST(e.source_revision AS TEXT), p.source_revision) AS source_revision,
                     COALESCE(e.evidence, p.evidence_json) AS evidence_json,
                     c.sort_order AS source_chapter_order, c.title AS source_chapter_title,
                     r.version AS source_current_version, r.content AS source_content,
                     p.version, p.created_at, p.updated_at
-             FROM plot_thread p
+             FROM plot_base p
              LEFT JOIN plot_thread_event e ON e.id = (
                SELECT e2.id FROM plot_thread_event e2
-               WHERE e2.plot_id = p.id AND e2.chapter_order <= ?
-               ORDER BY e2.chapter_order DESC, e2.created_at DESC, e2.id DESC LIMIT 1
+               LEFT JOIN chapter c2 ON c2.id = e2.chapter_id
+               WHERE e2.plot_id = p.id
+                 AND COALESCE(c2.sort_order, e2.chapter_order) <= ?
+               ORDER BY COALESCE(c2.sort_order, e2.chapter_order) DESC,
+                        e2.created_at DESC, e2.rowid DESC
+               LIMIT 1
              )
+             LEFT JOIN chapter ec ON ec.id = e.chapter_id
              LEFT JOIN chapter c ON c.id = COALESCE(e.chapter_id, p.source_chapter_id)
                                 AND c.novel_id = p.novel_id
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
-             WHERE p.novel_id = ? AND p.opened_chapter_order <= ?
-             ORDER BY p.opened_chapter_order DESC, p.created_at DESC, p.id
+             WHERE p.effective_opened <= ?
+             ORDER BY p.effective_opened DESC, p.created_at DESC, p.id
              LIMIT 500",
         )
-        .bind(as_of_chapter_order)
-        .bind(as_of_chapter_order)
         .bind(novel_id)
+        .bind(as_of_chapter_order)
+        .bind(as_of_chapter_order)
+        .bind(as_of_chapter_order)
+        .bind(as_of_chapter_order)
         .bind(as_of_chapter_order)
         .fetch_all(&self.pool)
         .await
@@ -394,13 +515,21 @@ impl PlotRepository for SqliteKernel {
         limit: i64,
     ) -> Result<Vec<PlotThreadEventView>, PortError> {
         let rows = sqlx::query(
-            "SELECT e.id, e.plot_id, p.title, e.kind, e.chapter_id, e.chapter_order,
-                    c.title AS chapter_title, e.evidence, e.from_status, e.to_status, e.created_at
+            "SELECT e.id, e.plot_id, p.title, e.kind, e.chapter_id,
+                    COALESCE(c.sort_order, e.chapter_order) AS chapter_order,
+                    c.title AS chapter_title, e.evidence, e.from_status, e.to_status,
+                    CASE WHEN r.version = e.source_revision
+                              AND instr(r.content, e.evidence) > 0
+                         THEN 1 ELSE 0 END AS source_valid,
+                    e.created_at
              FROM plot_thread_event e
              JOIN plot_thread p ON p.id = e.plot_id
-             LEFT JOIN chapter c ON c.id = e.chapter_id
-             WHERE e.novel_id = ? AND e.chapter_order <= ?
-             ORDER BY e.chapter_order DESC, e.created_at DESC, e.id
+             LEFT JOIN chapter c ON c.id = e.chapter_id AND c.novel_id = e.novel_id
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE e.novel_id = ?
+               AND COALESCE(c.sort_order, e.chapter_order) <= ?
+             ORDER BY COALESCE(c.sort_order, e.chapter_order) DESC,
+                      e.created_at DESC, e.rowid DESC
              LIMIT ?",
         )
         .bind(novel_id)
@@ -422,6 +551,7 @@ impl PlotRepository for SqliteKernel {
                     evidence: row.try_get("evidence").map_err(map_sql)?,
                     from_status: row.try_get("from_status").map_err(map_sql)?,
                     to_status: row.try_get("to_status").map_err(map_sql)?,
+                    source_valid: row.try_get::<i64, _>("source_valid").map_err(map_sql)? != 0,
                     created_at: row.try_get("created_at").map_err(map_sql)?,
                 })
             })
@@ -439,7 +569,8 @@ impl PlotRepository for SqliteKernel {
         ] {
             let exists: i64 = match kind {
                 "timeline_event" => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM timeline_event WHERE id = ? AND novel_id = ?",
+                    "SELECT COUNT(*) FROM timeline_event
+                     WHERE id = ? AND novel_id = ? AND status = 'confirmed'",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -447,7 +578,9 @@ impl PlotRepository for SqliteKernel {
                 .await
                 .map_err(map_sql)?,
                 "plot_thread" => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM plot_thread WHERE id = ? AND novel_id = ?",
+                    "SELECT COUNT(*) FROM plot_thread
+                     WHERE id = ? AND novel_id = ?
+                       AND status NOT IN ('superseded','disputed','stale')",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -456,7 +589,8 @@ impl PlotRepository for SqliteKernel {
                 .map_err(map_sql)?,
                 "structured_fact" => sqlx::query_scalar(
                     "SELECT COUNT(*) FROM structured_story_fact
-                     WHERE id = ? AND novel_id = ? AND truthfulness = 'confirmed'",
+                     WHERE id = ? AND novel_id = ?
+                       AND truthfulness = 'confirmed' AND status = 'active'",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -466,7 +600,9 @@ impl PlotRepository for SqliteKernel {
                 _ => 0,
             };
             if exists == 0 {
-                return Err(PortError::Conflict("因果关系引用了不存在的实体。".into()));
+                return Err(PortError::Conflict(
+                    "因果关系引用了不存在或已失效的实体。".into(),
+                ));
             }
         }
         // 循环检测：在已确认边上加入新边，若从 to 能走回 from 则拒绝。
@@ -556,9 +692,11 @@ impl PlotRepository for SqliteKernel {
             from_kind: input.from_kind,
             from_id: input.from_id,
             from_label: None,
+            from_valid: true,
             to_kind: input.to_kind,
             to_id: input.to_id,
             to_label: None,
+            to_valid: true,
             relation: input.relation,
             evidence: input.evidence,
             source_chapter_id: input.chapter_id,
@@ -596,7 +734,47 @@ impl PlotRepository for SqliteKernel {
                         (SELECT title FROM plot_thread WHERE id = e.to_id)
                      WHEN e.to_kind = 'structured_fact' THEN
                         (SELECT fact_type || '：' || value_json FROM structured_story_fact WHERE id = e.to_id)
-                     END AS to_label
+                     END AS to_label,
+                    CASE
+                      WHEN e.from_kind = 'timeline_event' THEN EXISTS(
+                        SELECT 1 FROM timeline_event te
+                        WHERE te.id = e.from_id AND te.novel_id = e.novel_id
+                          AND te.status = 'confirmed'
+                          AND (te.source_chapter_id IS NULL OR EXISTS(
+                            SELECT 1 FROM chapter tc WHERE tc.id = te.source_chapter_id)))
+                      WHEN e.from_kind = 'plot_thread' THEN EXISTS(
+                        SELECT 1 FROM plot_thread pt
+                        WHERE pt.id = e.from_id AND pt.novel_id = e.novel_id
+                          AND pt.status NOT IN ('superseded','stale','disputed'))
+                      WHEN e.from_kind = 'structured_fact' THEN EXISTS(
+                        SELECT 1 FROM structured_story_fact sf
+                        JOIN chapter sc ON sc.id = sf.source_chapter_id
+                        JOIN chapter_revision sr ON sr.id = sc.official_revision_id
+                        WHERE sf.id = e.from_id AND sf.novel_id = e.novel_id
+                          AND sf.truthfulness = 'confirmed' AND sf.status = 'active'
+                          AND sr.version = sf.source_revision)
+                      ELSE 0
+                    END AS from_valid,
+                    CASE
+                      WHEN e.to_kind = 'timeline_event' THEN EXISTS(
+                        SELECT 1 FROM timeline_event te
+                        WHERE te.id = e.to_id AND te.novel_id = e.novel_id
+                          AND te.status = 'confirmed'
+                          AND (te.source_chapter_id IS NULL OR EXISTS(
+                            SELECT 1 FROM chapter tc WHERE tc.id = te.source_chapter_id)))
+                      WHEN e.to_kind = 'plot_thread' THEN EXISTS(
+                        SELECT 1 FROM plot_thread pt
+                        WHERE pt.id = e.to_id AND pt.novel_id = e.novel_id
+                          AND pt.status NOT IN ('superseded','stale','disputed'))
+                      WHEN e.to_kind = 'structured_fact' THEN EXISTS(
+                        SELECT 1 FROM structured_story_fact sf
+                        JOIN chapter sc ON sc.id = sf.source_chapter_id
+                        JOIN chapter_revision sr ON sr.id = sc.official_revision_id
+                        WHERE sf.id = e.to_id AND sf.novel_id = e.novel_id
+                          AND sf.truthfulness = 'confirmed' AND sf.status = 'active'
+                          AND sr.version = sf.source_revision)
+                      ELSE 0
+                    END AS to_valid
              FROM plot_causality_edge e
              LEFT JOIN chapter c ON c.id = e.source_chapter_id AND c.novel_id = e.novel_id
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
@@ -614,18 +792,21 @@ impl PlotRepository for SqliteKernel {
                     row.try_get("source_current_version").map_err(map_sql)?;
                 let content: Option<String> = row.try_get("source_content").map_err(map_sql)?;
                 let evidence: String = row.try_get("evidence").map_err(map_sql)?;
-                let evidence_present = content
-                    .as_deref()
-                    .is_some_and(|text| text.contains(&evidence));
+                let evidence_present = !evidence.trim().is_empty()
+                    && content
+                        .as_deref()
+                        .is_some_and(|text| text.contains(&evidence));
                 Ok(CausalityEdgeView {
                     id: row.try_get("id").map_err(map_sql)?,
                     novel_id: row.try_get("novel_id").map_err(map_sql)?,
                     from_kind: row.try_get("from_kind").map_err(map_sql)?,
                     from_id: row.try_get("from_id").map_err(map_sql)?,
                     from_label: row.try_get("from_label").map_err(map_sql)?,
+                    from_valid: row.try_get::<i64, _>("from_valid").map_err(map_sql)? != 0,
                     to_kind: row.try_get("to_kind").map_err(map_sql)?,
                     to_id: row.try_get("to_id").map_err(map_sql)?,
                     to_label: row.try_get("to_label").map_err(map_sql)?,
+                    to_valid: row.try_get::<i64, _>("to_valid").map_err(map_sql)? != 0,
                     relation: row.try_get("relation").map_err(map_sql)?,
                     evidence,
                     source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,

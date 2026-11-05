@@ -156,6 +156,9 @@ pub struct TimelineEntryView {
     pub source_revision: Option<String>,
     pub evidence: Option<String>,
     pub status: String,
+    pub source_valid: bool,
+    /// 伏笔事件按真实写入时间排序；故事事实没有该字段时排在同章事件之前。
+    pub created_at: Option<i64>,
     pub entity_name: Option<String>,
     pub plot_id: Option<String>,
 }
@@ -232,6 +235,8 @@ pub async fn get_plot_workspace(
             source_revision: None,
             evidence: Some(event.evidence.clone()),
             status: event.to_status.clone(),
+            source_valid: event.source_valid,
+            created_at: Some(event.created_at),
             entity_name: None,
             plot_id: Some(event.plot_id.clone()),
         }
@@ -239,12 +244,18 @@ pub async fn get_plot_workspace(
     timeline.sort_by(|left, right| {
         left.chapter_order
             .cmp(&right.chapter_order)
+            .then_with(|| {
+                left.created_at
+                    .unwrap_or(0)
+                    .cmp(&right.created_at.unwrap_or(0))
+            })
             .then_with(|| left.kind.cmp(&right.kind))
             .then_with(|| left.id.cmp(&right.id))
     });
-    let timeline_truncated = timeline.len() > TIMELINE_LIMIT;
-    timeline.truncate(TIMELINE_LIMIT);
     let events_truncated = events.len() > TIMELINE_LIMIT;
+    let timeline_truncated =
+        novel_application::truncate_to_most_recent(&mut timeline, TIMELINE_LIMIT)
+            || events_truncated;
     let mut events = events;
     events.truncate(TIMELINE_LIMIT);
 
@@ -257,7 +268,7 @@ pub async fn get_plot_workspace(
         events,
         edges,
         timeline,
-        timeline_truncated: timeline_truncated || events_truncated,
+        timeline_truncated,
         timeline_limit: TIMELINE_LIMIT,
     })
 }
@@ -289,6 +300,10 @@ fn story_fact_entry(
         source_revision: fact.source_revision.clone(),
         evidence: fact.evidence_quote.clone(),
         status: fact.status.clone(),
+        // list_story_facts 只返回 confirmed 事实；来源改写时它会被标记为 superseded，
+        // 因此这里出现的事实视为当前有效。
+        source_valid: true,
+        created_at: None,
         entity_name: fact.character_name.clone(),
         plot_id: None,
     }

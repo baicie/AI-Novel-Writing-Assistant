@@ -309,9 +309,27 @@ impl MemoryRepository for SqliteKernel {
                         status, source_revision, evidence_json, created_at, updated_at, source_chapter_id)
                      VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
-                       opened_chapter_order = excluded.opened_chapter_order, status = excluded.status,
-                       source_revision = excluded.source_revision, updated_at = excluded.updated_at,
-                       source_chapter_id = excluded.source_chapter_id",
+                       opened_chapter_order = CASE
+                         WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                           THEN plot_thread.opened_chapter_order
+                         ELSE excluded.opened_chapter_order
+                       END,
+                       status = CASE
+                         WHEN plot_thread.status = 'disputed' AND excluded.status = 'open'
+                           THEN 'open'
+                         ELSE plot_thread.status
+                       END,
+                       source_revision = CASE
+                         WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                           THEN plot_thread.source_revision
+                         ELSE excluded.source_revision
+                       END,
+                       updated_at = excluded.updated_at,
+                       source_chapter_id = CASE
+                         WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                           THEN plot_thread.source_chapter_id
+                         ELSE excluded.source_chapter_id
+                       END",
                 ).bind(&fact_id).bind(&candidate.novel_id).bind(title).bind(&candidate.value)
                 .bind(chapter_order).bind(if fact_status == "confirmed" { "open" } else { "disputed" })
                 .bind(format!("memory:{}", candidate.chapter_version)).bind(&candidate.evidence_quote)
@@ -892,9 +910,27 @@ async fn write_candidate_fact(
                     status, source_revision, evidence_json, created_at, updated_at, source_chapter_id)
                  VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(id) DO UPDATE SET title = excluded.title, body = excluded.body,
-                   opened_chapter_order = excluded.opened_chapter_order, status = excluded.status,
-                   source_revision = excluded.source_revision, updated_at = excluded.updated_at,
-                   source_chapter_id = excluded.source_chapter_id",
+                   opened_chapter_order = CASE
+                     WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                       THEN plot_thread.opened_chapter_order
+                     ELSE excluded.opened_chapter_order
+                   END,
+                   status = CASE
+                     WHEN plot_thread.status = 'disputed' AND excluded.status = 'open'
+                       THEN 'open'
+                     ELSE plot_thread.status
+                   END,
+                   source_revision = CASE
+                     WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                       THEN plot_thread.source_revision
+                     ELSE excluded.source_revision
+                   END,
+                   updated_at = excluded.updated_at,
+                   source_chapter_id = CASE
+                     WHEN EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)
+                       THEN plot_thread.source_chapter_id
+                     ELSE excluded.source_chapter_id
+                   END",
             ).bind(&fact_id).bind(&candidate.novel_id).bind(title).bind(&candidate.value)
             .bind(chapter_order).bind(if fact_status == "confirmed" { "open" } else { "disputed" })
             .bind(format!("memory:{}", candidate.chapter_version)).bind(&candidate.evidence_quote)
@@ -1128,9 +1164,11 @@ async fn supersede_old_facts(
         .execute(tx.deref_mut())
         .await
         .map_err(map_sql)?;
+        // 作者已经建立生命周期事件的伏笔由状态机维护，记忆冲突裁决不能直接覆盖。
         sqlx::query(
-            "UPDATE plot_thread SET status = 'superseded', updated_at = ?
-             WHERE id = ? AND novel_id = ?",
+            "UPDATE plot_thread SET status = 'superseded', updated_at = ?, version = version + 1
+             WHERE id = ? AND novel_id = ?
+               AND NOT EXISTS (SELECT 1 FROM plot_thread_event e WHERE e.plot_id = plot_thread.id)",
         )
         .bind(now_ms)
         .bind(id)

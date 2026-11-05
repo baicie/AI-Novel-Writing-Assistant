@@ -79,7 +79,7 @@ pub use plot::{
     PLOT_STATUS_DEFERRED, PLOT_STATUS_DEVELOPING, PLOT_STATUS_OPEN, PLOT_STATUS_RESOLVED,
     PLOT_STATUS_STALE, PLOT_STATUS_SUPERSEDED, PLOT_TRANSITION_ABANDON, PLOT_TRANSITION_DEFER,
     PLOT_TRANSITION_DEVELOP, PLOT_TRANSITION_PAYOFF, PLOT_TRANSITION_RECOVER, PlotRepository,
-    PlotService, PlotThreadEventView, PlotThreadView, PlotTransition,
+    PlotService, PlotThreadEventView, PlotThreadView, PlotTransition, truncate_to_most_recent,
 };
 pub use ports::{
     CandidateBody, ChapterHeader, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,

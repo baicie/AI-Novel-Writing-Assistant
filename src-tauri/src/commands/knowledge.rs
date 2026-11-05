@@ -239,6 +239,13 @@ pub async fn upsert_plot_thread(
     state: State<'_, AppState>,
     request: UpsertPlotThreadRequest,
 ) -> Result<(), AppError> {
+    // 旧入口只接受生命周期能识别的状态；disputed/superseded 由记忆与失效流程维护。
+    if !matches!(
+        request.status.as_str(),
+        "open" | "developing" | "resolved" | "deferred" | "abandoned" | "stale"
+    ) {
+        return Err(AppError::validation("伏笔状态无法识别。"));
+    }
     state
         .kernel
         .upsert_plot_thread(novel_application::NewPlotThread {

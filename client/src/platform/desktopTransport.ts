@@ -1488,9 +1488,12 @@ export interface PlotThreadView {
   title: string;
   body: string;
   status: string;
+  lifecycleStatus: string;
+  storedStatus: string;
   openedChapterOrder: number;
   lastDevelopmentChapterOrder?: number | null;
   resolvedChapterOrder?: number | null;
+  latestEventChapterOrder?: number | null;
   sourceChapterId?: string | null;
   sourceChapterOrder?: number | null;
   sourceChapterTitle?: string | null;
@@ -1515,6 +1518,7 @@ export interface PlotThreadEventView {
   evidence: string;
   fromStatus?: string | null;
   toStatus: string;
+  sourceValid: boolean;
   createdAt: number;
 }
 
@@ -1524,9 +1528,11 @@ export interface CausalityEdgeView {
   fromKind: string;
   fromId: string;
   fromLabel?: string | null;
+  fromValid: boolean;
   toKind: string;
   toId: string;
   toLabel?: string | null;
+  toValid: boolean;
   relation: string;
   evidence: string;
   sourceChapterId: string;
@@ -1553,6 +1559,8 @@ export interface TimelineEntryView {
   sourceRevision?: string | null;
   evidence?: string | null;
   status: string;
+  sourceValid: boolean;
+  createdAt?: number | null;
   entityName?: string | null;
   plotId?: string | null;
 }

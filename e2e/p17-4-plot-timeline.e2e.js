@@ -156,6 +156,8 @@ describe("伏笔生命周期与剧情因果（桌面原生）", () => {
     await openChapter(novelId, chapterIds[10]);
     await refreshPlotTab();
     expect(await $('[data-testid="plot-status"]').getText()).toBe("来源失效");
+    const staleText = await $('[data-testid="plot-workspace"]').getText();
+    expect(staleText).toContain("生命周期已回收");
 
     const payoffButton = await $('[data-testid="plot-action-payoff"]');
     await payoffButton.waitForExist({ timeout: 10000 });
@@ -258,5 +260,13 @@ describe("伏笔生命周期与剧情因果（桌面原生）", () => {
     await refreshPlotTab();
     const refreshedEdges = await $$('[data-testid="plot-causality-edge"]');
     expect(await refreshedEdges[0].getText()).toContain("来源已失效");
+
+    // 伏笔埋设事件的来源章节被改写：时间线仍保留历史，但必须显示来源失效。
+    const kindFilterAfter = await $('[data-testid="plot-timeline-filter-kind"]');
+    await kindFilterAfter.selectByAttribute("value", "plot_setup");
+    await browser.pause(500);
+    const setupEntries = await $$('[data-testid="plot-timeline-entry"]');
+    expect(setupEntries.length).toBeGreaterThanOrEqual(1);
+    expect(await setupEntries[0].getText()).toContain("来源失效");
   });
 });
