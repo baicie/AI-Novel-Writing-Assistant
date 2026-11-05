@@ -1,0 +1,71 @@
+name: Server CI
+
+# Server 回归独立于 Tauri Bundle / Native E2E 运行，使用临时 SQLite，不接触用户数据库。
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "server/**"
+      - "shared/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - ".github/workflows/server-ci.yml"
+  push:
+    branches:
+      - "beta"
+      - "main"
+    paths:
+      - "server/**"
+      - "shared/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - ".github/workflows/server-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-ci-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "22.12.0"
+  PNPM_VERSION: "10.6.0"
+  # CI 专用临时数据库；每次 runner 都是干净环境。
+  DATABASE_URL: "file:/tmp/ai-novel-server-ci.db"
+
+jobs:
+  server:
+    name: Server 类型检查与测试
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: 安装依赖（锁定锁文件）
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建共享包
+        run: pnpm --filter @ai-novel/shared build
+
+      - name: 初始化临时 SQLite / Prisma schema
+        run: |
+          rm -f /tmp/ai-novel-server-ci.db
+          pnpm --filter @ai-novel/server prisma:push
+
+      - name: 类型检查
+        run: pnpm --filter @ai-novel/server typecheck
+
+      - name: 测试（保留既有 skip，区分失败）
+        run: pnpm --filter @ai-novel/server test

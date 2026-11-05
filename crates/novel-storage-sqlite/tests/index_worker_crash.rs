@@ -62,35 +62,30 @@ async fn killed_index_worker_is_recovered_by_fencing_and_reindexed() {
         .await
         .unwrap();
     let marker = dir.path().join("worker.pid");
-    let mut child = None;
-    for attempt in 0..3 {
-        let mut candidate = Command::new(env!("CARGO_BIN_EXE_index_worker"))
-            .env("INDEX_WORKER_DB", &path)
-            .env("INDEX_WORKER_JOB", &job.id)
-            .env("INDEX_WORKER_OWNER", format!("worker-killed-{attempt}"))
-            .env("INDEX_WORKER_MARKER", &marker)
-            .env("INDEX_WORKER_LEASE_MS", "300")
-            .spawn()
-            .unwrap();
-        let start = Instant::now();
-        while !marker.exists() && start.elapsed() < Duration::from_secs(6) {
-            if let Some(status) = candidate.try_wait().unwrap()
-                && !status.success()
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+    // The worker opens the database and claims the job in milliseconds on an idle
+    // machine. A fixed 6s spawn deadline made this crash-recovery test fail under
+    // heavy host load even though the worker was healthy; wait for the real claim
+    // signal, fail fast if the process exits, and keep a bounded safety deadline.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_index_worker"))
+        .env("INDEX_WORKER_DB", &path)
+        .env("INDEX_WORKER_JOB", &job.id)
+        .env("INDEX_WORKER_OWNER", "worker-killed")
+        .env("INDEX_WORKER_MARKER", &marker)
+        .env("INDEX_WORKER_LEASE_MS", "300")
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while !marker.exists() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!("worker exited before claiming the job: {status}");
         }
-        if marker.exists() {
-            child = Some(candidate);
-            break;
+        if start.elapsed() > Duration::from_secs(30) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("worker did not claim job within 30s");
         }
-        let _ = candidate.kill();
-        let _ = candidate.wait();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(marker.exists(), "worker did not claim job");
-    let mut child = child.expect("worker process");
     let _ = child.kill();
     let status = child.wait().unwrap();
     assert!(!status.success(), "worker should have been SIGKILLed");
