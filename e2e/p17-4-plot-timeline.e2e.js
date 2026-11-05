@@ -184,6 +184,12 @@ describe("伏笔生命周期与剧情因果（桌面原生）", () => {
       ["p174-e2", 5, "事件二：被追捕"],
       ["p174-e3", 10, "事件三：逃入山门"],
     ]) {
+      // 第十章在 Journey 2 已被改写，时间线事件必须记录当前的正式版本，
+      // 否则它不能作为可信因果边端点。
+      const sourceChapter = await invoke("get_chapter", {
+        novelId,
+        chapterId: chapterIds[order - 1],
+      });
       await invoke("upsert_timeline_event", {
         request: {
           id,
@@ -191,7 +197,7 @@ describe("伏笔生命周期与剧情因果（桌面原生）", () => {
           chapterOrder: order,
           body,
           sourceChapterId: chapterIds[order - 1],
-          sourceRevision: "1",
+          sourceRevision: String(sourceChapter.officialVersion),
           status: "confirmed",
         },
       });
