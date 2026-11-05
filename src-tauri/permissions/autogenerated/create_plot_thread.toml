@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-plot-thread"
+description = "Enables the create_plot_thread command without any pre-configured scope."
+commands.allow = ["create_plot_thread"]
+
+[[permission]]
+identifier = "deny-create-plot-thread"
+description = "Denies the create_plot_thread command without any pre-configured scope."
+commands.deny = ["create_plot_thread"]

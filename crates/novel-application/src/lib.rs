@@ -26,6 +26,7 @@ mod knowledge;
 #[allow(clippy::too_many_arguments)]
 mod memory;
 mod native_tasks;
+mod plot;
 #[allow(clippy::too_many_arguments)]
 mod ports;
 mod provider_service;
@@ -72,6 +73,13 @@ pub use knowledge::assemble_context;
 pub use memory::{ExtractMemoryInput, MemoryService};
 pub use native_tasks::{
     NativeTaskQuery, NativeTaskRepository, NativeTaskService, NativeTaskSummary,
+};
+pub use plot::{
+    CausalityEdgeView, CreatePlotThreadInput, NewCausalityEdge, PLOT_STATUS_ABANDONED,
+    PLOT_STATUS_DEFERRED, PLOT_STATUS_DEVELOPING, PLOT_STATUS_OPEN, PLOT_STATUS_RESOLVED,
+    PLOT_STATUS_STALE, PLOT_STATUS_SUPERSEDED, PLOT_TRANSITION_ABANDON, PLOT_TRANSITION_DEFER,
+    PLOT_TRANSITION_DEVELOP, PLOT_TRANSITION_PAYOFF, PLOT_TRANSITION_RECOVER, PlotRepository,
+    PlotService, PlotThreadEventView, PlotThreadView, PlotTransition, truncate_to_most_recent,
 };
 pub use ports::{
     CandidateBody, ChapterHeader, ClaimedRun, Clock, CommandOutcome, ControlCommit, ControlWrite,

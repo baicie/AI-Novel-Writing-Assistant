@@ -122,6 +122,7 @@ std::fs::create_dir_all(data_dir.join("logs"))
                     kernel.clone(),
                 ),
             );
+            let plot = Arc::new(novel_application::PlotService::new(kernel.clone()));
             app.manage(AppState {
                 runtime: runtime.clone(),
                 data_dir: data_dir.clone(),
@@ -129,6 +130,7 @@ std::fs::create_dir_all(data_dir.join("logs"))
                 native_tasks,
                 structured_memory,
                 chapter_continuity,
+                plot,
                 kernel,
                 secrets,
                 llm,
@@ -339,6 +341,10 @@ commands::novel::create_character,
             commands::continuity::get_chapter_continuity,
             commands::continuity::preview_chapter_context,
             commands::continuity::get_run_context_trace,
+            commands::plot::create_plot_thread,
+            commands::plot::transition_plot_thread,
+            commands::plot::create_plot_causality,
+            commands::plot::get_plot_workspace,
             commands::run::approve_run,
 commands::run::reject_run,
             commands::run::regenerate_run,

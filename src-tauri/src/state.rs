@@ -19,6 +19,8 @@ pub struct AppState {
     pub structured_memory: Arc<StructuredMemoryService>,
     /// 章节连续性只读投影：合并既有事实、候选与冲突，不新建记忆引擎。
     pub chapter_continuity: Arc<novel_application::ChapterContinuityService>,
+    /// 伏笔生命周期、时间线与剧情因果。
+    pub plot: Arc<novel_application::PlotService>,
     pub kernel: Arc<SqliteKernel>,
     pub secrets: Arc<OsSecretStore>,
     pub llm: Arc<dyn LlmProvider>,

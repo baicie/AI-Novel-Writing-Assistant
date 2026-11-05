@@ -95,7 +95,8 @@ async fn story_memory_respects_chapter_time_and_does_not_use_future_facts() {
     assert!(!at20.prompt_text.contains("状态：死亡"));
     assert!(at20.prompt_text.contains("拜入山门"));
     assert!(!at20.prompt_text.contains("事件：宗门大战"));
-    assert!(at20.prompt_text.contains("祖祠里有一道未解封印"));
+    // 旧伏笔没有来源章节与证据：仍保留在数据库里，但不能进入可信生成上下文。
+    assert!(!at20.prompt_text.contains("祖祠里有一道未解封印"));
 
     let facts30 = NovelRepository::list_story_facts(kernel.as_ref(), "n", 30)
         .await
@@ -106,7 +107,10 @@ async fn story_memory_respects_chapter_time_and_does_not_use_future_facts() {
             .iter()
             .any(|fact| fact.body.contains("事件：宗门大战"))
     );
-    assert!(facts30.iter().any(|fact| fact.fact_type == "plot_thread"));
+    assert!(
+        !facts30.iter().any(|fact| fact.fact_type == "plot_thread"),
+        "无来源旧伏笔不能进入 list_story_facts"
+    );
     println!(
         "P13 story-memory: at20=掌门/no-future at30=death+battle facts={} sources=3",
         facts30.len()

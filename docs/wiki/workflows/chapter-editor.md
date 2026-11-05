@@ -86,7 +86,52 @@
 - **边界**：章节目录只读 header（不加载正文）；结构化事实 500、候选 200、冲突 100；
   界面关键事实最多展示 80 条并提示剩余数量。
 
+## 伏笔生命周期与剧情因果（P17.4）
+
+- `plot_thread.status` 是伏笔生命周期的唯一权威：open / developing / resolved / deferred /
+  abandoned / stale；不再引入第二套伏笔状态字段。
+- 每次 setup / develop / payoff / defer / abandon / recover 追加一条 `plot_thread_event`，
+  记录章节、来源版本、证据、前后状态与 commandId；历史事件不覆盖。
+- 状态转换必须带 `expectedVersion` 与真实章节证据；同一 commandId + 请求哈希幂等返回，
+  不同请求冲突。推进/回收章节不能早于埋设章节。
+- As-Of：伏笔状态与来源取「目标章节之前最近一条事件」；未来章节的回收不能提前显示。
+  最近一条事件来源失效时显示 stale，必须用新证据恢复，不能退回更早状态冒充有效。
+- 章节改写时在同一事务内把伏笔置为 stale；结构化事实、角色状态、时间线同步失效。
+- 因果边只允许引用同书的事件、伏笔或已确认事实；拒绝自引用与循环；来源失效后边保留但
+  `sourceValid=false`。
+- 时间线读取有上限（500），不加载全书正文；没有可靠故事内日期时只使用章节顺序。
+- 模型建议不能直接改变伏笔状态或创建正式因果边；必须由作者操作。
+
+### 生命周期状态、来源有效性与展示状态（P17.4.1）
+
+- 一次伏笔读取必须区分三个字段：
+  - `lifecycleStatus`：截至目标章节由事件折叠出的生命周期状态；
+  - `sourceValid` / `evidencePresentInCurrent`：最近一条事件的来源版本与证据是否仍匹配当前正文；
+  - `status`：给作者看的综合状态，来源失效且生命周期仍活跃时显示 `stale`。
+- `storedStatus` 是数据库原始值，失效流程可能把它改成 `stale`；不要把 `storedStatus` 当作历史语义。
+  需要显示“来源失效前是已回收/推进中”时使用 `lifecycleStatus`。
+- 旧记忆写入路径可能留下 `disputed`（待确认）与 `superseded`（已被新事实替代）。它们只读展示，
+  不参与生命周期动作；`disputed` 的裁决仍走记忆冲突入口。
+- 旧 `plot_thread` 行没有事件历史时，`resolved` 只在 `resolved_chapter_order <= As-Of` 时显示；
+  不能把当前状态直接回填到更早章节。没有证据的旧行显示 `stale`，作者可用新证据恢复。
+- `list_story_facts` 是可信事实读取面：事件来源失效、`stale`/`superseded`/`disputed` 状态、
+  以及没有来源证据或来源版本无法核对的旧行都不进入 Director 上下文；数据仍保留在工作台，
+  由作者补证据后恢复。不要用删除旧行的方式处理兼容。
+- 动作白名单按“展示状态”判断：存储里仍是 `resolved`/`deferred` 但来源失效时，作者仍可用
+  `recover`/`payoff`/`abandon` 修复，不能因为存储值而拒绝所有动作。
+- 新动作的章节顺序必须不早于已有最新事件；否则新增事件会被更晚事件遮住，造成当前行状态与
+  As-Of 折叠不一致。界面在更早章节隐藏动作，并提示到最新动作所在章节继续。
+- 事件折叠按“当前章节目录顺序”计算，章节重排后 As-Of 位置随来源章节移动；同一章同一毫秒
+  的多次动作按 `rowid`（真实写入顺序）折叠，不能按 commandId 字典序。
+- 记忆候选重新确认只能把 `disputed` 提升为 `open`；不得重开 `resolved`/`abandoned`/`stale`，
+  也不得覆盖作者最近一次动作的来源章节、版本与证据。
+- 时间线合并事件与故事事实时，先按章节顺序、再按事件写入时间排序；超过 500 条保留最近条目，
+  丢弃最早条目。伏笔事件来源失效仍保留在时间线，但必须显示“来源失效”。
+- 因果边保留历史；端点事件被替代、事实失效或来源章节删除时，`fromValid`/`toValid` 变为 false，
+  界面显示“引用对象失效”，不能静默消失或伪装为有效。
+
 ## Failure Modes
+
 
 
 - 只比较章节 ID：旧窗口会覆盖新正文。应使用 `expectedUpdatedAt` 并在冲突后保留本地草稿。
@@ -114,12 +159,26 @@
 - 用不可审计的 Prompt 字符串代替 Context Trace：作者无法判断上下文为什么缺失或被排除。
   预览与运行都保留结构化 trace。
 
+- 把「计划回收」写成 resolved：会提前剧透并让上下文引用尚未发生的事实。只有作者 payoff
+  动作且证据有效时才设置回收章。
+- 伏笔状态只看当前行：会把第 10 章的回收泄露到第 5 章。必须按事件 As-Of 推导。
+- 来源改写后回退到更早状态：会让作者误以为伏笔仍有效。最近事件来源失效必须显示 stale。
+- 用 `storedStatus` 代替 `lifecycleStatus` 展示历史：失效流程把行改成 stale 后，界面会丢掉
+  “来源失效前已回收/推进中”的语义。
+- 时间线截断保留最旧 500 条：界面提示“最近条目”却展示最早历史。必须丢弃最早条目。
+- 在较早章节对更后章节推进过的伏笔执行动作：新事件排不到最新，当前行状态与后续 As-Of 折叠分叉。
+- 允许因果边自引用或成环：会破坏因果解释。建立边时做同书实体校验、自引用拒绝与 DFS 环检测。
+- 因为时间线需要而扫描全书正文：章节多时会拖慢工作台。只读章节 header、事件与按上限过滤的来源。
+
 ## Related Modules
 
 - `client/src/pages/novels/components/chapterEditor/document/`
 - `client/src/pages/novels/components/chapterEditor/ChapterEditorShell.tsx`
 - `client/src/api/novel/chapterSelectionRewriteBilling.ts`（计费状态语义）
 - `crates/novel-application/src/continuity.rs`（章节连续性投影）
+- `crates/novel-application/src/plot.rs`（伏笔生命周期与因果）
+- `crates/novel-storage-sqlite/src/plot.rs`
+- `client/src/pages/novels/components/chapterEditor/rightPanel/PlotWorkspaceTab.tsx`
 - `crates/novel-application/src/context.rs`（上下文组装与预览）
 - `client/src/pages/novels/components/chapterEditor/rightPanel/ContextPreviewTab.tsx`
 - `crates/novel-storage-sqlite/src/selection_rewrite.rs`（请求尝试记录）

@@ -16,6 +16,7 @@ export const config = {
     "./p17-edit-position.e2e.js",
     "./p17-3-continuity.e2e.js",
     "./p17-3-context.e2e.js",
+    "./p17-4-plot-timeline.e2e.js",
   ],
   // 这些用例共用同一份本地数据目录与同一个应用窗口：
   // 并行跑会让两个实例争抢 SQLite 与窗口，产生与代码无关的失败。

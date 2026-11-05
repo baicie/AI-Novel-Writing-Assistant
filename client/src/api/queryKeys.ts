@@ -30,6 +30,7 @@ export const queryKeys = {
     pendingSelectionRewrites: (id: string, chapterId: string) => ["novels", "pending-selection-rewrites", id, chapterId] as const,
     chapterContinuity: (id: string, chapterId: string) => ["novels", "chapter-continuity", id, chapterId] as const,
     chapterContextPreview: (id: string, chapterId: string) => ["novels", "chapter-context-preview", id, chapterId] as const,
+    plotWorkspace: (id: string, chapterId: string) => ["novels", "plot-workspace", id, chapterId] as const,
     runContextTrace: (id: string, runId: string) => ["novels", "run-context-trace", id, runId] as const,
     storylineVersions: (id: string) => ["novels", "storyline-versions", id] as const,
     volumeWorkspace: (id: string) => ["novels", "volume-workspace", id] as const,

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-transition-plot-thread"
+description = "Enables the transition_plot_thread command without any pre-configured scope."
+commands.allow = ["transition_plot_thread"]
+
+[[permission]]
+identifier = "deny-transition-plot-thread"
+description = "Denies the transition_plot_thread command without any pre-configured scope."
+commands.deny = ["transition_plot_thread"]

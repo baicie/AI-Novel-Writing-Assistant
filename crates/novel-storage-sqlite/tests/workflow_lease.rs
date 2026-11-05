@@ -443,9 +443,9 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
                 .fetch_one(kernel.pool())
                 .await
                 .unwrap();
-        assert_eq!(
-            status, "superseded",
-            "{table} must be invalidated on promotion"
+        assert!(
+            status == "superseded" || status == "stale",
+            "{table} must be invalidated on promotion, got {status}"
         );
     }
     let revisions_after: i64 = sqlx::query_scalar(
