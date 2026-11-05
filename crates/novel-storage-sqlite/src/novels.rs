@@ -1494,12 +1494,13 @@ impl NovelRepository for SqliteKernel {
                                     AND instr(er.content, e.evidence) > 0
                                THEN 1 ELSE 0 END
                         WHEN p.source_chapter_id IS NULL
-                             OR p.evidence_json IS NULL
-                             OR trim(p.evidence_json) = '' THEN 0
+                             OR COALESCE(p.evidence_json, mc.evidence_quote) IS NULL
+                             OR trim(COALESCE(p.evidence_json, mc.evidence_quote)) = '' THEN 0
                         ELSE (
                           SELECT CASE
                             WHEN pr.version = CAST(REPLACE(p.source_revision, 'memory:', '') AS INTEGER)
-                                 AND instr(pr.content, p.evidence_json) > 0 THEN 1
+                                 AND instr(pr.content, COALESCE(p.evidence_json, mc.evidence_quote)) > 0
+                              THEN 1
                             ELSE 0
                           END
                           FROM chapter pc
