@@ -66,3 +66,37 @@ export function canReconfirm(fact: {
     && Boolean(fact.entityId)
   );
 }
+
+
+/** 重新确认一条过期事实需要的动作。 */
+export type ReconfirmMode = "direct" | "needs_evidence" | "needs_order" | "blocked";
+
+export interface ReconfirmFactInput {
+  status: string;
+  valueJson?: string | null;
+  entityId?: string | null;
+  sourceChapterId?: string | null;
+  sourceCurrentVersion?: number | null;
+  evidenceStillPresent?: boolean;
+  sourceOrderValid?: boolean;
+}
+
+/** 只有作者能提供当前正文证据、且来源顺序有效时，才允许直接重新确认。 */
+export function reconfirmMode(fact: ReconfirmFactInput): ReconfirmMode {
+  if (
+    fact.status === "unavailable"
+    || !fact.entityId
+    || !fact.valueJson
+    || !fact.sourceChapterId
+    || fact.sourceCurrentVersion == null
+  ) {
+    return "blocked";
+  }
+  if (fact.sourceOrderValid === false) {
+    return "needs_order";
+  }
+  if (fact.evidenceStillPresent === false) {
+    return "needs_evidence";
+  }
+  return "direct";
+}

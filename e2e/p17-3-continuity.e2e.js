@@ -253,22 +253,34 @@ describe("章节连续性（桌面原生）", () => {
     expect(text).not.toContain("别处");
   });
 
-  it("来源章节产生新版本后事实标记过期，作者可重新确认", async () => {
+  it("来源章节产生新版本后事实标记过期，旧证据不存在时必须重新选取", async () => {
     const chapter = await invoke("get_chapter", { novelId, chapterId: chapterIds[1] });
     await invoke("save_chapter", {
       novelId,
       chapterId: chapterIds[1],
       expectedVersion: chapter.officialVersion,
       title: "第2章",
-      content: "山门在夜色里亮着灯。\n\n他按住伤口，抬头看见新的旗帜。",
+      // 新正文不再包含旧证据「山门在夜色里亮着灯」。
+      content: "他按住伤口，抬头看见新的旗帜。",
     });
 
     await refreshCastTab();
     const stale = await $('[data-testid="continuity-stale"]');
     await stale.waitForExist({ timeout: 15000 });
-    expect(await stale.getText()).toContain("不能继续作为有效证据");
-    await $('[data-testid="continuity-reconfirm"]').click();
-    for (let i = 0; i < 12; i += 1) {
+    const staleText = await stale.getText();
+    expect(staleText).toContain("找不到旧证据");
+    expect(staleText).toContain("重新选取");
+
+    // 直接确认按钮在未提供新证据时不可用。
+    const confirmButton = await $('[data-testid="continuity-reconfirm"]');
+    expect(await confirmButton.getAttribute("disabled")).not.toBe(null);
+
+    const evidence = await $('[data-testid="continuity-new-evidence"]');
+    await evidence.waitForExist({ timeout: 10000 });
+    await evidence.setValue("抬头看见新的旗帜");
+    await browser.pause(300);
+    await confirmButton.click();
+    for (let i = 0; i < 16; i += 1) {
       await browser.pause(500);
       if (!(await $('[data-testid="continuity-stale"]').isExisting())) break;
     }

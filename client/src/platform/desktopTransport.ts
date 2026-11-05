@@ -311,6 +311,8 @@ export interface ContinuityFact {
   sourceRevision?: number | null;
   sourceCurrentVersion?: number | null;
   evidenceQuote?: string | null;
+  evidenceStillPresent: boolean;
+  sourceOrderValid: boolean;
   status: string;
 }
 

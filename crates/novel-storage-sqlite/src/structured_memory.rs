@@ -93,8 +93,12 @@ async fn verify_source(
     if character == 0 {
         return Err(PortError::Conflict("人物不属于这本书。".into()));
     }
-    let version: Option<i64> = sqlx::query_scalar(
-        "SELECT r.version FROM chapter c JOIN chapter_revision r ON r.id = c.official_revision_id
+    if fact.evidence_quote.trim().is_empty() {
+        return Err(PortError::Conflict("事实证据不能为空。".into()));
+    }
+    let source = sqlx::query(
+        "SELECT c.sort_order, r.version, r.content FROM chapter c
+         JOIN chapter_revision r ON r.id = c.official_revision_id
          WHERE c.id = ? AND c.novel_id = ?",
     )
     .bind(&fact.source_chapter_id)
@@ -102,13 +106,28 @@ async fn verify_source(
     .fetch_optional(&mut **tx)
     .await
     .map_err(map_sql)?;
-    match version {
-        Some(current) if current == fact.source_revision => Ok(()),
-        Some(_) => Err(PortError::Conflict(
+    let Some(source) = source else {
+        return Err(PortError::Conflict("来源章节没有正式正文。".into()));
+    };
+    let source_order: i32 = source.try_get("sort_order").map_err(map_sql)?;
+    let current: i64 = source.try_get("version").map_err(map_sql)?;
+    if current != fact.source_revision {
+        return Err(PortError::Conflict(
             "来源章节已经更新，请重新确认事实。".into(),
-        )),
-        None => Err(PortError::Conflict("来源章节没有正式正文。".into())),
+        ));
     }
+    let content: String = source.try_get("content").map_err(map_sql)?;
+    if !content.contains(&fact.evidence_quote) {
+        return Err(PortError::Conflict(
+            "证据不在当前正式正文中，请重新选取证据后再确认。".into(),
+        ));
+    }
+    if i64::from(source_order) > fact.effective_chapter_order {
+        return Err(PortError::Conflict(
+            "来源章节晚于事实生效章节，请调整生效章节后再确认。".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -156,7 +175,11 @@ impl StructuredMemoryRepository for SqliteKernel {
     ) -> Result<Vec<StructuredFactWithSource>, PortError> {
         let rows = sqlx::query(
             "SELECT f.*, c.sort_order AS source_chapter_order, c.title AS source_chapter_title,
-                    r.version AS source_current_version
+                    r.version AS source_current_version,
+                    CASE WHEN r.content IS NULL THEN 0
+                         ELSE instr(r.content, f.evidence_quote) > 0 END AS evidence_present,
+                    CASE WHEN c.sort_order IS NULL THEN 0
+                         ELSE c.sort_order > f.effective_chapter_order END AS source_after_effective
              FROM structured_story_fact f
              LEFT JOIN chapter c ON c.id = f.source_chapter_id AND c.novel_id = f.novel_id
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
@@ -179,6 +202,14 @@ impl StructuredMemoryRepository for SqliteKernel {
                     source_current_version: row
                         .try_get("source_current_version")
                         .map_err(map_sql)?,
+                    evidence_present_in_current: row
+                        .try_get::<i64, _>("evidence_present")
+                        .map_err(map_sql)?
+                        != 0,
+                    source_after_effective: row
+                        .try_get::<i64, _>("source_after_effective")
+                        .map_err(map_sql)?
+                        != 0,
                 })
             })
             .collect()

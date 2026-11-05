@@ -372,6 +372,16 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
     .unwrap();
     assert_eq!(valid_attempt, 1);
 
+    // 旧章节事实：正式晋升新正文时必须与其它保存路径一样失效。
+    sqlx::query("INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at) VALUES ('char-lease','novel-lease','林动','主角','{}',1,1)")
+        .execute(kernel.pool()).await.unwrap();
+    sqlx::query("INSERT INTO character_state(id, character_id, chapter_order, body, created_at, source_revision, status, updated_at, source_chapter_id) VALUES ('state-lease','char-lease',1,'旧状态',1,'old','confirmed',1,'chapter-lease')")
+        .execute(kernel.pool()).await.unwrap();
+    sqlx::query("INSERT INTO timeline_event(id, novel_id, chapter_order, body, created_at, source_revision, status, updated_at, source_chapter_id) VALUES ('event-lease','novel-lease',1,'旧事件',1,'old','confirmed',1,'chapter-lease')")
+        .execute(kernel.pool()).await.unwrap();
+    sqlx::query("INSERT INTO plot_thread(id, novel_id, title, body, opened_chapter_order, resolved_chapter_order, status, source_revision, created_at, updated_at, source_chapter_id) VALUES ('thread-lease','novel-lease','旧伏笔','旧伏笔正文',1,NULL,'open','old',1,1,'chapter-lease')")
+        .execute(kernel.pool()).await.unwrap();
+
     // Chapter commit is fenced too: stale A cannot promote, current B can.
     let stale_promote = NovelRepository::promote_candidate_fenced(
         &kernel,
@@ -384,6 +394,20 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
     )
     .await;
     assert!(matches!(stale_promote, Err(PortError::Conflict(_))));
+    // 非法 Fence 必须零副作用：旧事实仍然保持 confirmed。
+    for (table, id, expected) in [
+        ("character_state", "state-lease", "confirmed"),
+        ("timeline_event", "event-lease", "confirmed"),
+        ("plot_thread", "thread-lease", "open"),
+    ] {
+        let status: String =
+            sqlx::query_scalar(&format!("SELECT status FROM {table} WHERE id = ?"))
+                .bind(id)
+                .fetch_one(kernel.pool())
+                .await
+                .unwrap();
+        assert_eq!(status, expected, "{table} must not change on stale fence");
+    }
     let promoted = NovelRepository::promote_candidate_fenced(
         &kernel,
         &second.fence,
@@ -406,6 +430,31 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
     .await
     .unwrap();
     assert_eq!(revisions, 1);
+
+    // 合法 Fence 晋升新正文后，旧事实必须与手动保存/历史恢复一样失效。
+    for (table, id) in [
+        ("character_state", "state-lease"),
+        ("timeline_event", "event-lease"),
+        ("plot_thread", "thread-lease"),
+    ] {
+        let status: String =
+            sqlx::query_scalar(&format!("SELECT status FROM {table} WHERE id = ?"))
+                .bind(id)
+                .fetch_one(kernel.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            status, "superseded",
+            "{table} must be invalidated on promotion"
+        );
+    }
+    let revisions_after: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM chapter_revision WHERE chapter_id = 'chapter-lease'",
+    )
+    .fetch_one(kernel.pool())
+    .await
+    .unwrap();
+    assert_eq!(revisions_after, 1);
 }
 
 #[tokio::test]

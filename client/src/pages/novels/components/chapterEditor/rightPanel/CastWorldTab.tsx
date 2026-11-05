@@ -15,7 +15,8 @@ import {
   type ContinuityFact,
   type ContinuityWorld,
 } from "@/platform/desktopTransport";
-import { canReconfirm, factValueText, sourceLabel } from "./continuityModel";
+import { factValueText, sourceLabel } from "./continuityModel";
+import ContinuityStaleFact from "./ContinuityStaleFact";
 
 interface CastWorldTabProps {
   novelId: string;
@@ -53,6 +54,7 @@ export default function CastWorldTab(props: CastWorldTabProps) {
   const queryClient = useQueryClient();
   const [expandedConflictId, setExpandedConflictId] = useState<string | null>(null);
   const [conflictReason, setConflictReason] = useState("作者按正文证据裁决");
+  const [factLimit, setFactLimit] = useState(80);
 
   const continuityQuery = useQuery({
     queryKey: queryKeys.novels.chapterContinuity(novelId, chapterId),
@@ -110,9 +112,17 @@ export default function CastWorldTab(props: CastWorldTabProps) {
   });
 
   const reconfirmMutation = useMutation({
-    mutationFn: (fact: ContinuityFact) => {
+    mutationFn: (input: {
+      fact: ContinuityFact;
+      evidenceQuote: string;
+      effectiveChapterOrder: number;
+    }) => {
+      const { fact, evidenceQuote, effectiveChapterOrder } = input;
       if (!fact.entityId || !fact.valueJson || !fact.sourceChapterId || fact.sourceCurrentVersion == null) {
         throw new Error("这条事实缺少可重新确认的来源信息。");
+      }
+      if (evidenceQuote.trim().length === 0) {
+        throw new Error("请先从当前正式正文中选取证据。");
       }
       return confirmStructuredFact({
         fact: {
@@ -123,8 +133,8 @@ export default function CastWorldTab(props: CastWorldTabProps) {
           valueJson: fact.valueJson,
           sourceChapterId: fact.sourceChapterId,
           sourceRevision: fact.sourceCurrentVersion,
-          evidenceQuote: fact.evidenceQuote?.trim() || "作者在人物与世界观面板重新确认",
-          effectiveChapterOrder: fact.effectiveChapterOrder,
+          evidenceQuote: evidenceQuote.trim(),
+          effectiveChapterOrder,
           nowMs: Date.now(),
         },
       });
@@ -155,7 +165,7 @@ export default function CastWorldTab(props: CastWorldTabProps) {
   const keyFacts = projection.facts.filter(
     (fact) => fact.kind === "structured" || fact.factType === "timeline_event" || fact.factType === "plot_thread",
   );
-  const visibleFacts = keyFacts.slice(0, 80);
+  const visibleFacts = keyFacts.slice(0, factLimit);
   const hiddenFactCount = keyFacts.length - visibleFacts.length;
 
   return (
@@ -225,7 +235,7 @@ export default function CastWorldTab(props: CastWorldTabProps) {
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-medium text-foreground">关键事实</h3>
+        <h3 className="text-sm font-medium text-foreground">关键事实（按生效章节从新到旧）</h3>
         {visibleFacts.length === 0 ? (
           <div className="text-xs text-muted-foreground">截至本章还没有已确认的关键事实。</div>
         ) : (
@@ -248,7 +258,17 @@ export default function CastWorldTab(props: CastWorldTabProps) {
           </ul>
         )}
         {hiddenFactCount > 0 ? (
-          <div className="text-[11px] text-muted-foreground">还有 {hiddenFactCount} 条事实未展开；先处理上面的条目以保持列表可读。</div>
+          <div className="space-y-2">
+            <div className="text-[11px] text-muted-foreground">还有 {hiddenFactCount} 条更早的事实未展开。</div>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="continuity-show-earlier"
+              onClick={() => setFactLimit((current) => current + 80)}
+            >
+              显示更早的事实
+            </Button>
+          </div>
         ) : null}
       </section>
 
@@ -256,26 +276,12 @@ export default function CastWorldTab(props: CastWorldTabProps) {
         <section className="space-y-2">
           <h3 className="text-sm font-medium text-amber-900">需要重新确认</h3>
           {projection.staleFacts.map((fact) => (
-            <div key={fact.id} className="rounded-xl bg-amber-50 px-3 py-2" data-testid="continuity-stale">
-              <div className="text-xs text-amber-950">
-                {FACT_TYPE_LABELS[fact.factType] ?? fact.factType}
-                {fact.entityName ? ` · ${fact.entityName}` : ""} · {sourceLabel(fact)}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-amber-950">{factValueText(fact)}</div>
-              <div className="mt-1 text-[11px] text-amber-800">
-                来源章节已是版本 {fact.sourceCurrentVersion ?? "未知"}，原事实来自版本 {fact.sourceRevision ?? "未知"}，不能继续作为有效证据。
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                data-testid="continuity-reconfirm"
-                disabled={reconfirmMutation.isPending || !canReconfirm(fact)}
-                onClick={() => reconfirmMutation.mutate(fact)}
-              >
-                按当前版本重新确认
-              </Button>
-            </div>
+            <ContinuityStaleFact
+              key={fact.id}
+              fact={fact}
+              isPending={reconfirmMutation.isPending}
+              onReconfirm={(input) => reconfirmMutation.mutate(input)}
+            />
           ))}
         </section>
       ) : null}

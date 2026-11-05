@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canReconfirm, factValueText, sourceLabel } from "./continuityModel.ts";
+import { canReconfirm, factValueText, reconfirmMode, sourceLabel } from "./continuityModel.ts";
 
 test("结构化事实按作者能读的方式展示", () => {
   assert.equal(factValueText({ factType: "life_state", value: "", valueJson: '{"state":"alive"}' }), "存活");
@@ -43,4 +43,27 @@ test("只有来源版本齐备的事实才允许一键重新确认", () => {
   assert.equal(canReconfirm({ ...base, sourceChapterId: null }), false);
   assert.equal(canReconfirm({ ...base, valueJson: null }), false);
   assert.equal(canReconfirm({ ...base, entityId: null }), false);
+});
+
+test("重新确认模式区分直接确认、需新证据、需新顺序与不可用", () => {
+  const base = {
+    status: "stale",
+    valueJson: "{}",
+    entityId: "c1",
+    sourceChapterId: "ch3",
+    sourceCurrentVersion: 2,
+    evidenceStillPresent: true,
+    sourceOrderValid: true,
+  };
+  assert.equal(reconfirmMode(base), "direct");
+  assert.equal(reconfirmMode({ ...base, evidenceStillPresent: false }), "needs_evidence");
+  assert.equal(reconfirmMode({ ...base, sourceOrderValid: false }), "needs_order");
+  assert.equal(reconfirmMode({ ...base, status: "unavailable" }), "blocked");
+  assert.equal(reconfirmMode({ ...base, sourceCurrentVersion: null }), "blocked");
+  assert.equal(reconfirmMode({ ...base, entityId: null }), "blocked");
+  // 顺序问题优先于证据问题：先让作者把生效章节调整到来源之后。
+  assert.equal(
+    reconfirmMode({ ...base, sourceOrderValid: false, evidenceStillPresent: false }),
+    "needs_order",
+  );
 });

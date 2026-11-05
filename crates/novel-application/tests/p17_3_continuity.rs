@@ -92,7 +92,7 @@ async fn confirm_fact(
             value_json: value_json.into(),
             source_chapter_id: chapter_id.into(),
             source_revision,
-            evidence_quote: format!("{chapter_id} 的原文证据"),
+            evidence_quote: "正式正文".into(),
             effective_chapter_order: effective_order,
             now_ms: effective_order + 1_000,
         },
@@ -476,47 +476,6 @@ async fn ambiguous_candidate_requires_manual_identity() {
 }
 
 #[tokio::test]
-async fn story_fact_without_source_is_marked_unavailable() {
-    let dir = tempfile::tempdir().unwrap();
-    let kernel = kernel(&dir).await;
-    seed_novel(kernel.as_ref(), "n", 5).await;
-    add_character(kernel.as_ref(), "n", "c1", "林动").await;
-    NovelRepository::upsert_character_state(
-        kernel.as_ref(),
-        NewCharacterState {
-            id: "legacy-state".into(),
-            character_id: "c1".into(),
-            chapter_order: 2,
-            body: "旧版人物状态".into(),
-            source_chapter_id: String::new(),
-            source_revision: "legacy".into(),
-            status: "confirmed".into(),
-            now_ms: 10,
-        },
-    )
-    .await
-    .unwrap();
-
-    let service = ChapterContinuityService::new(kernel.clone(), kernel.clone(), kernel.clone());
-    let projection = service.project("n", "n-ch3").await.unwrap();
-    let fact = projection
-        .facts
-        .iter()
-        .find(|fact| fact.id == "legacy-state")
-        .expect("没有来源的旧事实仍要展示内容");
-    assert_eq!(fact.status, "unavailable");
-    assert_eq!(fact.source_chapter_order, None);
-    assert_eq!(
-        projection.characters[0]
-            .current_state
-            .as_ref()
-            .map(|state| state.body.as_str()),
-        Some("旧版人物状态"),
-        "内容可以展示，但来源状态必须是 unavailable"
-    );
-}
-
-#[tokio::test]
 async fn conflict_sides_expose_both_sources_without_auto_overwrite() {
     let dir = tempfile::tempdir().unwrap();
     let kernel = kernel(&dir).await;
@@ -585,6 +544,202 @@ async fn conflict_sides_expose_both_sources_without_auto_overwrite() {
             .evidence_quote
             .as_deref()
             .unwrap()
-            .contains("原文证据")
+            .contains("正式正文")
     );
+}
+
+#[tokio::test]
+async fn reconfirm_requires_evidence_that_exists_in_the_new_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = kernel(&dir).await;
+    seed_novel(kernel.as_ref(), "n", 5).await;
+    add_character(kernel.as_ref(), "n", "c1", "林动").await;
+    NovelRepository::save_user_chapter(
+        kernel.as_ref(),
+        SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "n-ch3".into(),
+            expected_version: 0,
+            title: "第3章".into(),
+            content: "旧证据：林动在山门。".into(),
+            revision_id: "n-ch3-rev1".into(),
+            artifact_id: "n-ch3-art1".into(),
+            content_sha256: "n-ch3-hash1".into(),
+            now_ms: 100,
+        },
+    )
+    .await
+    .unwrap();
+    StructuredMemoryRepository::confirm_structured_fact(
+        kernel.as_ref(),
+        NewStructuredFact {
+            id: "f-old".into(),
+            novel_id: "n".into(),
+            entity_id: "c1".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "n-ch3".into(),
+            source_revision: 1,
+            evidence_quote: "旧证据：林动在山门。".into(),
+            effective_chapter_order: 3,
+            now_ms: 150,
+        },
+    )
+    .await
+    .unwrap();
+    // 新版本不再包含旧证据。
+    NovelRepository::save_user_chapter(
+        kernel.as_ref(),
+        SaveChapterRecord {
+            novel_id: "n".into(),
+            chapter_id: "n-ch3".into(),
+            expected_version: 1,
+            title: "第3章".into(),
+            content: "新正文：林动已经离开。".into(),
+            revision_id: "n-ch3-rev2".into(),
+            artifact_id: "n-ch3-art2".into(),
+            content_sha256: "n-ch3-hash2".into(),
+            now_ms: 200,
+        },
+    )
+    .await
+    .unwrap();
+
+    let service = ChapterContinuityService::new(kernel.clone(), kernel.clone(), kernel.clone());
+    let projection = service.project("n", "n-ch4").await.unwrap();
+    assert!(!projection.facts.iter().any(|fact| fact.id == "f-old"));
+    let stale = projection
+        .stale_facts
+        .iter()
+        .find(|fact| fact.id == "f-old")
+        .expect("旧事实必须标记为待处理");
+    assert_eq!(stale.status, "stale");
+    assert!(!stale.evidence_still_present, "新正文中已经没有旧证据");
+    assert_eq!(stale.source_current_version, Some(2));
+
+    let rejected = StructuredMemoryRepository::confirm_structured_fact(
+        kernel.as_ref(),
+        NewStructuredFact {
+            id: "f-reconfirm-old".into(),
+            novel_id: "n".into(),
+            entity_id: "c1".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "n-ch3".into(),
+            source_revision: 2,
+            evidence_quote: "旧证据：林动在山门。".into(),
+            effective_chapter_order: 3,
+            now_ms: 300,
+        },
+    )
+    .await;
+    assert!(rejected.is_err(), "旧证据不在新正文中时不能直接重新确认");
+
+    let accepted = StructuredMemoryRepository::confirm_structured_fact(
+        kernel.as_ref(),
+        NewStructuredFact {
+            id: "f-reconfirm-new".into(),
+            novel_id: "n".into(),
+            entity_id: "c1".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "n-ch3".into(),
+            source_revision: 2,
+            evidence_quote: "林动已经离开。".into(),
+            effective_chapter_order: 3,
+            now_ms: 400,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(accepted.truthfulness, "confirmed");
+
+    let after = service.project("n", "n-ch4").await.unwrap();
+    assert!(after.facts.iter().any(|fact| fact.id == "f-reconfirm-new"));
+    assert!(!after.stale_facts.iter().any(|fact| fact.id == "f-old"));
+}
+
+#[tokio::test]
+async fn delayed_effect_and_chapter_reorder_are_re_evaluated() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = kernel(&dir).await;
+    seed_novel(kernel.as_ref(), "n", 30).await;
+    add_character(kernel.as_ref(), "n", "c1", "林动").await;
+    save_chapter(kernel.as_ref(), "n", "n-ch5", 5, 0).await;
+    confirm_fact(
+        kernel.as_ref(),
+        "f-delayed",
+        "n",
+        "c1",
+        "location",
+        r#"{"location":"山门"}"#,
+        "n-ch5",
+        1,
+        20,
+    )
+    .await;
+
+    let service = ChapterContinuityService::new(kernel.clone(), kernel.clone(), kernel.clone());
+    let at10 = service.project("n", "n-ch10").await.unwrap();
+    assert!(
+        !at10.facts.iter().any(|fact| fact.id == "f-delayed"),
+        "第 5 章的证据延迟到第 20 章生效，不能提前出现在第 10 章"
+    );
+    let at20 = service.project("n", "n-ch20").await.unwrap();
+    assert!(at20.facts.iter().any(|fact| fact.id == "f-delayed"));
+
+    // 把来源章节移动到第 29 章：事实不能再作为第 20 章的已知事实。
+    sqlx::query("DELETE FROM chapter WHERE id = 'n-ch29'")
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE chapter SET sort_order = 29 WHERE id = 'n-ch5'")
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+    let reordered = service.project("n", "n-ch20").await.unwrap();
+    assert!(
+        !reordered.facts.iter().any(|fact| fact.id == "f-delayed"),
+        "来源章节被移到更晚顺序后，旧投影不能继续泄露未来事实"
+    );
+    let invalid = reordered
+        .stale_facts
+        .iter()
+        .find(|fact| fact.id == "f-delayed")
+        .expect("来源晚于生效顺序的事实必须标记待处理");
+    assert_eq!(invalid.status, "invalid");
+    assert!(!invalid.source_order_valid);
+}
+
+#[tokio::test]
+async fn story_fact_without_source_is_marked_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = kernel(&dir).await;
+    seed_novel(kernel.as_ref(), "n", 5).await;
+    add_character(kernel.as_ref(), "n", "c1", "林动").await;
+    NovelRepository::upsert_character_state(
+        kernel.as_ref(),
+        NewCharacterState {
+            id: "legacy-state".into(),
+            character_id: "c1".into(),
+            chapter_order: 2,
+            body: "旧版人物状态".into(),
+            source_chapter_id: String::new(),
+            source_revision: "legacy".into(),
+            status: "confirmed".into(),
+            now_ms: 10,
+        },
+    )
+    .await
+    .unwrap();
+
+    let service = ChapterContinuityService::new(kernel.clone(), kernel.clone(), kernel.clone());
+    let projection = service.project("n", "n-ch3").await.unwrap();
+    let fact = projection
+        .facts
+        .iter()
+        .find(|fact| fact.id == "legacy-state")
+        .expect("没有来源的旧事实仍要展示内容");
+    assert_eq!(fact.status, "unavailable");
+    assert!(!fact.source_order_valid);
 }

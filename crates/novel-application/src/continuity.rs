@@ -15,7 +15,7 @@ use crate::ports::{
     StoryFactView,
 };
 use crate::structured_memory::{
-    StructuredFactView, StructuredFactWithSource, StructuredMemoryRepository, visible_facts_at,
+    StructuredFactWithSource, StructuredMemoryRepository, visible_facts_at,
 };
 
 pub const CONTINUITY_CANDIDATE_LIMIT: i64 = 200;
@@ -75,6 +75,10 @@ pub struct ContinuityFact {
     pub source_revision: Option<i64>,
     pub source_current_version: Option<i64>,
     pub evidence_quote: Option<String>,
+    /// 旧证据是否仍存在于来源章节当前正式正文；不存在时必须重新选取。
+    pub evidence_still_present: bool,
+    /// 来源章节是否不晚于事实生效章节。
+    pub source_order_valid: bool,
     pub status: String,
 }
 
@@ -227,9 +231,17 @@ impl ChapterContinuityService {
             .into_iter()
             .take(CONTINUITY_STRUCTURED_FACT_LIMIT as usize)
             .collect::<Vec<_>>();
-        let (mut valid_structured, stale_structured, conflict_fact_pool) =
+        let (valid_structured, stale_structured, conflict_fact_pool) =
             split_structured_by_source(structured, &header_by_id, &character_names);
-        valid_structured = visible_facts_at(valid_structured);
+        let visible_ids: std::collections::HashSet<String> = visible_facts_at(
+            valid_structured
+                .iter()
+                .map(|item| item.fact.clone())
+                .collect(),
+        )
+        .into_iter()
+        .map(|fact| fact.id)
+        .collect();
 
         let story = story_facts
             .iter()
@@ -237,8 +249,9 @@ impl ChapterContinuityService {
             .collect::<Vec<_>>();
         let mut facts = valid_structured
             .iter()
-            .map(|fact| {
-                structured_fact_to_continuity(fact, &header_by_id, &character_names, "valid")
+            .filter(|item| visible_ids.contains(&item.fact.id))
+            .map(|item| {
+                structured_fact_to_continuity(item, &header_by_id, &character_names, "valid")
             })
             .chain(story.iter().cloned())
             .collect::<Vec<_>>();
@@ -247,7 +260,7 @@ impl ChapterContinuityService {
             .iter()
             .map(|item| {
                 structured_fact_to_continuity(
-                    &item.fact,
+                    item,
                     &header_by_id,
                     &character_names,
                     structured_fact_status(item),
@@ -316,7 +329,7 @@ fn split_structured_by_source(
     headers: &std::collections::HashMap<&str, &ChapterHeader>,
     character_names: &std::collections::HashMap<&str, &str>,
 ) -> (
-    Vec<StructuredFactView>,
+    Vec<StructuredFactWithSource>,
     Vec<StructuredFactWithSource>,
     Vec<ContinuityFact>,
 ) {
@@ -328,20 +341,22 @@ fn split_structured_by_source(
         let confirmed = row.fact.truthfulness == "confirmed";
         let status = if !confirmed {
             "disputed"
-        } else if header.map(|item| item.official_version) == Some(row.fact.source_revision) {
+        } else if header.map(|item| item.official_version) == Some(row.fact.source_revision)
+            && !row.source_after_effective
+        {
             "valid"
         } else {
             structured_fact_status(&row)
         };
         pool.push(structured_fact_to_continuity(
-            &row.fact,
+            &row,
             headers,
             character_names,
             status,
         ));
         if confirmed {
             if status == "valid" {
-                valid.push(row.fact);
+                valid.push(row);
             } else if row.fact.superseded_by.is_none() {
                 // 已经被新事实替代的旧版本不再提示重新确认；否则确认一次后提示永远不会消失。
                 stale.push(row);
@@ -354,17 +369,20 @@ fn split_structured_by_source(
 fn structured_fact_status(item: &StructuredFactWithSource) -> &'static str {
     if item.source_chapter_order.is_none() || item.source_current_version.is_none() {
         "unavailable"
+    } else if item.source_after_effective {
+        "invalid"
     } else {
         "stale"
     }
 }
 
 fn structured_fact_to_continuity(
-    fact: &StructuredFactView,
+    item: &StructuredFactWithSource,
     headers: &std::collections::HashMap<&str, &ChapterHeader>,
     character_names: &std::collections::HashMap<&str, &str>,
     status: &str,
 ) -> ContinuityFact {
+    let fact = &item.fact;
     let header = headers.get(fact.source_chapter_id.as_str()).copied();
     ContinuityFact {
         id: fact.id.clone(),
@@ -384,6 +402,8 @@ fn structured_fact_to_continuity(
         source_revision: Some(fact.source_revision),
         source_current_version: header.map(|item| item.official_version),
         evidence_quote: Some(fact.evidence_quote.clone()),
+        evidence_still_present: item.evidence_present_in_current,
+        source_order_valid: !item.source_after_effective,
         status: status.into(),
     }
 }
@@ -412,6 +432,8 @@ fn story_fact_to_continuity(
         source_revision: None,
         source_current_version: header.map(|item| item.official_version),
         evidence_quote: fact.evidence_quote.clone(),
+        evidence_still_present: fact.evidence_quote.is_some(),
+        source_order_valid: header.is_some_and(|item| item.sort_order <= fact.chapter_order),
         // 没有来源章节的旧事实仍可展示内容，但不能冒充可追溯的有效证据。
         status: if header.is_some() {
             "valid"
@@ -422,7 +444,7 @@ fn story_fact_to_continuity(
     }
 }
 
-fn fact_sort_key(fact: &ContinuityFact) -> (i32, u8, String, String, String) {
+fn fact_sort_key(fact: &ContinuityFact) -> (std::cmp::Reverse<i32>, u8, String, String, String) {
     let kind_rank = match fact.fact_type.as_str() {
         "life_state" => 0,
         "location" => 1,
@@ -434,7 +456,7 @@ fn fact_sort_key(fact: &ContinuityFact) -> (i32, u8, String, String, String) {
         _ => 7,
     };
     (
-        fact.effective_chapter_order,
+        std::cmp::Reverse(fact.effective_chapter_order),
         kind_rank,
         fact.entity_name.clone().unwrap_or_default(),
         fact.fact_type.clone(),
