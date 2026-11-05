@@ -17,6 +17,8 @@ pub struct AppState {
     pub data_dir: std::path::PathBuf,
     pub native_tasks: Arc<NativeTaskService>,
     pub structured_memory: Arc<StructuredMemoryService>,
+    /// 章节连续性只读投影：合并既有事实、候选与冲突，不新建记忆引擎。
+    pub chapter_continuity: Arc<novel_application::ChapterContinuityService>,
     pub kernel: Arc<SqliteKernel>,
     pub secrets: Arc<OsSecretStore>,
     pub llm: Arc<dyn LlmProvider>,

@@ -7,6 +7,7 @@ import {
   approveRun,
   cancelRun,
   confirmCandidateAfterEdit,
+  getRunContextTrace,
   getRunDetail,
   listRuns,
   regenerateRun,
@@ -58,6 +59,14 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
     queryFn: () => getRunDetail(novelId, latest!.id),
     enabled: Boolean(latest?.id),
     refetchInterval: 5000,
+  });
+
+  // 运行冻结的上下文 trace：只读该 Run 自己保存的版本，不跟随数据库最新状态。
+  const runTraceQuery = useQuery({
+    queryKey: queryKeys.novels.runContextTrace(novelId, latest?.id ?? "none"),
+    queryFn: () => getRunContextTrace({ novelId, runId: latest!.id }),
+    enabled: Boolean(latest?.id),
+    staleTime: Infinity,
   });
 
   const refresh = () => {
@@ -187,6 +196,36 @@ export default function RunRecoveryTab(props: RunRecoveryTabProps) {
         {actions.length === 0 && !isRecoverableStatus(status) ? (
           <span className="text-xs text-muted-foreground">当前没有需要你处理的步骤。</span>
         ) : null}
+      </div>
+
+      <div className="space-y-2 border-t border-border/70 pt-3" data-testid="run-context-trace">
+        <div className="text-sm font-medium text-foreground">这次运行引用的上下文</div>
+        {runTraceQuery.isLoading ? (
+          <div className="text-xs text-muted-foreground">正在读取冻结的上下文来源...</div>
+        ) : runTraceQuery.isError ? (
+          <div className="text-xs text-amber-800">上下文来源读取失败；历史运行不能被当成「没有来源」。</div>
+        ) : !runTraceQuery.data ? (
+          <div className="text-xs text-muted-foreground">这次运行还没有保存上下文来源。</div>
+        ) : (
+          <>
+            <div className="text-[11px] text-muted-foreground">
+              版本 {runTraceQuery.data.assemblyVersion} · 预算 {runTraceQuery.data.inputBudget} · 使用 {runTraceQuery.data.estimatedTokens} tokens
+            </div>
+            <ul className="space-y-1">
+              {runTraceQuery.data.sources.filter((source) => source.selected).map((source) => (
+                <li key={`${source.sourceType}:${source.sourceId}`} className="rounded-lg bg-muted/30 px-2 py-1" data-testid="run-context-source">
+                  <span className="text-[11px] text-foreground">{source.sourceType}</span>
+                  <span className="ml-2 text-[11px] text-muted-foreground">{source.sourceId || "（无编号）"} · 版本 {source.sourceVersion ?? "未知"} · 约 {source.estimatedTokens} tokens</span>
+                </li>
+              ))}
+            </ul>
+            {runTraceQuery.data.sources.some((source) => !source.selected) ? (
+              <div className="text-[11px] text-amber-800">
+                有 {runTraceQuery.data.sources.filter((source) => !source.selected).length} 个来源未使用（缺失、过期或超出预算）。
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
 
       <Link

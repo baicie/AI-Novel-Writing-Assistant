@@ -69,7 +69,25 @@
 - 位置按小说隔离，记录只含坐标与标识，不含正文与任何凭据。
 - 光标变化与滚动都会调度一次 400ms 的去抖上报；只监听滚动会漏掉「只点了光标没滚动」的情况。
 
+## 章节连续性与上下文来源（P17.3）
+
+章节工作台要在不新建记忆引擎的前提下回答「截至这一章，哪些事实已经确认」。
+
+- **As-Of 规则**：只读取 `effective_chapter_order <= 目标章节顺序` 的事实；
+  只把 `confirmed` 且来源章节当前正式版本等于 `source_revision` 的事实放进有效集。
+- **来源状态**：来源版本变化 → `stale`；来源章节缺失 → `unavailable`。
+  两者都不能继续冒充有效证据；`stale` 提供重新确认入口。
+- **候选与冲突**：候选必须由作者确认后才写入正式状态；过期候选禁用确认；
+  冲突复用既有 `memory_conflict` 流程，双方来源并列展示，不自动覆盖。
+- **上下文预览**：复用 `assemble_director_context` 与 `ContextTrace`，允许必要来源缺失
+  但返回 `blockedReasons`；只返回 trace，不返回 Prompt 正文，不调用模型，预算硬上限 64k。
+- **历史运行**：context step 的 trace 存在冻结 artifact 里；只读该 Run 自己的记录，
+  不用数据库最新状态替换。
+- **边界**：章节目录只读 header（不加载正文）；结构化事实 500、候选 200、冲突 100；
+  界面关键事实最多展示 80 条并提示剩余数量。
+
 ## Failure Modes
+
 
 - 只比较章节 ID：旧窗口会覆盖新正文。应使用 `expectedUpdatedAt` 并在冲突后保留本地草稿。
 - 对正文 `trim` 或压缩空白：会改变选区偏移，导致 AI 候选替换错误位置。应保留原文空格、空段和单换行。
@@ -85,11 +103,25 @@
 - 只凭 localStorage 里的旧坐标恢复光标，不校验正文长度：版本变短后光标会停在不相关的文字中间。应比较记录长度并在明显缩短时放弃。
 - 用固定的二维 LCS 对比整章改写：长章节会耗尽内存或长时间阻塞编辑器。应先按码点裁掉公共前后缀，再在预算内做精确对比；超出预算时退化为段落级对齐或整段替换，并通过 `degraded` 明确告知作者，不能悄悄给出错位的细粒度对比。
 
+- 用未来章节的事实生成当前章节：会让角色提前知道尚未发生的事。所有连续性查询必须带
+  `effective_chapter_order <= 目标顺序`，并检查来源修订仍有效。
+- 把记忆候选或 disputed 事实当成 confirmed：会未经作者确认写入正式设定。候选必须走确认命令，
+  disputed 只用于冲突展示。
+- 用「最新数据库状态」渲染历史 Run 的上下文：会篡改已冻结的运行证据。历史 Run 只能读
+  自己的 context artifact。
+- 为了做连续性面板而加载全书正文：章节再多也会拖慢工作台。只读章节 header 与按上限过滤的事实。
+- 把 `stale` / `unavailable` 静默丢弃：作者会以为事实仍然有效。必须显示来源状态与重新确认入口。
+- 用不可审计的 Prompt 字符串代替 Context Trace：作者无法判断上下文为什么缺失或被排除。
+  预览与运行都保留结构化 trace。
+
 ## Related Modules
 
 - `client/src/pages/novels/components/chapterEditor/document/`
 - `client/src/pages/novels/components/chapterEditor/ChapterEditorShell.tsx`
 - `client/src/api/novel/chapterSelectionRewriteBilling.ts`（计费状态语义）
+- `crates/novel-application/src/continuity.rs`（章节连续性投影）
+- `crates/novel-application/src/context.rs`（上下文组装与预览）
+- `client/src/pages/novels/components/chapterEditor/rightPanel/ContextPreviewTab.tsx`
 - `crates/novel-storage-sqlite/src/selection_rewrite.rs`（请求尝试记录）
 - `server/src/services/novel/chapterEditor/context/`
 - `server/src/services/novel/novelCoreCrudService.ts`

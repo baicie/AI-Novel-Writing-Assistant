@@ -2,10 +2,10 @@ use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use novel_application::{
-    CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
-    CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery, ListNovelsResult,
-    NewChapter, NewCharacter, NewNovel, NewVolume, NovelDetail, NovelRepository, NovelSummary,
-    PortError, PromoteOutcome, RestoreChapterRecord, SaveCandidateEditDraftRecord,
+    CandidateEditDraftView, ChapterDraftView, ChapterHeader, ChapterRevisionSnapshot,
+    ChapterSnapshot, CharacterSnapshot, CreateNovelInput, DeleteChapterRecord, ListNovelsQuery,
+    ListNovelsResult, NewChapter, NewCharacter, NewNovel, NewVolume, NovelDetail, NovelRepository,
+    NovelSummary, PortError, PromoteOutcome, RestoreChapterRecord, SaveCandidateEditDraftRecord,
     SaveChapterDraftRecord, SaveChapterRecord, StoryFactView, UpdateChapterMetaRecord,
     UpdateNovelFields, UpdateVolumeRecord, VolumeSnapshot,
 };
@@ -551,6 +551,31 @@ impl NovelRepository for SqliteKernel {
             content: String::new(),
             updated_at: chapter.now_ms,
         })
+    }
+
+    async fn list_chapter_headers(&self, novel_id: &str) -> Result<Vec<ChapterHeader>, PortError> {
+        let rows = sqlx::query(
+            "SELECT c.id, c.title, c.sort_order, c.protection, COALESCE(r.version, 0) AS official_version
+             FROM chapter c
+             LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
+             WHERE c.novel_id = ?
+             ORDER BY c.sort_order, c.id",
+        )
+        .bind(novel_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sql)?;
+        rows.iter()
+            .map(|row| {
+                Ok(ChapterHeader {
+                    id: row.try_get("id").map_err(map_sql)?,
+                    title: row.try_get("title").map_err(map_sql)?,
+                    sort_order: row.try_get("sort_order").map_err(map_sql)?,
+                    protection: row.try_get("protection").map_err(map_sql)?,
+                    official_version: row.try_get("official_version").map_err(map_sql)?,
+                })
+            })
+            .collect()
     }
 
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError> {
@@ -1354,15 +1379,19 @@ impl NovelRepository for SqliteKernel {
     ) -> Result<Vec<StoryFactView>, PortError> {
         let mut facts = Vec::new();
         let states = sqlx::query(
-            "SELECT cs.id, cs.body, cs.chapter_order, cs.source_revision, cs.status
-             FROM character_state cs JOIN character c ON c.id = cs.character_id
+            "SELECT cs.id, cs.body, cs.chapter_order, cs.source_revision, cs.status,
+                    cs.source_chapter_id, cs.character_id, c.name AS character_name,
+                    mc.evidence_quote AS evidence_quote
+             FROM character_state cs
+             JOIN character c ON c.id = cs.character_id
+             LEFT JOIN memory_extraction_candidate mc ON ('memory-' || mc.id) = cs.id
              WHERE c.novel_id = ? AND cs.status = 'confirmed' AND cs.chapter_order <= ?
                AND cs.rowid = (
                  SELECT cs2.rowid FROM character_state cs2
                  WHERE cs2.character_id = cs.character_id AND cs2.chapter_order <= ?
                  ORDER BY cs2.chapter_order DESC, cs2.updated_at DESC, cs2.rowid DESC LIMIT 1
                )
-             ORDER BY cs.chapter_order",
+             ORDER BY cs.chapter_order, cs.character_id",
         )
         .bind(novel_id)
         .bind(before_chapter_order)
@@ -1378,13 +1407,19 @@ impl NovelRepository for SqliteKernel {
                 chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
                 source_revision: row.try_get("source_revision").map_err(map_sql)?,
                 status: row.try_get("status").map_err(map_sql)?,
+                source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,
+                evidence_quote: row.try_get("evidence_quote").map_err(map_sql)?,
+                character_id: row.try_get("character_id").map_err(map_sql)?,
+                character_name: row.try_get("character_name").map_err(map_sql)?,
             });
         }
         let events = sqlx::query(
-            "SELECT id, body, chapter_order, source_revision, status
-             FROM timeline_event
-             WHERE novel_id = ? AND status = 'confirmed' AND chapter_order <= ?
-             ORDER BY chapter_order, id",
+            "SELECT e.id, e.body, e.chapter_order, e.source_revision, e.status,
+                    e.source_chapter_id, mc.evidence_quote AS evidence_quote
+             FROM timeline_event e
+             LEFT JOIN memory_extraction_candidate mc ON ('memory-' || mc.id) = e.id
+             WHERE e.novel_id = ? AND e.status = 'confirmed' AND e.chapter_order <= ?
+             ORDER BY e.chapter_order, e.id",
         )
         .bind(novel_id)
         .bind(before_chapter_order)
@@ -1399,14 +1434,20 @@ impl NovelRepository for SqliteKernel {
                 chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
                 source_revision: row.try_get("source_revision").map_err(map_sql)?,
                 status: row.try_get("status").map_err(map_sql)?,
+                source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,
+                evidence_quote: row.try_get("evidence_quote").map_err(map_sql)?,
+                character_id: None,
+                character_name: None,
             });
         }
         let threads = sqlx::query(
-            "SELECT id, title || '：' || body AS body, opened_chapter_order AS chapter_order,
-                    source_revision, status
-             FROM plot_thread
-             WHERE novel_id = ? AND opened_chapter_order <= ? AND status IN ('open','resolved')
-             ORDER BY opened_chapter_order, id",
+            "SELECT p.id, p.title || '：' || p.body AS body, p.opened_chapter_order AS chapter_order,
+                    p.source_revision, p.status, p.source_chapter_id,
+                    COALESCE(mc.evidence_quote, p.evidence_json) AS evidence_quote
+             FROM plot_thread p
+             LEFT JOIN memory_extraction_candidate mc ON ('memory-' || mc.id) = p.id
+             WHERE p.novel_id = ? AND p.opened_chapter_order <= ? AND p.status IN ('open','resolved')
+             ORDER BY p.opened_chapter_order, p.id",
         )
         .bind(novel_id)
         .bind(before_chapter_order)
@@ -1421,6 +1462,10 @@ impl NovelRepository for SqliteKernel {
                 chapter_order: row.try_get("chapter_order").map_err(map_sql)?,
                 source_revision: row.try_get("source_revision").map_err(map_sql)?,
                 status: row.try_get("status").map_err(map_sql)?,
+                source_chapter_id: row.try_get("source_chapter_id").map_err(map_sql)?,
+                evidence_quote: row.try_get("evidence_quote").map_err(map_sql)?,
+                character_id: None,
+                character_name: None,
             });
         }
         Ok(facts)

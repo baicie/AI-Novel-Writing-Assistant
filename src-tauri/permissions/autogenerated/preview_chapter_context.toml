@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-chapter-context"
+description = "Enables the preview_chapter_context command without any pre-configured scope."
+commands.allow = ["preview_chapter_context"]
+
+[[permission]]
+identifier = "deny-preview-chapter-context"
+description = "Denies the preview_chapter_context command without any pre-configured scope."
+commands.deny = ["preview_chapter_context"]

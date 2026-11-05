@@ -348,6 +348,17 @@ pub struct NewPlotThread {
     pub now_ms: i64,
 }
 
+/// 章节的轻量索引：上下文投影只需要定位与版本，不加载正文。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterHeader {
+    pub id: String,
+    pub title: String,
+    pub sort_order: i32,
+    pub official_version: i64,
+    pub protection: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryFactView {
@@ -357,6 +368,11 @@ pub struct StoryFactView {
     pub chapter_order: i32,
     pub source_revision: Option<String>,
     pub status: String,
+    /// 来源章节与证据：没有来源的旧事实保持 None，由界面显示为不可追溯。
+    pub source_chapter_id: Option<String>,
+    pub evidence_quote: Option<String>,
+    pub character_id: Option<String>,
+    pub character_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -586,6 +602,20 @@ pub trait MemoryRepository: Send + Sync {
         &self,
         novel_id: &str,
     ) -> Result<Vec<MemoryConflictView>, PortError>;
+    /// 截至目标章节仍待处理的候选。按章节顺序倒序、同一章内稳定排序，调用方必须传 limit。
+    async fn list_continuity_candidates(
+        &self,
+        novel_id: &str,
+        max_chapter_order: i32,
+        limit: i64,
+    ) -> Result<Vec<MemoryCandidateView>, PortError>;
+    /// 截至目标章节尚未裁决的冲突。调用方必须传 limit。
+    async fn list_continuity_conflicts(
+        &self,
+        novel_id: &str,
+        max_chapter_order: i32,
+        limit: i64,
+    ) -> Result<Vec<MemoryConflictView>, PortError>;
     async fn get_memory_conflict(&self, conflict_id: &str)
     -> Result<MemoryConflictView, PortError>;
     async fn resolve_memory_conflict(
@@ -699,6 +729,8 @@ pub trait NovelRepository: Send + Sync {
     ) -> Result<NovelDetail, PortError>;
     async fn create_chapter(&self, chapter: NewChapter) -> Result<ChapterSnapshot, PortError>;
     async fn list_chapters(&self, novel_id: &str) -> Result<Vec<ChapterSnapshot>, PortError>;
+    /// 只读取章节标题、顺序与正式版本：连续性投影不能因为章节多就加载全书正文。
+    async fn list_chapter_headers(&self, novel_id: &str) -> Result<Vec<ChapterHeader>, PortError>;
     async fn list_characters(&self, novel_id: &str) -> Result<Vec<CharacterSnapshot>, PortError>;
     async fn create_character(
         &self,

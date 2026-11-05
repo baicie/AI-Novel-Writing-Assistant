@@ -3,6 +3,7 @@
 
 pub mod backup;
 pub mod batch;
+pub mod continuity;
 pub mod editor;
 pub mod generation;
 pub mod knowledge;

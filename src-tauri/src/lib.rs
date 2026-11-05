@@ -115,12 +115,20 @@ std::fs::create_dir_all(data_dir.join("logs"))
             let batch = Arc::new(BatchService::new(kernel.clone(), Arc::new(UuidIds)));
             let native_tasks = Arc::new(NativeTaskService::new(kernel.clone()));
             let structured_memory = Arc::new(StructuredMemoryService::new(kernel.clone()));
+            let chapter_continuity = Arc::new(
+                novel_application::ChapterContinuityService::new(
+                    kernel.clone(),
+                    kernel.clone(),
+                    kernel.clone(),
+                ),
+            );
             app.manage(AppState {
                 runtime: runtime.clone(),
                 data_dir: data_dir.clone(),
                 batch,
                 native_tasks,
                 structured_memory,
+                chapter_continuity,
                 kernel,
                 secrets,
                 llm,
@@ -328,6 +336,9 @@ commands::novel::create_character,
             commands::windows::close_editor_window,
             commands::structured_memory::list_structured_facts,
             commands::structured_memory::confirm_structured_fact,
+            commands::continuity::get_chapter_continuity,
+            commands::continuity::preview_chapter_context,
+            commands::continuity::get_run_context_trace,
             commands::run::approve_run,
 commands::run::reject_run,
             commands::run::regenerate_run,

@@ -16,6 +16,8 @@ use crate::ports::NovelRepository;
 pub const CONTEXT_ASSEMBLY_VERSION: &str = "director-context-v1";
 pub const DEFAULT_CONTEXT_TOKEN_BUDGET: u64 = 24_000;
 pub const DEFAULT_OUTPUT_RESERVE: u64 = 8_000;
+/// 预览入口的硬上限：任何调用方都不能把整本书塞进一次上下文。
+pub const MAX_CONTEXT_TOKEN_BUDGET: u64 = 64_000;
 
 pub fn default_context_token_budget() -> u64 {
     DEFAULT_CONTEXT_TOKEN_BUDGET
@@ -52,6 +54,14 @@ pub struct ContextTrace {
 pub struct ContextAssembly {
     pub prompt_text: String,
     pub trace: ContextTrace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextPreview {
+    pub trace: ContextTrace,
+    /// 必需来源缺失的原因；非空时对应生成能力必须被阻断。
+    pub blocked_reasons: Vec<String>,
 }
 
 struct SourceDraft {
@@ -144,12 +154,66 @@ pub async fn assemble_director_context(
     input_budget: u64,
     output_reserve: u64,
 ) -> Result<ContextAssembly, AppError> {
+    Ok(assemble_context(
+        novels,
+        artifacts,
+        novel_id,
+        target_chapter_id,
+        input_budget,
+        output_reserve,
+        true,
+    )
+    .await?
+    .assembly)
+}
+
+/// 只读预览：不发送模型请求。必要来源缺失时不报错，而是记进 trace 并返回阻断原因。
+pub async fn preview_director_context(
+    novels: &dyn NovelRepository,
+    artifacts: &[ArtifactView],
+    novel_id: &str,
+    target_chapter_id: &str,
+    input_budget: u64,
+    output_reserve: u64,
+) -> Result<ContextPreview, AppError> {
+    let budget = input_budget.clamp(512, MAX_CONTEXT_TOKEN_BUDGET);
+    let outcome = assemble_context(
+        novels,
+        artifacts,
+        novel_id,
+        target_chapter_id,
+        budget,
+        output_reserve,
+        false,
+    )
+    .await?;
+    Ok(ContextPreview {
+        trace: outcome.assembly.trace,
+        blocked_reasons: outcome.blocked_reasons,
+    })
+}
+
+struct AssemblyOutcome {
+    assembly: ContextAssembly,
+    blocked_reasons: Vec<String>,
+}
+
+async fn assemble_context(
+    novels: &dyn NovelRepository,
+    artifacts: &[ArtifactView],
+    novel_id: &str,
+    target_chapter_id: &str,
+    input_budget: u64,
+    output_reserve: u64,
+    strict: bool,
+) -> Result<AssemblyOutcome, AppError> {
     if input_budget < 512 {
         return Err(AppError::validation("上下文预算过小，无法保证必要事实。"));
     }
     let novel = novels.get_novel(novel_id).await?;
     let target = novels.get_chapter(novel_id, target_chapter_id).await?;
     let mut drafts: Vec<SourceDraft> = Vec::new();
+    let mut blocked_reasons: Vec<String> = Vec::new();
 
     let seed = serde_json::json!({
         "title": novel.title,
@@ -181,9 +245,13 @@ pub async fn assemble_director_context(
         let (artifact, missing) = artifact_source(artifacts, artifact_type, book_scope());
         let Some(artifact) = artifact else {
             if mandatory {
-                return Err(AppError::integrity(format!(
-                    "上下文必要来源 {artifact_type} 缺失，不能伪装成空上下文继续生成。"
-                )));
+                let reason = missing.unwrap_or("missing");
+                if strict {
+                    return Err(AppError::integrity(format!(
+                        "上下文必要来源 {artifact_type} 不可用（{reason}），不能伪装成空上下文继续生成。"
+                    )));
+                }
+                blocked_reasons.push(format!("必要来源 {artifact_type} 不可用（{reason}）"));
             }
             drafts.push(SourceDraft {
                 source_type: artifact_type,
@@ -449,21 +517,24 @@ pub async fn assemble_director_context(
         prompt_text.push('\n');
         traces.push(source_trace(draft, true, None));
     }
-    if prompt_text.trim().is_empty() {
+    if prompt_text.trim().is_empty() && strict {
         return Err(AppError::integrity("上下文组装为空，已停止生成。"));
     }
     let content_hash = sha256_hex(prompt_text.as_bytes());
-    Ok(ContextAssembly {
-        prompt_text,
-        trace: ContextTrace {
-            assembly_version: CONTEXT_ASSEMBLY_VERSION.to_string(),
-            target_chapter_id: target.id,
-            input_budget,
-            output_reserve,
-            estimated_tokens: used_tokens,
-            content_hash,
-            sources: traces,
+    Ok(AssemblyOutcome {
+        assembly: ContextAssembly {
+            prompt_text,
+            trace: ContextTrace {
+                assembly_version: CONTEXT_ASSEMBLY_VERSION.to_string(),
+                target_chapter_id: target.id,
+                input_budget,
+                output_reserve,
+                estimated_tokens: used_tokens,
+                content_hash,
+                sources: traces,
+            },
         },
+        blocked_reasons,
     })
 }
 

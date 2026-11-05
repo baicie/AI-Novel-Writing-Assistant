@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ChapterEditorDiagnosticCard, ChapterEditorWorkspaceResponse } from "@ai-novel/shared/types/novel";
 import CastWorldTab from "./CastWorldTab";
+import ContextPreviewTab from "./ContextPreviewTab";
 import type { CastItem, PanelTab } from "./panelModel";
 import DiagnosticsTab from "./DiagnosticsTab";
 import RunRecoveryTab from "./RunRecoveryTab";
@@ -9,6 +10,7 @@ const TAB_LABELS: Array<{ key: PanelTab; label: string }> = [
   { key: "revise", label: "AI 修改" },
   { key: "review", label: "审校问题" },
   { key: "cast", label: "人物与世界观" },
+  { key: "context", label: "上下文" },
   { key: "run", label: "运行与恢复" },
 ];
 
@@ -21,6 +23,7 @@ interface ChapterRightPanelProps {
   selectedDiagnosticId: string | null;
   world?: { name: string; summary: string | null } | null;
   characters?: CastItem[];
+  onOpenChapter?: (chapterId: string) => void;
   onFocusDiagnostic: (card: ChapterEditorDiagnosticCard) => void;
   onRunDiagnostic: (card: ChapterEditorDiagnosticCard) => void;
   onResolveDiagnostic: (card: ChapterEditorDiagnosticCard) => void;
@@ -41,8 +44,7 @@ export default function ChapterRightPanel(props: ChapterRightPanelProps) {
     chapterId,
     workspace,
     selectedDiagnosticId,
-    world = null,
-    characters = [],
+    onOpenChapter,
     onFocusDiagnostic,
     onRunDiagnostic,
     onResolveDiagnostic,
@@ -83,7 +85,10 @@ export default function ChapterRightPanel(props: ChapterRightPanelProps) {
             isResolvingDiagnostic={isResolvingDiagnostic}
           />
         ) : null}
-        {tab === "cast" ? <CastWorldTab world={world} characters={characters} /> : null}
+        {tab === "cast" ? (
+          <CastWorldTab novelId={novelId} chapterId={chapterId} onOpenChapter={onOpenChapter} />
+        ) : null}
+        {tab === "context" ? <ContextPreviewTab novelId={novelId} chapterId={chapterId} /> : null}
         {tab === "run" ? <RunRecoveryTab novelId={novelId} chapterId={chapterId} /> : null}
       </div>
     </div>

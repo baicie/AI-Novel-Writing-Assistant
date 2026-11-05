@@ -60,9 +60,7 @@ impl IntoResponse for HttpError {
                     // 让它带着明确的错误码回到界面，而不是被当成可自动重试的 5xx。
                     novel_application::AppErrorCode::ModelResultUnknown => StatusCode::BAD_GATEWAY,
                     // 模型已经返回但输出不可用：同样是已发生调用，不能伪装成请求校验失败。
-                    novel_application::AppErrorCode::ModelResultUnusable => {
-                        StatusCode::BAD_GATEWAY
-                    }
+                    novel_application::AppErrorCode::ModelResultUnusable => StatusCode::BAD_GATEWAY,
                 };
                 (
                     status,

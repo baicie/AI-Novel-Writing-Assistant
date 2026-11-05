@@ -38,6 +38,18 @@ pub struct NewStructuredFact {
     pub now_ms: i64,
 }
 
+/// 带来源定位的结构化事实：用于连续性投影判断「来源修订是否仍然有效」。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructuredFactWithSource {
+    pub fact: StructuredFactView,
+    /// 来源章节被删除时为 None：界面必须显示 unavailable，不能补一个假来源。
+    pub source_chapter_order: Option<i64>,
+    pub source_chapter_title: Option<String>,
+    /// 来源章节当前的正式版本；与 `fact.source_revision` 不同即说明事实已过期。
+    pub source_current_version: Option<i64>,
+}
+
 #[async_trait]
 pub trait StructuredMemoryRepository: Send + Sync {
     async fn list_structured_facts(
@@ -46,6 +58,14 @@ pub trait StructuredMemoryRepository: Send + Sync {
         entity_id: Option<&str>,
         as_of_chapter_order: Option<i64>,
     ) -> Result<Vec<StructuredFactView>, PortError>;
+    /// 截至该章的结构化事实（含 proposed/disputed，供冲突双方展示）。
+    /// 调用方只能把 confirmed 且来源修订仍有效的条目放进有效事实。
+    async fn list_structured_facts_with_source(
+        &self,
+        novel_id: &str,
+        as_of_chapter_order: i64,
+        limit: i64,
+    ) -> Result<Vec<StructuredFactWithSource>, PortError>;
     async fn confirm_structured_fact(
         &self,
         fact: NewStructuredFact,
@@ -57,6 +77,65 @@ pub trait StructuredMemoryRepository: Send + Sync {
         replacement_id: &str,
         now_ms: i64,
     ) -> Result<(), PortError>;
+}
+
+fn relationship_value(fact: &StructuredFactView) -> (String, String, bool) {
+    let value = parse_value(&fact.value_json);
+    let target = value
+        .get("targetEntityId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let relation = value
+        .get("relation")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let active = value
+        .get("active")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    (target, relation, active)
+}
+
+fn parse_value(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or_else(|_| serde_json::Value::String(raw.to_string()))
+}
+
+/// As-Of 可见事实的纯选择规则：单值类型保留最新一条，关系按有向键保留最新一条，
+/// 别名可以共存。仓储与连续性投影共用这一份规则，避免两套口径。
+pub fn visible_facts_at(mut rows: Vec<StructuredFactView>) -> Vec<StructuredFactView> {
+    rows.sort_by(|left, right| {
+        right
+            .effective_chapter_order
+            .cmp(&left.effective_chapter_order)
+            .then_with(|| right.updated_at.cmp(&left.updated_at))
+            .then_with(|| right.created_at.cmp(&left.created_at))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    let mut seen_single: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_relation: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for fact in rows {
+        match fact.fact_type.as_str() {
+            "location" | "life_state" => {
+                let key = format!("{}:{}", fact.entity_id, fact.fact_type);
+                if seen_single.insert(key) {
+                    out.push(fact);
+                }
+            }
+            "alias" => out.push(fact),
+            "relationship" => {
+                let (target, relation, active) = relationship_value(&fact);
+                let key = format!("{}:{}:{}", fact.entity_id, target, relation);
+                if seen_relation.insert(key) && active {
+                    out.push(fact);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 pub struct StructuredMemoryService {
