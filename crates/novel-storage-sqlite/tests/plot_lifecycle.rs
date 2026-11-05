@@ -276,7 +276,7 @@ async fn causality_rejects_missing_entities_self_reference_and_cycles() {
         .bind(body)
         .bind(order)
         .bind(order)
-        .bind(format!("c{order}"))
+        .bind("c1")
         .execute(kernel.pool())
         .await
         .unwrap();
@@ -1180,6 +1180,98 @@ async fn causality_rejects_new_edges_to_stale_entities() {
     assert!(
         matches!(edge, Err(PortError::Conflict(_))),
         "来源失效的伏笔不能作为新因果边的端点"
+    );
+
+    // 结构化事实不会被标成 stale，但来源版本已经不匹配当前正文；
+    // 新边同样不能引用这条事实。
+    sqlx::query(
+        "INSERT INTO structured_story_fact
+           (id, novel_id, entity_id, fact_type, value_json, source_chapter_id, source_revision,
+            evidence_quote, truthfulness, effective_chapter_order, status, created_at, updated_at)
+         VALUES ('stale-fact', 'n1', 'lin', 'location', '{\"location\":\"山门\"}', 'c1', 1,
+                 '第一章埋下玉佩。', 'confirmed', 1, 'active', 1, 1)",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    let fact_edge = kernel
+        .create_causality_edge(NewCausalityEdge {
+            id: "stale-fact-edge".into(),
+            novel_id: "n1".into(),
+            from_kind: "structured_fact".into(),
+            from_id: "stale-fact".into(),
+            to_kind: "timeline_event".into(),
+            to_id: "fresh-event".into(),
+            relation: "导致".into(),
+            chapter_id: "c5".into(),
+            source_revision: 1,
+            evidence: "第五章玉佩发光。".into(),
+            now_ms: 1,
+        })
+        .await;
+    assert!(
+        matches!(fact_edge, Err(PortError::Conflict(_))),
+        "来源版本不匹配的结构化事实不能作为新因果边的端点"
+    );
+
+    // 已确认但来源版本不匹配的时间线事件同样不能作为新边端点。
+    sqlx::query(
+        "INSERT INTO timeline_event
+           (id, novel_id, chapter_order, body, created_at, source_revision, status, updated_at, source_chapter_id)
+         VALUES ('stale-event', 'n1', 1, '旧事件', 1, '9', 'confirmed', 1, 'c1')",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    let event_edge = kernel
+        .create_causality_edge(NewCausalityEdge {
+            id: "stale-event-edge".into(),
+            novel_id: "n1".into(),
+            from_kind: "timeline_event".into(),
+            from_id: "stale-event".into(),
+            to_kind: "timeline_event".into(),
+            to_id: "fresh-event".into(),
+            relation: "导致".into(),
+            chapter_id: "c5".into(),
+            source_revision: 1,
+            evidence: "第五章玉佩发光。".into(),
+            now_ms: 1,
+        })
+        .await;
+    assert!(
+        matches!(event_edge, Err(PortError::Conflict(_))),
+        "来源版本不匹配的时间线事件不能作为新因果边的端点"
+    );
+
+    // 状态仍是 open、但没有证据的旧伏笔不能作为新边端点。
+    sqlx::query(
+        "INSERT INTO plot_thread
+           (id, novel_id, title, body, opened_chapter_order, resolved_chapter_order, status,
+            source_revision, evidence_json, created_at, updated_at, source_chapter_id, version)
+         VALUES ('open-no-evidence', 'n1', '无证据伏笔', '无证据伏笔正文', 1, NULL, 'open',
+                 '1', NULL, 1, 1, 'c1', 0)",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    let no_evidence_edge = kernel
+        .create_causality_edge(NewCausalityEdge {
+            id: "no-evidence-edge".into(),
+            novel_id: "n1".into(),
+            from_kind: "plot_thread".into(),
+            from_id: "open-no-evidence".into(),
+            to_kind: "timeline_event".into(),
+            to_id: "fresh-event".into(),
+            relation: "导致".into(),
+            chapter_id: "c5".into(),
+            source_revision: 1,
+            evidence: "第五章玉佩发光。".into(),
+            now_ms: 1,
+        })
+        .await;
+    assert!(
+        matches!(no_evidence_edge, Err(PortError::Conflict(_))),
+        "无证据旧伏笔不能作为新因果边的端点"
     );
 }
 

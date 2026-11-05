@@ -569,8 +569,13 @@ impl PlotRepository for SqliteKernel {
         ] {
             let exists: i64 = match kind {
                 "timeline_event" => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM timeline_event
-                     WHERE id = ? AND novel_id = ? AND status = 'confirmed'",
+                    "SELECT COUNT(*) FROM timeline_event te
+                     WHERE te.id = ? AND te.novel_id = ? AND te.status = 'confirmed'
+                       AND (te.source_chapter_id IS NULL OR EXISTS (
+                         SELECT 1 FROM chapter tc
+                         JOIN chapter_revision tr ON tr.id = tc.official_revision_id
+                         WHERE tc.id = te.source_chapter_id AND tc.novel_id = te.novel_id
+                           AND tr.version = CAST(REPLACE(te.source_revision, 'memory:', '') AS INTEGER)))",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -578,9 +583,16 @@ impl PlotRepository for SqliteKernel {
                 .await
                 .map_err(map_sql)?,
                 "plot_thread" => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM plot_thread
-                     WHERE id = ? AND novel_id = ?
-                       AND status NOT IN ('superseded','disputed','stale')",
+                    "SELECT COUNT(*) FROM plot_thread pt
+                     WHERE pt.id = ? AND pt.novel_id = ?
+                       AND pt.status NOT IN ('superseded','disputed','stale')
+                       AND EXISTS (
+                         SELECT 1 FROM chapter pc
+                         JOIN chapter_revision pr ON pr.id = pc.official_revision_id
+                         WHERE pc.id = pt.source_chapter_id AND pc.novel_id = pt.novel_id
+                           AND trim(COALESCE(pt.evidence_json, '')) != ''
+                           AND pr.version = CAST(REPLACE(pt.source_revision, 'memory:', '') AS INTEGER)
+                           AND instr(pr.content, pt.evidence_json) > 0)",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -588,9 +600,16 @@ impl PlotRepository for SqliteKernel {
                 .await
                 .map_err(map_sql)?,
                 "structured_fact" => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM structured_story_fact
-                     WHERE id = ? AND novel_id = ?
-                       AND truthfulness = 'confirmed' AND status = 'active'",
+                    "SELECT COUNT(*) FROM structured_story_fact sf
+                     WHERE sf.id = ? AND sf.novel_id = ?
+                       AND sf.truthfulness = 'confirmed' AND sf.status = 'active'
+                       AND EXISTS (
+                         SELECT 1 FROM chapter sc
+                         JOIN chapter_revision sr ON sr.id = sc.official_revision_id
+                         WHERE sc.id = sf.source_chapter_id AND sc.novel_id = sf.novel_id
+                           AND trim(sf.evidence_quote) != ''
+                           AND sr.version = sf.source_revision
+                           AND instr(sr.content, sf.evidence_quote) > 0)",
                 )
                 .bind(id)
                 .bind(&input.novel_id)
@@ -741,18 +760,28 @@ impl PlotRepository for SqliteKernel {
                         WHERE te.id = e.from_id AND te.novel_id = e.novel_id
                           AND te.status = 'confirmed'
                           AND (te.source_chapter_id IS NULL OR EXISTS(
-                            SELECT 1 FROM chapter tc WHERE tc.id = te.source_chapter_id)))
+                            SELECT 1 FROM chapter tc
+                            JOIN chapter_revision tr ON tr.id = tc.official_revision_id
+                            WHERE tc.id = te.source_chapter_id AND tc.novel_id = te.novel_id
+                              AND tr.version = CAST(REPLACE(te.source_revision, 'memory:', '') AS INTEGER))))
                       WHEN e.from_kind = 'plot_thread' THEN EXISTS(
                         SELECT 1 FROM plot_thread pt
+                        JOIN chapter pc ON pc.id = pt.source_chapter_id AND pc.novel_id = pt.novel_id
+                        JOIN chapter_revision pr ON pr.id = pc.official_revision_id
                         WHERE pt.id = e.from_id AND pt.novel_id = e.novel_id
-                          AND pt.status NOT IN ('superseded','stale','disputed'))
+                          AND pt.status NOT IN ('superseded','stale','disputed')
+                          AND trim(COALESCE(pt.evidence_json, '')) != ''
+                          AND pr.version = CAST(REPLACE(pt.source_revision, 'memory:', '') AS INTEGER)
+                          AND instr(pr.content, pt.evidence_json) > 0)
                       WHEN e.from_kind = 'structured_fact' THEN EXISTS(
                         SELECT 1 FROM structured_story_fact sf
                         JOIN chapter sc ON sc.id = sf.source_chapter_id
                         JOIN chapter_revision sr ON sr.id = sc.official_revision_id
                         WHERE sf.id = e.from_id AND sf.novel_id = e.novel_id
                           AND sf.truthfulness = 'confirmed' AND sf.status = 'active'
-                          AND sr.version = sf.source_revision)
+                          AND trim(sf.evidence_quote) != ''
+                          AND sr.version = sf.source_revision
+                          AND instr(sr.content, sf.evidence_quote) > 0)
                       ELSE 0
                     END AS from_valid,
                     CASE
@@ -761,18 +790,28 @@ impl PlotRepository for SqliteKernel {
                         WHERE te.id = e.to_id AND te.novel_id = e.novel_id
                           AND te.status = 'confirmed'
                           AND (te.source_chapter_id IS NULL OR EXISTS(
-                            SELECT 1 FROM chapter tc WHERE tc.id = te.source_chapter_id)))
+                            SELECT 1 FROM chapter tc
+                            JOIN chapter_revision tr ON tr.id = tc.official_revision_id
+                            WHERE tc.id = te.source_chapter_id AND tc.novel_id = te.novel_id
+                              AND tr.version = CAST(REPLACE(te.source_revision, 'memory:', '') AS INTEGER))))
                       WHEN e.to_kind = 'plot_thread' THEN EXISTS(
                         SELECT 1 FROM plot_thread pt
+                        JOIN chapter pc ON pc.id = pt.source_chapter_id AND pc.novel_id = pt.novel_id
+                        JOIN chapter_revision pr ON pr.id = pc.official_revision_id
                         WHERE pt.id = e.to_id AND pt.novel_id = e.novel_id
-                          AND pt.status NOT IN ('superseded','stale','disputed'))
+                          AND pt.status NOT IN ('superseded','stale','disputed')
+                          AND trim(COALESCE(pt.evidence_json, '')) != ''
+                          AND pr.version = CAST(REPLACE(pt.source_revision, 'memory:', '') AS INTEGER)
+                          AND instr(pr.content, pt.evidence_json) > 0)
                       WHEN e.to_kind = 'structured_fact' THEN EXISTS(
                         SELECT 1 FROM structured_story_fact sf
                         JOIN chapter sc ON sc.id = sf.source_chapter_id
                         JOIN chapter_revision sr ON sr.id = sc.official_revision_id
                         WHERE sf.id = e.to_id AND sf.novel_id = e.novel_id
                           AND sf.truthfulness = 'confirmed' AND sf.status = 'active'
-                          AND sr.version = sf.source_revision)
+                          AND trim(sf.evidence_quote) != ''
+                          AND sr.version = sf.source_revision
+                          AND instr(sr.content, sf.evidence_quote) > 0)
                       ELSE 0
                     END AS to_valid
              FROM plot_causality_edge e
