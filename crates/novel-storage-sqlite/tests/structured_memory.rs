@@ -50,7 +50,13 @@ async fn structured_facts_supersede_at_as_of_and_reject_stale_revision() {
     .await
     .unwrap();
     character(&kernel, "lin", "林动").await;
-    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    official_chapter(
+        &kernel,
+        "c1",
+        1,
+        "林动在山门。林动在祖祠。林动活着。传闻林动已死。林动在后山。",
+    )
+    .await;
     official_chapter(&kernel, "c2", 2, "林动抵达祖祠。").await;
     let first = kernel
         .confirm_structured_fact(NewStructuredFact {
@@ -145,7 +151,13 @@ async fn conflict_is_atomic_and_resolves_new_or_existing() {
     .await
     .unwrap();
     character(&kernel, "lin", "林动").await;
-    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    official_chapter(
+        &kernel,
+        "c1",
+        1,
+        "林动在山门。林动在祖祠。林动活着。传闻林动已死。林动在后山。",
+    )
+    .await;
     kernel
         .confirm_structured_fact(NewStructuredFact {
             id: "f1".into(),
@@ -384,7 +396,13 @@ async fn context_only_uses_confirmed_active_facts_at_target() {
     .await
     .unwrap();
     character(&kernel, "lin", "林动").await;
-    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    official_chapter(
+        &kernel,
+        "c1",
+        1,
+        "林动在山门。林动在祖祠。林动活着。传闻林动已死。林动在后山。",
+    )
+    .await;
     kernel
         .confirm_structured_fact(NewStructuredFact {
             id: "f1".into(),
@@ -468,7 +486,13 @@ async fn concurrent_conflicts_do_not_lose_fact_updates() {
     .await
     .unwrap();
     character(&kernel, "lin", "林动").await;
-    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    official_chapter(
+        &kernel,
+        "c1",
+        1,
+        "林动在山门。林动在祖祠。林动活着。传闻林动已死。林动在后山。",
+    )
+    .await;
     kernel
         .confirm_structured_fact(NewStructuredFact {
             id: "old".into(),
@@ -562,7 +586,7 @@ async fn location_return_and_relationship_termination_follow_as_of() {
     character(&kernel, "lin", "林动").await;
     character(&kernel, "su", "苏晚").await;
     for (id, order) in [("c1", 1), ("c3", 3), ("c5", 5), ("c8", 8), ("c12", 12)] {
-        official_chapter(&kernel, id, order, "时间线正文").await;
+        official_chapter(&kernel, id, order, "时间线正文。山门。祖祠。关系变化。").await;
     }
     for (id, loc, chapter, order, now) in [
         ("l1", "山门", "c1", 1, 10),
@@ -646,4 +670,277 @@ async fn location_return_and_relationship_termination_follow_as_of() {
             .iter()
             .any(|f| f.fact_type == "relationship")
     );
+}
+
+async fn new_official_revision(
+    kernel: &SqliteKernel,
+    chapter_id: &str,
+    version: i64,
+    content: &str,
+) {
+    let revision_id = format!("{chapter_id}-rev{version}");
+    sqlx::query(
+        "INSERT INTO chapter_revision(id, chapter_id, version, origin, content, content_sha256, created_at)
+         VALUES (?, ?, ?, 'user', ?, 'hash', ?)",
+    )
+    .bind(&revision_id)
+    .bind(chapter_id)
+    .bind(version)
+    .bind(content)
+    .bind(version)
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE chapter SET official_revision_id = ? WHERE id = ?")
+        .bind(&revision_id)
+        .bind(chapter_id)
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn reconfirmation_requires_evidence_in_the_current_official_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("evidence.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "证据".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "f1".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 1,
+            evidence_quote: "林动在山门。".into(),
+            effective_chapter_order: 1,
+            now_ms: 10,
+        })
+        .await
+        .unwrap();
+
+    new_official_revision(&kernel, "c1", 2, "林动已经离开。").await;
+    // 未保存草稿里仍有旧证据，但不能拿来确认正式事实。
+    sqlx::query(
+        "INSERT INTO chapter_local_draft
+           (novel_id, chapter_id, client_id, content, base_official_version, base_updated_at,
+            local_revision, updated_at)
+         VALUES ('n1', 'c1', 'client-a', '林动在山门。', 1, '1', 1, 11)",
+    )
+    .execute(kernel.pool())
+    .await
+    .unwrap();
+
+    let stale_evidence = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "f2".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 2,
+            evidence_quote: "林动在山门。".into(),
+            effective_chapter_order: 1,
+            now_ms: 20,
+        })
+        .await;
+    assert!(
+        matches!(
+            stale_evidence,
+            Err(novel_application::PortError::Conflict(_))
+        ),
+        "新正文不含旧证据时必须拒绝重新确认"
+    );
+
+    let fresh_evidence = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "f3".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c1".into(),
+            source_revision: 2,
+            evidence_quote: "林动已经离开。".into(),
+            effective_chapter_order: 1,
+            now_ms: 30,
+        })
+        .await
+        .unwrap();
+    assert_eq!(fresh_evidence.truthfulness, "confirmed");
+    assert_eq!(fresh_evidence.source_revision, 2);
+}
+
+#[tokio::test]
+async fn source_order_must_not_be_after_effective_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("order.sqlite"))
+        .await
+        .unwrap();
+    NovelRepository::create_novel(
+        &kernel,
+        NewNovel {
+            id: "n1".into(),
+            title: "时序".into(),
+            description: String::new(),
+            now_ms: 1,
+        },
+    )
+    .await
+    .unwrap();
+    character(&kernel, "lin", "林动").await;
+    official_chapter(&kernel, "c5", 5, "第五章程远在山门。").await;
+    official_chapter(&kernel, "c20", 20, "第二十章程远死亡。").await;
+
+    let future_source = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "bad".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "life_state".into(),
+            value_json: r#"{"state":"dead"}"#.into(),
+            source_chapter_id: "c20".into(),
+            source_revision: 1,
+            evidence_quote: "第二十章程远死亡。".into(),
+            effective_chapter_order: 5,
+            now_ms: 10,
+        })
+        .await;
+    assert!(
+        matches!(
+            future_source,
+            Err(novel_application::PortError::Conflict(_))
+        ),
+        "第 20 章才产生的证据不能在第 5 章生效"
+    );
+
+    let delayed = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            id: "delayed".into(),
+            novel_id: "n1".into(),
+            entity_id: "lin".into(),
+            fact_type: "location".into(),
+            value_json: r#"{"location":"山门"}"#.into(),
+            source_chapter_id: "c5".into(),
+            source_revision: 1,
+            evidence_quote: "第五章程远在山门。".into(),
+            effective_chapter_order: 20,
+            now_ms: 20,
+        })
+        .await
+        .unwrap();
+    assert_eq!(delayed.effective_chapter_order, 20);
+
+    let at_ten = kernel
+        .list_structured_facts("n1", Some("lin"), Some(10))
+        .await
+        .unwrap();
+    assert!(
+        !at_ten.iter().any(|fact| fact.id == "delayed"),
+        "延迟生效的事实不能提前出现在第 10 章"
+    );
+    let at_twenty = kernel
+        .list_structured_facts("n1", Some("lin"), Some(20))
+        .await
+        .unwrap();
+    assert!(at_twenty.iter().any(|fact| fact.id == "delayed"));
+}
+
+#[tokio::test]
+async fn evidence_and_source_scope_are_validated() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = SqliteKernel::open(&dir.path().join("scope.sqlite"))
+        .await
+        .unwrap();
+    for novel in ["n1", "n2"] {
+        NovelRepository::create_novel(
+            &kernel,
+            NewNovel {
+                id: novel.into(),
+                title: novel.into(),
+                description: String::new(),
+                now_ms: 1,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    character(&kernel, "lin", "林动").await;
+    official_chapter(&kernel, "c1", 1, "林动在山门。").await;
+    official_chapter(&kernel, "c1-other", 2, "别人在山门。").await;
+    // Move the other novel's chapter under n2.
+    sqlx::query("UPDATE chapter SET novel_id = 'n2' WHERE id = 'c1-other'")
+        .execute(kernel.pool())
+        .await
+        .unwrap();
+
+    let base = NewStructuredFact {
+        id: "probe".into(),
+        novel_id: "n1".into(),
+        entity_id: "lin".into(),
+        fact_type: "location".into(),
+        value_json: r#"{"location":"山门"}"#.into(),
+        source_chapter_id: "c1".into(),
+        source_revision: 1,
+        evidence_quote: "林动在山门。".into(),
+        effective_chapter_order: 1,
+        now_ms: 10,
+    };
+    let empty = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            evidence_quote: "   ".into(),
+            ..base.clone()
+        })
+        .await;
+    assert!(matches!(
+        empty,
+        Err(novel_application::PortError::Conflict(_))
+    ));
+    let fake = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            evidence_quote: "这句话不在正文里。".into(),
+            ..base.clone()
+        })
+        .await;
+    assert!(matches!(
+        fake,
+        Err(novel_application::PortError::Conflict(_))
+    ));
+    let missing = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            source_chapter_id: "missing".into(),
+            ..base.clone()
+        })
+        .await;
+    assert!(matches!(
+        missing,
+        Err(novel_application::PortError::Conflict(_))
+    ));
+    let cross_novel = kernel
+        .confirm_structured_fact(NewStructuredFact {
+            source_chapter_id: "c1-other".into(),
+            evidence_quote: "别人在山门。".into(),
+            ..base
+        })
+        .await;
+    assert!(matches!(
+        cross_novel,
+        Err(novel_application::PortError::Conflict(_))
+    ));
 }

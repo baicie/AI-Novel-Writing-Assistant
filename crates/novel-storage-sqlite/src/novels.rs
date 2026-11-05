@@ -1841,6 +1841,15 @@ impl NovelRepository for SqliteKernel {
             .bind(now_ms).execute(tx.deref_mut()).await.map_err(map_sql)?;
         sqlx::query("UPDATE chapter SET official_revision_id = ?, updated_at = ? WHERE id = ? AND protection = 'none'")
             .bind(revision_id).bind(now_ms).bind(chapter_id).execute(tx.deref_mut()).await.map_err(map_sql)?;
+        // 与 promote_candidate / save_user_chapter / restore_chapter_revision 保持同一语义：
+        // 新正文生效时，旧的角色状态/时间线/伏笔证据必须失效，且必须发生在同一事务内。
+        invalidate_story_facts(
+            &mut tx,
+            chapter_id,
+            &format!("{}@v{}", revision_id, version),
+            now_ms,
+        )
+        .await?;
         tx.commit().await.map_err(map_sql)?;
         Ok(PromoteOutcome::Promoted { version })
     }

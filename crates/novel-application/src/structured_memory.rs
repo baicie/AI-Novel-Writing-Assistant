@@ -48,6 +48,10 @@ pub struct StructuredFactWithSource {
     pub source_chapter_title: Option<String>,
     /// 来源章节当前的正式版本；与 `fact.source_revision` 不同即说明事实已过期。
     pub source_current_version: Option<i64>,
+    /// 旧证据是否仍存在于当前正式正文；不存在时必须重新选取证据。
+    pub evidence_present_in_current: bool,
+    /// 来源章节是否晚于事实生效章节；为真时事实不能作为已知事实。
+    pub source_after_effective: bool,
 }
 
 #[async_trait]
