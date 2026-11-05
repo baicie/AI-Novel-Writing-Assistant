@@ -32,6 +32,7 @@ if [[ ${#SPECS[@]} -eq 0 ]]; then
     e2e/p17-edit-position.e2e.js
     e2e/p17-3-continuity.e2e.js
     e2e/p17-3-context.e2e.js
+    e2e/p17-4-plot-timeline.e2e.js
   )
 fi
 

@@ -357,6 +357,7 @@ pub struct ChapterHeader {
     pub sort_order: i32,
     pub official_version: i64,
     pub protection: String,
+    pub volume_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

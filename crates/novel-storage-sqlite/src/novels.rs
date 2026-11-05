@@ -555,7 +555,8 @@ impl NovelRepository for SqliteKernel {
 
     async fn list_chapter_headers(&self, novel_id: &str) -> Result<Vec<ChapterHeader>, PortError> {
         let rows = sqlx::query(
-            "SELECT c.id, c.title, c.sort_order, c.protection, COALESCE(r.version, 0) AS official_version
+            "SELECT c.id, c.title, c.sort_order, c.protection, c.volume_id,
+                    COALESCE(r.version, 0) AS official_version
              FROM chapter c
              LEFT JOIN chapter_revision r ON r.id = c.official_revision_id
              WHERE c.novel_id = ?
@@ -573,6 +574,7 @@ impl NovelRepository for SqliteKernel {
                     sort_order: row.try_get("sort_order").map_err(map_sql)?,
                     protection: row.try_get("protection").map_err(map_sql)?,
                     official_version: row.try_get("official_version").map_err(map_sql)?,
+                    volume_id: row.try_get("volume_id").map_err(map_sql)?,
                 })
             })
             .collect()
@@ -1441,14 +1443,29 @@ impl NovelRepository for SqliteKernel {
             });
         }
         let threads = sqlx::query(
-            "SELECT p.id, p.title || '：' || p.body AS body, p.opened_chapter_order AS chapter_order,
-                    p.source_revision, p.status, p.source_chapter_id,
-                    COALESCE(mc.evidence_quote, p.evidence_json) AS evidence_quote
+            // 伏笔的生命周期按 As-Of 事件推导：查看第 5 章时不能看到第 10 章的回收。
+            "SELECT p.id, p.title || '：' || p.body AS body,
+                    COALESCE(e.chapter_order, p.opened_chapter_order) AS chapter_order,
+                    COALESCE(CAST(e.source_revision AS TEXT), p.source_revision) AS source_revision,
+                    COALESCE(e.to_status, p.status) AS status,
+                    COALESCE(e.chapter_id, p.source_chapter_id) AS source_chapter_id,
+                    COALESCE(e.evidence, p.evidence_json, mc.evidence_quote) AS evidence_quote
              FROM plot_thread p
+             LEFT JOIN plot_thread_event e ON e.id = (
+               SELECT e2.id FROM plot_thread_event e2
+               WHERE e2.plot_id = p.id AND e2.chapter_order <= ?
+               ORDER BY e2.chapter_order DESC, e2.created_at DESC, e2.id DESC LIMIT 1
+             )
+             LEFT JOIN chapter ec ON ec.id = e.chapter_id
+             LEFT JOIN chapter_revision er ON er.id = ec.official_revision_id
              LEFT JOIN memory_extraction_candidate mc ON ('memory-' || mc.id) = p.id
-             WHERE p.novel_id = ? AND p.opened_chapter_order <= ? AND p.status IN ('open','resolved')
-             ORDER BY p.opened_chapter_order, p.id",
+             WHERE p.novel_id = ? AND p.opened_chapter_order <= ?
+               AND COALESCE(e.to_status, p.status) IN ('open','developing','deferred','resolved')
+               AND (e.id IS NULL OR (er.version = e.source_revision
+                                    AND instr(er.content, e.evidence) > 0))
+             ORDER BY COALESCE(e.chapter_order, p.opened_chapter_order), p.id",
         )
+        .bind(before_chapter_order)
         .bind(novel_id)
         .bind(before_chapter_order)
         .fetch_all(&self.pool)
@@ -1882,8 +1899,8 @@ async fn invalidate_story_facts(
     .await
     .map_err(map_sql)?;
     sqlx::query(
-        "UPDATE plot_thread SET status = 'superseded', updated_at = ?
-         WHERE source_chapter_id = ? AND status IN ('open','resolved') AND source_revision != ?",
+        "UPDATE plot_thread SET status = 'stale', updated_at = ?
+         WHERE source_chapter_id = ? AND status IN ('open','developing','deferred','resolved') AND source_revision != ?",
     )
     .bind(now_ms)
     .bind(chapter_id)

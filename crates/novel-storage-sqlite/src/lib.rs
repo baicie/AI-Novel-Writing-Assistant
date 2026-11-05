@@ -15,6 +15,7 @@ pub use db::MIGRATION_COUNT;
 pub use provider::ApplyDiscoveredOutcome;
 mod native_tasks;
 mod novels;
+mod plot;
 mod selection_rewrite;
 mod structured_memory;
 mod tasks;

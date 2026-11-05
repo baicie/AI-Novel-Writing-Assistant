@@ -10,6 +10,7 @@ pub mod knowledge;
 pub mod model;
 pub mod native_tasks;
 pub mod novel;
+pub mod plot;
 pub mod provider;
 pub mod run;
 pub mod setup;

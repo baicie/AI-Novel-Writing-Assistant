@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ChapterEditorDiagnosticCard, ChapterEditorWorkspaceResponse } from "@ai-novel/shared/types/novel";
 import CastWorldTab from "./CastWorldTab";
 import ContextPreviewTab from "./ContextPreviewTab";
+import PlotWorkspaceTab from "./PlotWorkspaceTab";
 import type { CastItem, PanelTab } from "./panelModel";
 import DiagnosticsTab from "./DiagnosticsTab";
 import RunRecoveryTab from "./RunRecoveryTab";
@@ -10,6 +11,7 @@ const TAB_LABELS: Array<{ key: PanelTab; label: string }> = [
   { key: "revise", label: "AI 修改" },
   { key: "review", label: "审校问题" },
   { key: "cast", label: "人物与世界观" },
+  { key: "plot", label: "剧情线索" },
   { key: "context", label: "上下文" },
   { key: "run", label: "运行与恢复" },
 ];
@@ -87,6 +89,9 @@ export default function ChapterRightPanel(props: ChapterRightPanelProps) {
         ) : null}
         {tab === "cast" ? (
           <CastWorldTab novelId={novelId} chapterId={chapterId} onOpenChapter={onOpenChapter} />
+        ) : null}
+        {tab === "plot" ? (
+          <PlotWorkspaceTab novelId={novelId} chapterId={chapterId} onOpenChapter={onOpenChapter} />
         ) : null}
         {tab === "context" ? <ContextPreviewTab novelId={novelId} chapterId={chapterId} /> : null}
         {tab === "run" ? <RunRecoveryTab novelId={novelId} chapterId={chapterId} /> : null}

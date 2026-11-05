@@ -86,7 +86,24 @@
 - **边界**：章节目录只读 header（不加载正文）；结构化事实 500、候选 200、冲突 100；
   界面关键事实最多展示 80 条并提示剩余数量。
 
+## 伏笔生命周期与剧情因果（P17.4）
+
+- `plot_thread.status` 是伏笔生命周期的唯一权威：open / developing / resolved / deferred /
+  abandoned / stale；不再引入第二套伏笔状态字段。
+- 每次 setup / develop / payoff / defer / abandon / recover 追加一条 `plot_thread_event`，
+  记录章节、来源版本、证据、前后状态与 commandId；历史事件不覆盖。
+- 状态转换必须带 `expectedVersion` 与真实章节证据；同一 commandId + 请求哈希幂等返回，
+  不同请求冲突。推进/回收章节不能早于埋设章节。
+- As-Of：伏笔状态与来源取「目标章节之前最近一条事件」；未来章节的回收不能提前显示。
+  最近一条事件来源失效时显示 stale，必须用新证据恢复，不能退回更早状态冒充有效。
+- 章节改写时在同一事务内把伏笔置为 stale；结构化事实、角色状态、时间线同步失效。
+- 因果边只允许引用同书的事件、伏笔或已确认事实；拒绝自引用与循环；来源失效后边保留但
+  `sourceValid=false`。
+- 时间线读取有上限（500），不加载全书正文；没有可靠故事内日期时只使用章节顺序。
+- 模型建议不能直接改变伏笔状态或创建正式因果边；必须由作者操作。
+
 ## Failure Modes
+
 
 
 - 只比较章节 ID：旧窗口会覆盖新正文。应使用 `expectedUpdatedAt` 并在冲突后保留本地草稿。
@@ -114,12 +131,22 @@
 - 用不可审计的 Prompt 字符串代替 Context Trace：作者无法判断上下文为什么缺失或被排除。
   预览与运行都保留结构化 trace。
 
+- 把「计划回收」写成 resolved：会提前剧透并让上下文引用尚未发生的事实。只有作者 payoff
+  动作且证据有效时才设置回收章。
+- 伏笔状态只看当前行：会把第 10 章的回收泄露到第 5 章。必须按事件 As-Of 推导。
+- 来源改写后回退到更早状态：会让作者误以为伏笔仍有效。最近事件来源失效必须显示 stale。
+- 允许因果边自引用或成环：会破坏因果解释。建立边时做同书实体校验、自引用拒绝与 DFS 环检测。
+- 因为时间线需要而扫描全书正文：章节多时会拖慢工作台。只读章节 header、事件与按上限过滤的来源。
+
 ## Related Modules
 
 - `client/src/pages/novels/components/chapterEditor/document/`
 - `client/src/pages/novels/components/chapterEditor/ChapterEditorShell.tsx`
 - `client/src/api/novel/chapterSelectionRewriteBilling.ts`（计费状态语义）
 - `crates/novel-application/src/continuity.rs`（章节连续性投影）
+- `crates/novel-application/src/plot.rs`（伏笔生命周期与因果）
+- `crates/novel-storage-sqlite/src/plot.rs`
+- `client/src/pages/novels/components/chapterEditor/rightPanel/PlotWorkspaceTab.tsx`
 - `crates/novel-application/src/context.rs`（上下文组装与预览）
 - `client/src/pages/novels/components/chapterEditor/rightPanel/ContextPreviewTab.tsx`
 - `crates/novel-storage-sqlite/src/selection_rewrite.rs`（请求尝试记录）

@@ -1480,3 +1480,137 @@ export function listBackups(): Promise<BackupInfo[]> { return invoke("list_backu
 export function createBackup(): Promise<BackupInfo> { return invoke("create_backup"); }
 export function verifyBackup(fileName: string): Promise<string> { return invoke("verify_backup", { fileName }); }
 export function requestRestore(fileName: string): Promise<string> { return invoke("request_restore", { fileName }); }
+// ---- P17.4：伏笔生命周期、时间线与剧情因果 ----
+
+export interface PlotThreadView {
+  id: string;
+  novelId: string;
+  title: string;
+  body: string;
+  status: string;
+  openedChapterOrder: number;
+  lastDevelopmentChapterOrder?: number | null;
+  resolvedChapterOrder?: number | null;
+  sourceChapterId?: string | null;
+  sourceChapterOrder?: number | null;
+  sourceChapterTitle?: string | null;
+  sourceRevision?: number | null;
+  sourceCurrentVersion?: number | null;
+  evidence?: string | null;
+  evidencePresentInCurrent: boolean;
+  sourceValid: boolean;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PlotThreadEventView {
+  id: string;
+  plotId: string;
+  title: string;
+  kind: string;
+  chapterId: string;
+  chapterOrder: number;
+  chapterTitle?: string | null;
+  evidence: string;
+  fromStatus?: string | null;
+  toStatus: string;
+  createdAt: number;
+}
+
+export interface CausalityEdgeView {
+  id: string;
+  novelId: string;
+  fromKind: string;
+  fromId: string;
+  fromLabel?: string | null;
+  toKind: string;
+  toId: string;
+  toLabel?: string | null;
+  relation: string;
+  evidence: string;
+  sourceChapterId: string;
+  sourceChapterOrder?: number | null;
+  sourceRevision: number;
+  sourceCurrentVersion?: number | null;
+  sourceValid: boolean;
+  status: string;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TimelineEntryView {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  chapterId: string;
+  chapterOrder: number;
+  chapterTitle?: string | null;
+  volumeId?: string | null;
+  volumeTitle?: string | null;
+  sourceRevision?: string | null;
+  evidence?: string | null;
+  status: string;
+  entityName?: string | null;
+  plotId?: string | null;
+}
+
+export interface PlotWorkspaceView {
+  novelId: string;
+  chapterId: string;
+  chapterOrder: number;
+  chapterVersion: number;
+  threads: PlotThreadView[];
+  events: PlotThreadEventView[];
+  edges: CausalityEdgeView[];
+  timeline: TimelineEntryView[];
+  timelineTruncated: boolean;
+  timelineLimit: number;
+}
+
+export function getPlotWorkspace(input: { novelId: string; chapterId: string }): Promise<PlotWorkspaceView> {
+  return invoke("get_plot_workspace", input);
+}
+
+export function createPlotThread(input: {
+  plotId: string;
+  novelId: string;
+  title: string;
+  body: string;
+  chapterId: string;
+  sourceRevision: number;
+  evidence: string;
+  commandId: string;
+}): Promise<PlotThreadView> {
+  return invoke("create_plot_thread", { request: input });
+}
+
+export function transitionPlotThread(input: {
+  plotId: string;
+  novelId: string;
+  expectedVersion: number;
+  action: string;
+  chapterId: string;
+  sourceRevision: number;
+  evidence: string;
+  commandId: string;
+}): Promise<PlotThreadView> {
+  return invoke("transition_plot_thread", { request: input });
+}
+
+export function createPlotCausality(input: {
+  edgeId: string;
+  novelId: string;
+  fromKind: string;
+  fromId: string;
+  toKind: string;
+  toId: string;
+  relation: string;
+  chapterId: string;
+  sourceRevision: number;
+  evidence: string;
+}): Promise<CausalityEdgeView> {
+  return invoke("create_plot_causality", { request: input });
+}

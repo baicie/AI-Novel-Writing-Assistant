@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-plot-causality"
+description = "Enables the create_plot_causality command without any pre-configured scope."
+commands.allow = ["create_plot_causality"]
+
+[[permission]]
+identifier = "deny-create-plot-causality"
+description = "Denies the create_plot_causality command without any pre-configured scope."
+commands.deny = ["create_plot_causality"]

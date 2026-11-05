@@ -31,6 +31,10 @@
     "allow-list-pending-selection-rewrites",
     "allow-get-chapter-continuity",
     "allow-preview-chapter-context",
-    "allow-get-run-context-trace"
+    "allow-get-run-context-trace",
+    "allow-create-plot-thread",
+    "allow-transition-plot-thread",
+    "allow-create-plot-causality",
+    "allow-get-plot-workspace"
   ]
 }

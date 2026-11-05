@@ -185,6 +185,29 @@ describe("Director 上下文来源追踪（桌面原生）", function () {
         nowMs: Date.now(),
       },
     });
+    await invoke("create_plot_thread", {
+      request: {
+        plotId: "p173-context-plot",
+        novelId,
+        title: "旧案",
+        body: "林动在查旧案",
+        chapterId,
+        sourceRevision: 1,
+        evidence: "他推开门",
+        commandId: "p173-context-plot-create",
+      },
+    });
+    await invoke("upsert_timeline_event", {
+      request: {
+        id: "p173-context-event",
+        novelId,
+        chapterOrder: 1,
+        body: "旧案线索出现",
+        sourceChapterId: chapterId,
+        sourceRevision: "1",
+        status: "confirmed",
+      },
+    });
 
     const opened = await invoke("open_run", {
       request: {
@@ -272,8 +295,13 @@ describe("Director 上下文来源追踪（桌面原生）", function () {
     expect(structured).toBeTruthy();
     expect(structured.selected).toBe(true);
     expect(structured.contentHash).toBeTruthy();
+    const storyFacts = frozenTrace.sources.find((source) => source.sourceType === "story_facts");
+    expect(storyFacts).toBeTruthy();
+    expect(storyFacts.selected).toBe(true);
     expect(frozenPrompt).toContain("alive");
     expect(frozenPrompt).toContain("林动");
+    expect(frozenPrompt).toContain("旧案");
+    expect(frozenPrompt).toContain("旧案线索");
   });
 
   it("数据库后续变化不修改历史 Run 的冻结上下文", async () => {
