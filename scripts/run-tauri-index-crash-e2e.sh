@@ -15,7 +15,7 @@ trap cleanup EXIT
 
 if [[ "${SKIP_E2E_BUILD:-0}" != "1" ]]; then
   echo "[index-crash] building dedicated E2E Tauri app (feature e2e, isolated config)"
-  cargo tauri build \
+  pnpm tauri build \
     --features e2e \
     --config src-tauri/tauri.e2e.conf.json \
     --target aarch64-apple-darwin \
