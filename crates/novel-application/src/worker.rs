@@ -1339,6 +1339,7 @@ async fn execute_structured(
         text
     });
     let started = worker.clock.now_ms();
+    let repair_cancel = cancel.clone();
     let generated = worker
         .llm
         .generate_with_protocol(
@@ -1347,7 +1348,7 @@ async fn execute_structured(
                 model: route.model_id(&claimed.contract.model).to_string(),
                 prompt,
                 endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
-                api_key,
+                api_key: api_key.clone(),
                 allow_localhost_http: route
                     .allow_localhost_http(claimed.contract.allow_localhost_http),
                 max_output_tokens: claimed.contract.token_budget,
@@ -1402,28 +1403,100 @@ async fn execute_structured(
     } else {
         raw
     };
+    let mut usage = response.usage.clone();
     let payload = match validate_structured_output(step_id, &raw) {
         Ok(payload) => payload,
-        Err(error) => {
-            worker
-                .runs
-                .mark_attempt_fenced(
-                    &claimed.fence,
-                    &claimed.run_id,
-                    &attempt_id,
-                    AttemptPhase::Interrupted.as_str(),
-                    None,
-                    worker.clock.now_ms(),
-                )
-                .await?;
-            return worker
-                .pause(
-                    claimed,
-                    StopSignalKind::DataIntegrity,
-                    &error,
-                    Some(step_id.into()),
+        Err(first_error) => {
+            // 结构化输出可能是被截断的 JSON，或字段类型/必填字段不符合契约。
+            // 只做一次有界修复调用：把原始输出与校验错误交给模型，要求只返回完整 JSON。
+            let repair_prompt = structured_repair_prompt(step_id, &first_error, &raw)?;
+            let repair_request_id = worker.ids.new_id();
+            let (repair_sender, mut repair_receiver) =
+                tokio::sync::mpsc::channel::<String>(64);
+            let repair_collect = tokio::spawn(async move {
+                let mut text = String::new();
+                while let Some(delta) = repair_receiver.recv().await {
+                    text.push_str(&delta);
+                }
+                text
+            });
+            let repair_generated = worker
+                .llm
+                .generate_with_protocol(
+                    LlmRequest {
+                        request_id: repair_request_id,
+                        model: route.model_id(&claimed.contract.model).to_string(),
+                        prompt: repair_prompt,
+                        endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
+                        api_key: api_key.clone(),
+                        allow_localhost_http: route
+                            .allow_localhost_http(claimed.contract.allow_localhost_http),
+                        max_output_tokens: claimed.contract.token_budget,
+                    },
+                    route.protocol(claimed.contract.protocol.as_deref()),
+                    route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
+                    repair_sender,
+                    repair_cancel,
                 )
                 .await;
+            let repair_raw = repair_collect.await.unwrap_or_default();
+            match repair_generated {
+                Ok(repair_response) => {
+                    accumulate_usage(&mut usage, &repair_response.usage);
+                    let repair_text = if repair_raw.trim().is_empty() {
+                        repair_response.text
+                    } else {
+                        repair_raw
+                    };
+                    match validate_structured_output(step_id, &repair_text) {
+                        Ok(payload) => payload,
+                        Err(repair_error) => {
+                            worker
+                                .runs
+                                .mark_attempt_fenced(
+                                    &claimed.fence,
+                                    &claimed.run_id,
+                                    &attempt_id,
+                                    AttemptPhase::Interrupted.as_str(),
+                                    None,
+                                    worker.clock.now_ms(),
+                                )
+                                .await?;
+                            return worker
+                                .pause(
+                                    claimed,
+                                    StopSignalKind::DataIntegrity,
+                                    &format!(
+                                        "{first_error}；修复重试仍失败：{repair_error}"
+                                    ),
+                                    Some(step_id.into()),
+                                )
+                                .await;
+                        }
+                    }
+                }
+                Err(repair_error) => {
+                    worker
+                        .runs
+                        .mark_attempt_fenced(
+                            &claimed.fence,
+                            &claimed.run_id,
+                            &attempt_id,
+                            AttemptPhase::Interrupted.as_str(),
+                            None,
+                            worker.clock.now_ms(),
+                        )
+                        .await?;
+                    return worker
+                        .pause(
+                            claimed,
+                            StopSignalKind::ProviderUnavailable,
+                            &format!("结构化修复请求失败：{repair_error}"),
+                            Some(step_id.into()),
+                        )
+                        .await;
+                }
+            }
         }
     };
     let payload = if step_id == "chapter_list" {
@@ -1445,7 +1518,7 @@ async fn execute_structured(
                 &request_id,
                 &summary,
                 started,
-                &response.usage,
+                &usage,
             ),
             worker.clock.now_ms(),
         )
@@ -1689,6 +1762,34 @@ async fn structured_prompt(
         novel_prompt::resolve(id, version).map_err(|_| AppError::validation("提示词版本不存在"))?;
     novel_prompt::render(asset.template, &vars)
         .map_err(|_| AppError::validation("提示词缺少必要上下文"))
+}
+
+fn structured_repair_prompt(
+    step_id: &str,
+    error: &str,
+    raw: &str,
+) -> Result<String, AppError> {
+    let asset = novel_prompt::resolve("structured_repair", "structured-repair-v1")
+        .map_err(|_| AppError::integrity("结构化修复提示词版本不存在"))?;
+    let mut vars = BTreeMap::new();
+    vars.insert("step_id".to_string(), step_id.to_string());
+    vars.insert("error".to_string(), error.to_string());
+    vars.insert("raw".to_string(), raw.to_string());
+    novel_prompt::render(asset.template, &vars)
+        .map_err(|_| AppError::integrity("结构化修复提示词渲染失败"))
+}
+
+fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
+    total.prompt_tokens = match (total.prompt_tokens, extra.prompt_tokens) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    };
+    total.completion_tokens = match (total.completion_tokens, extra.completion_tokens) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    };
 }
 
 async fn draft_prompt(
