@@ -73,6 +73,7 @@ export interface CharacterSnapshot {
   role: string;
   personality?: string | null;
   arc?: string | null;
+  profile?: Record<string, unknown> | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -677,7 +678,13 @@ export function deleteNovel(novelId: string): Promise<void> {
   return invoke("delete_novel", { novelId });
 }
 
-export function createCharacter(input: { id: string; novelId: string; name: string; role: string }): Promise<CharacterSnapshot> {
+export function createCharacter(input: {
+  id: string;
+  novelId: string;
+  name: string;
+  role: string;
+  profile?: Record<string, unknown>;
+}): Promise<CharacterSnapshot> {
   return invoke("create_character", { request: input });
 }
 
@@ -1225,6 +1232,14 @@ export function listStoryModes(): Promise<StoryMode[]> {
 
 export function listWorlds(): Promise<World[]> {
   return invoke("list_worlds");
+}
+
+export function createWorld(input: {
+  name: string;
+  description: string;
+  overviewSummary: string;
+}): Promise<World> {
+  return invoke("create_world", input);
 }
 
 export interface TaskOverview {

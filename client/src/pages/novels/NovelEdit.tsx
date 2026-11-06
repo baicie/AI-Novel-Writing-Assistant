@@ -22,6 +22,7 @@ import NovelEditView from "./components/NovelEditView";
 import NovelProductionExperienceHandoff from "./components/NovelProductionExperienceHandoff";
 import type { LLMSelectorValue } from "@/components/common/LLMSelector";
 import { getBaseCharacterList } from "@/api/character";
+import { APP_RUNTIME } from "@/lib/constants";
 import { flattenGenreTreeOptions, getGenreTree } from "@/api/genre";
 import { acceptManualChangesAndContinueDirector, calibrateDirectorStep, getDirectorBookAutomationProjection, getDirectorTaskSnapshot } from "@/api/novelDirector";
 import { continueNovelWorkflow, getActiveAutoDirectorTask } from "@/api/novelWorkflow";
@@ -448,6 +449,8 @@ export default function NovelEdit() {
   const baseCharacterListQuery = useQuery({
     queryKey: queryKeys.baseCharacters.all,
     queryFn: () => getBaseCharacterList(),
+    // 桌面本地内核没有基础角色库；不要在打开角色页时请求未迁移的接口。
+    enabled: APP_RUNTIME !== "desktop",
   });
   const worldListQuery = useQuery({
     queryKey: queryKeys.worlds.all,

@@ -30,6 +30,7 @@ pub struct NewCharacter {
     pub novel_id: String,
     pub name: String,
     pub role: String,
+    pub profile: serde_json::Value,
     pub now_ms: i64,
 }
 

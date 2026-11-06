@@ -47,6 +47,7 @@ async fn fixture(output: String) -> (Arc<SqliteKernel>, MemoryService, String, S
             novel_id: "n".into(),
             name: "林动".into(),
             role: "主角".into(),
+            profile: serde_json::json!({}),
             now_ms: 1,
         },
     )
@@ -59,6 +60,7 @@ async fn fixture(output: String) -> (Arc<SqliteKernel>, MemoryService, String, S
             novel_id: "n".into(),
             name: "陆沉".into(),
             role: "对手".into(),
+            profile: serde_json::json!({}),
             now_ms: 1,
         },
     )

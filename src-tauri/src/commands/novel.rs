@@ -619,6 +619,8 @@ pub struct CreateCharacterRequest {
     pub novel_id: String,
     pub name: String,
     pub role: String,
+    #[serde(default)]
+    pub profile: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -636,6 +638,7 @@ pub async fn create_character(
             novel_id: request.novel_id,
             name: request.name.trim().into(),
             role: request.role,
+            profile: request.profile.unwrap_or_else(|| serde_json::json!({})),
             now_ms: novel_platform::now_ms(),
         })
         .await

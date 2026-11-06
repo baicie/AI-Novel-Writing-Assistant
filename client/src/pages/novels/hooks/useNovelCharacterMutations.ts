@@ -304,16 +304,21 @@ export function useNovelCharacterMutations(input: UseNovelCharacterMutationsInpu
         role: nextRole,
         relationToProtagonist: payload?.relationToProtagonist?.trim() || undefined,
         storyFunction: payload?.storyFunction?.trim() || undefined,
+        outerGoal: payload?.outerGoal?.trim() || undefined,
+        currentGoal: payload?.currentGoal?.trim() || undefined,
         ...generatedProfile,
       });
     },
-    onSuccess: async (response) => {
+    onSuccess: (response) => {
       setCharacterMessage(response.message ?? "角色创建成功。");
       setQuickCharacterForm((prev) => ({ ...prev, name: "" }));
       if (response.data?.id) {
         setSelectedCharacterId(response.data.id);
       }
-      await invalidateCharacterViews(queryClient, id, response.data?.id ?? selectedCharacterId ?? "none");
+      // 角色已经创建成功，先结束弹窗的“创建中”状态；详情与时间线在后台刷新，
+      // 避免不支持的桌面面板把创建完成卡在 pending。
+      void invalidateCharacterViews(queryClient, id, response.data?.id ?? selectedCharacterId ?? "none")
+        .catch(() => undefined);
     },
     onError: (error) => {
       setCharacterMessage(error instanceof Error ? error.message : "角色创建失败。");
