@@ -1486,6 +1486,23 @@ async fn execute_structured(
                             worker.clock.now_ms(),
                         )
                         .await?;
+                    // 修复调用同样受取消令牌控制：用户取消时必须进入 cancelled，
+                    // 不能退化成可恢复的 ProviderUnavailable 暂停。
+                    if matches!(repair_error, novel_llm::LlmError::Cancelled) {
+                        return worker
+                            .write(
+                                claimed,
+                                ControlEvent::Cancel,
+                                "run_cancelled",
+                                Some(step_id.into()),
+                                &serde_json::json!({ "reason": repair_error.to_string() })
+                                    .to_string(),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await;
+                    }
                     return worker
                         .pause(
                             claimed,
