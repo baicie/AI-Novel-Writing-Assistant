@@ -1340,6 +1340,7 @@ async fn execute_structured(
     });
     let started = worker.clock.now_ms();
     let repair_cancel = cancel.clone();
+    let original_prompt = prompt.clone();
     let generated = worker
         .llm
         .generate_with_protocol(
@@ -1409,7 +1410,8 @@ async fn execute_structured(
         Err(first_error) => {
             // 结构化输出可能是被截断的 JSON，或字段类型/必填字段不符合契约。
             // 只做一次有界修复调用：把原始输出与校验错误交给模型，要求只返回完整 JSON。
-            let repair_prompt = structured_repair_prompt(step_id, &first_error, &raw)?;
+            let repair_prompt =
+                structured_repair_prompt(step_id, &original_prompt, &first_error, &raw)?;
             let repair_request_id = worker.ids.new_id();
             let (repair_sender, mut repair_receiver) =
                 tokio::sync::mpsc::channel::<String>(64);
@@ -1764,8 +1766,30 @@ async fn structured_prompt(
         .map_err(|_| AppError::validation("提示词缺少必要上下文"))
 }
 
+fn structured_step_requirement(step_id: &str) -> &'static str {
+    match step_id {
+        "story_macro" => {
+            "expansion.mystery_box 必须是单个非空字符串，不能是数组，也不能省略；conflict_layers 必须是对象或数组；setpiece_seeds 必须是字符串数组；expansion 与 decomposition 的所有文本字段尽量精简，字段名使用 snake_case。"
+        }
+        "character_cast" => {
+            "members 至少 3 人、relations 至少 2 条；字段名使用 name、role、castRole、storyFunction、sourceName、targetName、surfaceRelation。"
+        }
+        "volume_strategy" => {
+            "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
+        }
+        "chapter_list" => {
+            "chapters 非空，chapterOrder 唯一；字段名使用 title、volumeTitle、summary、characterNames。"
+        }
+        "consistency_review" => {
+            "只输出 issues 数组；每项包含 type、severity、evidence、suggestion。"
+        }
+        _ => "只输出完整 JSON。",
+    }
+}
+
 fn structured_repair_prompt(
     step_id: &str,
+    original_prompt: &str,
     error: &str,
     raw: &str,
 ) -> Result<String, AppError> {
@@ -1773,6 +1797,11 @@ fn structured_repair_prompt(
         .map_err(|_| AppError::integrity("结构化修复提示词版本不存在"))?;
     let mut vars = BTreeMap::new();
     vars.insert("step_id".to_string(), step_id.to_string());
+    vars.insert(
+        "step_requirement".to_string(),
+        structured_step_requirement(step_id).to_string(),
+    );
+    vars.insert("original_prompt".to_string(), original_prompt.to_string());
     vars.insert("error".to_string(), error.to_string());
     vars.insert("raw".to_string(), raw.to_string());
     novel_prompt::render(asset.template, &vars)

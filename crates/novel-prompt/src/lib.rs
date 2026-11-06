@@ -62,7 +62,7 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             id: "structured_repair",
             version: "structured-repair-v1",
             family: "director",
-            template: "STEP:structured_repair\n你是结构化输出修复器。下面是一次模型输出和校验错误。请只输出修复后的完整 JSON 对象，不要 Markdown、不要解释、不要省略必填字段。如果原输出被截断，请补全缺失部分；如果字段类型不符，请按校验错误修正。\n步骤：{{step_id}}\n校验错误：{{error}}\n原始输出：\n{{raw}}",
+            template: "STEP:structured_repair\n你是结构化输出修复器。下面包含原始任务要求、上一次模型输出和校验错误。请只输出修复后的完整 JSON 对象，不要 Markdown、不要解释、不要省略任何必填字段。如果原输出被截断，请补全缺失部分；如果字段类型不符，请按校验错误修正。\n本步骤硬性要求：{{step_requirement}}\n\n原始任务要求：\n{{original_prompt}}\n\n校验错误：{{error}}\n\n原始输出：\n{{raw}}",
         },
         PromptAsset {
             id: "chapter_repair",
