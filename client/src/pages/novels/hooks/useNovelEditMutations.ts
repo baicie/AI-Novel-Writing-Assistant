@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useMutation, type QueryClient } from "@tanstack/react-query";
 import type { Chapter, PipelineRepairMode, PipelineRunMode, VolumePlanDocument } from "@ai-novel/shared/types/novel";
 import type { LLMProvider } from "@ai-novel/shared/types/llm";
@@ -17,6 +18,7 @@ import {
 } from "@/api/novel";
 import { queryKeys } from "@/api/queryKeys";
 import { buildNovelUpdatePayload, type NovelBasicFormState } from "../novelBasicInfo.shared";
+import { buildNewChapterDraft } from "../chapterCreationPolicy";
 import type { ChapterReviewResult } from "../chapterPlanning.shared";
 import type { StructuredSyncOptions } from "../novelEdit.utils";
 import { syncNovelWorkflowStageSilently } from "../novelWorkflow.client";
@@ -57,13 +59,13 @@ interface UseNovelEditMutationsArgs {
   llm: LlmSettings;
   pipelineForm: PipelineFormState;
   selectedChapterId: string;
-  chapterCount: number;
   chapters: Chapter[];
   setActiveTab: (value: string) => void;
   setSelectedChapterId: (value: string) => void;
   setCurrentJobId: (value: string) => void;
   setPipelineMessage: (value: string) => void;
   setStructuredMessage: (value: string) => void;
+  setChapterOperationMessage: (value: string) => void;
   setReviewResult: (value: ChapterReviewResult | null) => void;
   queryClient: QueryClient;
   invalidateNovelDetail: () => Promise<void>;
@@ -87,17 +89,26 @@ export function useNovelEditMutations({
   llm,
   pipelineForm,
   selectedChapterId,
-  chapterCount,
   chapters,
   setActiveTab,
   setSelectedChapterId,
   setCurrentJobId,
   setPipelineMessage,
   setStructuredMessage,
+  setChapterOperationMessage,
   setReviewResult,
   queryClient,
   invalidateNovelDetail,
 }: UseNovelEditMutationsArgs) {
+  // 同步闸门：isPending 要等下一次渲染才反映到按钮上，同一任务里的连续点击
+  // 仍可能重复进入 mutation；这里在调用瞬间拦住第二次创建。
+  const createRequestPendingRef = useRef(false);
+  // mutation 的 onSuccess 闭包可能属于上一本书；切书后不能把旧章节选中到新书里。
+  const currentNovelIdRef = useRef(id);
+  currentNovelIdRef.current = id;
+  // 创建成功到详情刷新完成之间列表可能还是旧数据，记录刚发出的顺序防止重复编号。
+  // 顺序必须按书记忆，切到另一本书后不能沿用上一本书的章节号。
+  const lastCreatedChapterRef = useRef<{ novelId: string; order: number } | null>(null);
   const saveBasicMutation = useMutation({
     mutationFn: async () => {
       const updated = await updateNovel(id, buildNovelUpdatePayload(basicForm));
@@ -218,26 +229,59 @@ export function useNovelEditMutations({
   });
 
   const createChapterMutation = useMutation({
-    mutationFn: () =>
-      createNovelChapter(id, {
-        title: `New Chapter ${chapterCount + 1}`,
-        order: chapterCount + 1,
+    mutationFn: async () => {
+      const novelId = id;
+      const lastCreated = lastCreatedChapterRef.current;
+      const draft = buildNewChapterDraft(
+        chapters,
+        lastCreated?.novelId === novelId ? lastCreated.order : 0,
+      );
+      const response = await createNovelChapter(novelId, {
+        title: draft.title,
+        order: draft.order,
         content: "",
-      }),
-    onSuccess: async (response) => {
-      if (response.data?.id) {
-        setSelectedChapterId(response.data.id);
+      });
+      return { response, novelId, order: draft.order };
+    },
+    onMutate: () => {
+      setChapterOperationMessage("");
+    },
+    onSuccess: ({ response, novelId, order }) => {
+      // 创建请求在切书后才返回时，只刷新原书数据，不把旧章节选中到新书。
+      if (novelId === currentNovelIdRef.current) {
+        lastCreatedChapterRef.current = { novelId, order };
+        if (response.data?.id) {
+          setSelectedChapterId(response.data.id);
+        }
       }
-      await syncNovelWorkflowStageSilently({
-        novelId: id,
+      // 章节已经创建成功，先结束按钮的“创建中”状态。详情、质量报告等十几个查询
+      // 会在这里依次刷新；如果等它们全部完成，新建按钮会被锁住几十秒。
+      void syncNovelWorkflowStageSilently({
+        novelId,
         stage: "chapter_execution",
         itemLabel: "已创建新的章节执行项",
         chapterId: response.data?.id,
         status: "waiting_approval",
       });
-      await invalidateNovelDetail();
+      void invalidateNovelDetail().catch(() => undefined);
+    },
+    onError: (error) => {
+      setChapterOperationMessage(
+        error instanceof Error ? error.message : "新建章节失败，请稍后重试。",
+      );
+    },
+    onSettled: () => {
+      createRequestPendingRef.current = false;
     },
   });
+
+  const requestCreateChapter = () => {
+    if (createRequestPendingRef.current) {
+      return;
+    }
+    createRequestPendingRef.current = true;
+    createChapterMutation.mutate();
+  };
 
   const deleteManualChapterMutation = useMutation({
     mutationFn: (chapterId: string) => deleteNovelChapter(id, chapterId),
@@ -335,6 +379,7 @@ export function useNovelEditMutations({
     optimizeStructuredMutation,
     syncStructuredChaptersMutation,
     createChapterMutation,
+    requestCreateChapter,
     deleteManualChapterMutation,
     runPipelineMutation,
     reviewMutation,
