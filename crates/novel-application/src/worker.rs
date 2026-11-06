@@ -1452,6 +1452,16 @@ async fn execute_structured(
                     match validate_structured_output(step_id, &repair_text) {
                         Ok(payload) => payload,
                         Err(repair_error) => {
+                            record_usage_before_stop(
+                                worker,
+                                claimed,
+                                step_id,
+                                &request_id,
+                                &summary,
+                                started,
+                                &usage,
+                            )
+                            .await?;
                             worker
                                 .runs
                                 .mark_attempt_fenced(
@@ -1475,6 +1485,16 @@ async fn execute_structured(
                     }
                 }
                 Err(repair_error) => {
+                    record_usage_before_stop(
+                        worker,
+                        claimed,
+                        step_id,
+                        &request_id,
+                        &summary,
+                        started,
+                        &usage,
+                    )
+                    .await?;
                     worker
                         .runs
                         .mark_attempt_fenced(
@@ -1515,14 +1535,6 @@ async fn execute_structured(
             }
         }
     };
-    let payload = if step_id == "chapter_list" {
-        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
-        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-        validate_chapter_plan_references(&payload, &cast, &volume)?
-    } else {
-        payload
-    };
     worker
         .runs
         .record_invocation_fenced(
@@ -1539,6 +1551,14 @@ async fn execute_structured(
             worker.clock.now_ms(),
         )
         .await?;
+    let payload = if step_id == "chapter_list" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
+        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
+        validate_chapter_plan_references(&payload, &cast, &volume)?
+    } else {
+        payload
+    };
     if step_id == "consistency_review" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
         let next_version = artifacts
@@ -1833,6 +1853,27 @@ fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
     };
+}
+
+/// 结构化调用即使最终校验失败，也已经发生了模型请求；在进入暂停/取消前先记录
+/// 已获得的 usage，避免失败路径把成本静默丢掉。使用非栅栏写入，保证取消竞争下
+/// 不会因控制版本变化而丢失调用记录。
+async fn record_usage_before_stop(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    usage: &TokenUsage,
+) -> Result<(), AppError> {
+    worker
+        .runs
+        .record_invocation(invocation(
+            worker, claimed, step_id, request_id, summary, started, usage,
+        ))
+        .await?;
+    Ok(())
 }
 
 async fn draft_prompt(

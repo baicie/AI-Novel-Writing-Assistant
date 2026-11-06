@@ -153,7 +153,10 @@ pub async fn cancel_run(
     command_id: String,
     run_id: String,
 ) -> Result<CommandOutcome, AppError> {
-    state.runtime.director.cancel(&command_id, &run_id).await
+    let outcome = state.runtime.director.cancel(&command_id, &run_id).await?;
+    // 取消成功后同时中止正在进行的模型请求，避免取消后继续发起补全等新调用。
+    state.runtime.worker.cancel_generation(&run_id);
+    Ok(outcome)
 }
 
 #[tauri::command]
