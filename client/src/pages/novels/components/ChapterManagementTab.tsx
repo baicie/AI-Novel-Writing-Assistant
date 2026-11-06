@@ -155,7 +155,7 @@ export default function ChapterManagementTab(props: ChapterTabViewProps) {
               把这里收成真正的主工作台：左侧只管切章，中间完整承接正文，右侧专心放 AI 动作和策略。
             </div>
           </div>
-          <Button onClick={onCreateChapter} disabled={isCreatingChapter}>
+          <Button data-testid="chapter-create-button" onClick={onCreateChapter} disabled={isCreatingChapter}>
             {isCreatingChapter ? "创建中..." : "新建章节"}
           </Button>
         </div>
@@ -165,7 +165,7 @@ export default function ChapterManagementTab(props: ChapterTabViewProps) {
         <WorldInjectionHint worldInjectionSummary={worldInjectionSummary} />
 
         {chapterOperationMessage ? (
-          <div className="rounded-2xl bg-muted/20 px-4 py-3 text-xs leading-6 text-muted-foreground">
+          <div data-testid="chapter-operation-message" role="status" className="rounded-2xl bg-muted/20 px-4 py-3 text-xs leading-6 text-muted-foreground">
             {chapterOperationMessage}
           </div>
         ) : null}
