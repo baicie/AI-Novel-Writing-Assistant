@@ -93,9 +93,118 @@ fn required_string(value: &serde_json::Value, key: &str) -> Result<(), String> {
     }
 }
 
+const EXPANSION_ALIASES: &[(&str, &str)] = &[
+    ("expandedPremise", "expanded_premise"),
+    ("protagonistCore", "protagonist_core"),
+    ("conflictEngine", "conflict_engine"),
+    ("conflictLayers", "conflict_layers"),
+    ("mysteryBox", "mystery_box"),
+    ("emotionalLine", "emotional_line"),
+    ("setpieceSeeds", "setpiece_seeds"),
+    ("toneReference", "tone_reference"),
+];
+
+const DECOMPOSITION_ALIASES: &[(&str, &str)] = &[
+    ("sellingPoint", "selling_point"),
+    ("coreConflict", "core_conflict"),
+    ("mainHook", "main_hook"),
+    ("progressionLoop", "progression_loop"),
+    ("growthPath", "growth_path"),
+    ("majorPayoffs", "major_payoffs"),
+    ("endingFlavor", "ending_flavor"),
+];
+
+fn rename_alias_keys(value: &mut serde_json::Value, aliases: &[(&str, &str)]) {
+    let Some(map) = value.as_object_mut() else {
+        return;
+    };
+    for (camel, snake) in aliases {
+        if !map.contains_key(*snake)
+            && let Some(alias_value) = map.remove(*camel)
+        {
+            map.insert((*snake).to_string(), alias_value);
+        }
+    }
+}
+
+/// 文本字段被模型写成数组时按“；”连接；数字/布尔转字符串。对象/空值保持原样，
+/// 交给校验器报错，避免凭空发明内容。
+fn coerce_text_field(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            *text = text.trim().to_string();
+        }
+        serde_json::Value::Array(items) => {
+            let joined = items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("；");
+            if !joined.is_empty() {
+                *value = serde_json::Value::String(joined);
+            }
+        }
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => {
+            *value = serde_json::Value::String(value.to_string());
+        }
+        _ => {}
+    }
+}
+
+/// 模型常把 story_macro 的字段写成 camelCase、把文本字段写成数组，或把
+/// conflict_layers/setpiece_seeds 写成字符串；下游按固定 snake_case/结构使用。
+/// 这是对已解析结构化输出的确定性归一化，不改变模型决策。
+fn normalize_story_macro(value: &mut serde_json::Value) {
+    if let Some(expansion) = value.get_mut("expansion") {
+        rename_alias_keys(expansion, EXPANSION_ALIASES);
+        for key in [
+            "expanded_premise",
+            "protagonist_core",
+            "conflict_engine",
+            "mystery_box",
+            "emotional_line",
+            "tone_reference",
+        ] {
+            if let Some(field) = expansion.get_mut(key) {
+                coerce_text_field(field);
+            }
+        }
+        if let Some(layers) = expansion.get_mut("conflict_layers")
+            && let Some(text) = layers.as_str()
+        {
+            *layers = serde_json::json!({ "external": text });
+        }
+        if let Some(seeds) = expansion.get_mut("setpiece_seeds")
+            && let Some(text) = seeds.as_str()
+        {
+            *seeds = serde_json::json!([text]);
+        }
+    }
+    if let Some(decomposition) = value.get_mut("decomposition") {
+        rename_alias_keys(decomposition, DECOMPOSITION_ALIASES);
+        for key in [
+            "selling_point",
+            "core_conflict",
+            "main_hook",
+            "progression_loop",
+            "growth_path",
+            "ending_flavor",
+        ] {
+            if let Some(field) = decomposition.get_mut(key) {
+                coerce_text_field(field);
+            }
+        }
+    }
+}
+
 pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<String, String> {
-    let value: serde_json::Value =
+    let mut value: serde_json::Value =
         serde_json::from_str(raw).map_err(|_| "模型输出不是合法 JSON".to_string())?;
+    if step_id == "story_macro" {
+        normalize_story_macro(&mut value);
+    }
     match step_id {
         "story_macro" => {
             let expansion = value.get("expansion").ok_or("Story Macro 缺少 expansion")?;
@@ -304,4 +413,110 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
         _ => return Err("未知的结构化步骤".into()),
     }
     serde_json::to_string(&value).map_err(|_| "结构化产物无法序列化".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_structured_output;
+
+    #[test]
+    fn story_macro_normalizes_mystery_box_array_to_string() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expanded_premise": "前提",
+                "protagonist_core": "主角",
+                "conflict_engine": "冲突",
+                "conflict_layers": { "external": "外部压力" },
+                "mystery_box": ["谜一", "谜二"],
+                "emotional_line": "成长",
+                "setpiece_seeds": ["场面"],
+                "tone_reference": "冷峻"
+            },
+            "decomposition": {
+                "selling_point": "卖点",
+                "core_conflict": "冲突",
+                "main_hook": "钩子",
+                "progression_loop": "循环",
+                "growth_path": "成长",
+                "ending_flavor": "结局"
+            },
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+
+        let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        assert_eq!(value["expansion"]["mystery_box"], "谜一；谜二");
+    }
+
+    #[test]
+    fn story_macro_coerces_common_type_deviations() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expanded_premise": ["前提一", "前提二"],
+                "protagonist_core": "主角",
+                "conflict_engine": "冲突",
+                "conflict_layers": "外部压力",
+                "mystery_box": "谜一",
+                "emotional_line": "成长",
+                "setpiece_seeds": "场面",
+                "tone_reference": "冷峻"
+            },
+            "decomposition": {
+                "selling_point": ["卖点一", "卖点二"],
+                "core_conflict": "冲突",
+                "main_hook": "钩子",
+                "progression_loop": "循环",
+                "growth_path": "成长",
+                "ending_flavor": "结局"
+            },
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+
+        let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        assert_eq!(value["expansion"]["expanded_premise"], "前提一；前提二");
+        assert_eq!(
+            value["expansion"]["conflict_layers"]["external"],
+            "外部压力"
+        );
+        assert_eq!(value["expansion"]["setpiece_seeds"][0], "场面");
+        assert_eq!(value["decomposition"]["selling_point"], "卖点一；卖点二");
+    }
+
+    #[test]
+    fn story_macro_normalizes_camel_case_fields() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expandedPremise": "前提",
+                "protagonistCore": "主角",
+                "conflictEngine": "冲突",
+                "conflictLayers": { "external": "外部压力" },
+                "mysteryBox": ["谜一", "谜二"],
+                "emotionalLine": "成长",
+                "setpieceSeeds": ["场面"],
+                "toneReference": "冷峻"
+            },
+            "decomposition": {
+                "sellingPoint": "卖点",
+                "coreConflict": "冲突",
+                "mainHook": "钩子",
+                "progressionLoop": "循环",
+                "growthPath": "成长",
+                "endingFlavor": "结局"
+            },
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+
+        let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        assert_eq!(value["expansion"]["mystery_box"], "谜一；谜二");
+        assert_eq!(value["expansion"]["expanded_premise"], "前提");
+        assert_eq!(value["decomposition"]["selling_point"], "卖点");
+    }
 }

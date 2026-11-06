@@ -59,6 +59,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_list\n依据卷策略输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames）。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
         },
         PromptAsset {
+            id: "structured_repair",
+            version: "structured-repair-v1",
+            family: "director",
+            template: "STEP:structured_repair\n你是结构化输出修复器。下面包含原始任务要求、上一次模型输出和校验错误。请只输出修复后的完整 JSON 对象，不要 Markdown、不要解释、不要省略任何必填字段。如果原输出被截断，请补全缺失部分；如果字段类型不符，请按校验错误修正。\n本步骤硬性要求：{{step_requirement}}\n\n原始任务要求：\n{{original_prompt}}\n\n校验错误：{{error}}\n\n原始输出：\n{{raw}}",
+        },
+        PromptAsset {
             id: "chapter_repair",
             version: "chapter-repair-v1",
             family: "director",

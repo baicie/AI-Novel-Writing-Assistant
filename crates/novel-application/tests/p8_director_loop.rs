@@ -1,12 +1,17 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
+use async_trait::async_trait;
 use novel_application::{
     ModelSecrets, NovelRepository, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome,
     WorkflowRepository,
 };
+use novel_llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, ProviderCapabilities, TokenUsage};
 use novel_storage_sqlite::SqliteKernel;
-use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
+use novel_testkit::{BlockingMockLlm, FakeClock, ScriptedLlm, SequentialIds};
 use sqlx::Row;
+use tokio_util::sync::CancellationToken;
 
 struct FixtureSecrets;
 #[async_trait::async_trait]
@@ -21,6 +26,70 @@ fn prompts() -> std::collections::BTreeMap<String, String> {
     let mut prompts = std::collections::BTreeMap::new();
     prompts.insert("chapter_draft".into(), "chapter-draft-v1".into());
     prompts
+}
+
+fn known_usage(prompt: u64, completion: u64) -> TokenUsage {
+    TokenUsage {
+        prompt_tokens: Some(prompt),
+        completion_tokens: Some(completion),
+    }
+}
+
+async fn runtime_for(
+    llm: Arc<dyn LlmProvider>,
+    owner: &str,
+) -> (tempfile::TempDir, Arc<SqliteKernel>, Runtime) {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("novel.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm,
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(FixtureSecrets),
+        owner: owner.into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    (dir, kernel, runtime)
+}
+
+async fn open_structured_run(
+    runtime: &Runtime,
+    novel_id: &str,
+    chapter_id: &str,
+    command_id: &str,
+) -> String {
+    runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: command_id.into(),
+            novel_id: novel_id.into(),
+            target_chapter_id: chapter_id.into(),
+            provider: "mock".into(),
+            credential_ref: Some("mock".into()),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(512),
+            context_token_budget: None,
+            max_automatic_retries: 0,
+            repair_budget: None,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+            step_routes: Default::default(),
+        })
+        .await
+        .unwrap()
+        .run_id
 }
 
 #[tokio::test]
@@ -319,6 +388,498 @@ async fn malformed_story_macro_pauses_without_persisting_a_success_artifact() {
         .try_get("status")
         .unwrap();
     assert_eq!(status, "paused");
+}
+
+/// 第一次返回非法 story_macro；修复请求一直等待取消令牌，用来验证取消语义。
+struct InvalidThenBlockingLlm {
+    calls: AtomicUsize,
+}
+
+impl InvalidThenBlockingLlm {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl LlmProvider for InvalidThenBlockingLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            streaming: true,
+            structured_output: true,
+            tool_call: false,
+            reasoning: false,
+            context_limit: 128_000,
+        }
+    }
+
+    async fn generate(
+        &self,
+        _request: LlmRequest,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call == 0 {
+            let text = r#"{"ok":true}"#.to_string();
+            let _ = tokens.send(text.clone()).await;
+            return Ok(LlmResponse {
+                text,
+                usage: known_usage(11, 3),
+            });
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => Err(LlmError::Cancelled),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let text = r#"{"ok":true}"#.to_string();
+                let _ = tokens.send(text.clone()).await;
+                Ok(LlmResponse {
+                    text,
+                    usage: TokenUsage::unknown(),
+                })
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn cancel_during_structured_repair_cancels_instead_of_pausing() {
+    let dir = tempfile::tempdir().unwrap();
+    let kernel = Arc::new(
+        SqliteKernel::open(&dir.path().join("cancel-repair.sqlite"))
+            .await
+            .unwrap(),
+    );
+    let llm = Arc::new(InvalidThenBlockingLlm::new());
+    let runtime = Runtime::new(RuntimeDeps {
+        novels: kernel.clone(),
+        runs: kernel.clone(),
+        worlds: kernel.clone(),
+        lookups: kernel.clone(),
+        task_center: kernel.clone(),
+        llm: llm.clone(),
+        clock: Arc::new(FakeClock::new(1_000)),
+        ids: Arc::new(SequentialIds::new()),
+        faults: Arc::new(novel_application::NoFault),
+        secrets: Arc::new(FixtureSecrets),
+        owner: "p8-cancel-repair-worker".into(),
+        lease_ms: 60_000,
+        concurrency: 1,
+    });
+    let novel = runtime.director.create_novel("取消修复", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let opened = runtime
+        .director
+        .open_run(OpenRunInput {
+            command_id: "p8-cancel-repair-open".into(),
+            novel_id: novel.id.clone(),
+            target_chapter_id: chapter.id,
+            provider: "mock".into(),
+            credential_ref: Some("mock".into()),
+            model: "mock-model".into(),
+            prompt_versions: prompts(),
+            token_budget: Some(512),
+            context_token_budget: None,
+            max_automatic_retries: 0,
+            repair_budget: None,
+            endpoint: "https://api.example.com/v1/chat/completions".into(),
+            allow_localhost_http: false,
+            step_routes: Default::default(),
+        })
+        .await
+        .unwrap();
+    let run_id = opened.run_id.clone();
+    let worker = runtime.worker.clone();
+    let tick = tokio::spawn(async move { worker.tick().await });
+    for _ in 0..50 {
+        if llm.calls() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(llm.calls(), 2, "first response and repair request must run");
+    runtime.worker.cancel_generation(&run_id);
+    let outcome = tick.await.unwrap().unwrap();
+    match outcome {
+        TickOutcome::Advanced { status, run_id: id } => {
+            assert_eq!(status, "cancelled", "want cancelled, got {status}");
+            assert_eq!(id, run_id);
+        }
+        other => panic!("expected Advanced(cancelled), got {other:?}"),
+    }
+    let status: String = sqlx::query("SELECT status FROM workflow_control WHERE run_id = ?")
+        .bind(&run_id)
+        .fetch_one(kernel.pool())
+        .await
+        .unwrap()
+        .try_get("status")
+        .unwrap();
+    assert_eq!(status, "cancelled");
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "story_macro"),
+        "cancelled repair must not persist a structured artifact"
+    );
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.usage.calls, 1,
+        "the first model call must still be recorded when repair is cancelled"
+    );
+    assert_eq!(detail.usage.prompt_tokens, 11);
+    assert_eq!(detail.usage.completion_tokens, 3);
+}
+
+fn mock_capabilities() -> ProviderCapabilities {
+    ProviderCapabilities {
+        streaming: true,
+        structured_output: true,
+        tool_call: false,
+        reasoning: false,
+        context_limit: 128_000,
+    }
+}
+
+/// 两次都返回非法 story_macro，用来验证修复失败时仍记录已发生的两次调用用量。
+struct InvalidTwiceLlm {
+    calls: AtomicUsize,
+}
+
+impl InvalidTwiceLlm {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for InvalidTwiceLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        mock_capabilities()
+    }
+
+    async fn generate(
+        &self,
+        _request: LlmRequest,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        _cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        let token_usage = if call == 0 {
+            known_usage(11, 3)
+        } else {
+            known_usage(13, 5)
+        };
+        let text = r#"{"ok":true}"#.to_string();
+        let _ = tokens.send(text.clone()).await;
+        Ok(LlmResponse {
+            text,
+            usage: token_usage,
+        })
+    }
+}
+
+struct UnavailableFirstLlm;
+
+#[async_trait]
+impl LlmProvider for UnavailableFirstLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        mock_capabilities()
+    }
+
+    async fn generate(
+        &self,
+        _request: LlmRequest,
+        _tokens: tokio::sync::mpsc::Sender<String>,
+        _cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        Err(LlmError::Unavailable {
+            billed: false,
+            reason: "provider down".into(),
+        })
+    }
+}
+
+/// 第一次返回非法 JSON，修复调用发生 Provider 故障。
+struct InvalidThenUnavailableLlm {
+    calls: AtomicUsize,
+}
+
+impl InvalidThenUnavailableLlm {
+    fn new() -> Self {
+        Self {
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for InvalidThenUnavailableLlm {
+    fn capabilities(&self) -> ProviderCapabilities {
+        mock_capabilities()
+    }
+
+    async fn generate(
+        &self,
+        _request: LlmRequest,
+        tokens: tokio::sync::mpsc::Sender<String>,
+        _cancel: CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call == 0 {
+            let text = r#"{"ok":true}"#.to_string();
+            let _ = tokens.send(text.clone()).await;
+            return Ok(LlmResponse {
+                text,
+                usage: known_usage(11, 3),
+            });
+        }
+        Err(LlmError::Unavailable {
+            billed: false,
+            reason: "repair down".into(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn repair_invalid_output_records_usage_and_pauses() {
+    let llm = Arc::new(InvalidTwiceLlm::new());
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p8-repair-invalid").await;
+    let novel = runtime
+        .director
+        .create_novel("修复仍非法", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id =
+        open_structured_run(&runtime, &novel.id, &chapter.id, "p8-repair-invalid-open").await;
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { ref status, .. } if status == "paused"),
+        "invalid repair must pause, got {outcome:?}"
+    );
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.pause_signal.as_deref(), Some("data_integrity"));
+    assert_eq!(detail.usage.calls, 1);
+    assert_eq!(detail.usage.prompt_tokens, 24);
+    assert_eq!(detail.usage.completion_tokens, 8);
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "story_macro"),
+        "invalid repair must not persist a structured artifact"
+    );
+}
+
+#[tokio::test]
+async fn provider_unavailable_on_first_structured_call_pauses_without_artifact() {
+    let llm = Arc::new(UnavailableFirstLlm);
+    let (_dir, kernel, runtime) = runtime_for(llm, "p8-provider-down").await;
+    let novel = runtime
+        .director
+        .create_novel("供应商不可用", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id =
+        open_structured_run(&runtime, &novel.id, &chapter.id, "p8-provider-down-open").await;
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { ref status, .. } if status == "paused"),
+        "provider error must pause, got {outcome:?}"
+    );
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.pause_signal.as_deref(), Some("provider_unavailable"));
+    assert_eq!(detail.usage.calls, 0);
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "story_macro")
+    );
+}
+
+#[tokio::test]
+async fn provider_unavailable_during_repair_records_first_usage() {
+    let llm = Arc::new(InvalidThenUnavailableLlm::new());
+    let (_dir, _kernel, runtime) = runtime_for(llm, "p8-repair-provider-down").await;
+    let novel = runtime
+        .director
+        .create_novel("修复供应商不可用", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_structured_run(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p8-repair-provider-down-open",
+    )
+    .await;
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(
+        matches!(outcome, TickOutcome::Advanced { ref status, .. } if status == "paused"),
+        "provider error must pause, got {outcome:?}"
+    );
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, &run_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.pause_signal.as_deref(), Some("provider_unavailable"));
+    assert_eq!(detail.usage.calls, 1);
+    assert_eq!(detail.usage.prompt_tokens, 11);
+    assert_eq!(detail.usage.completion_tokens, 3);
+}
+
+#[tokio::test]
+async fn cancel_before_first_structured_call_does_not_call_model() {
+    let llm = Arc::new(ScriptedLlm::new(vec![]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p8-cancel-before").await;
+    let novel = runtime
+        .director
+        .create_novel("调用前取消", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id =
+        open_structured_run(&runtime, &novel.id, &chapter.id, "p8-cancel-before-open").await;
+    runtime
+        .director
+        .cancel("p8-cancel-before-command", &run_id)
+        .await
+        .unwrap();
+    let outcome = runtime.worker.tick().await.unwrap();
+    assert!(matches!(outcome, TickOutcome::Idle), "got {outcome:?}");
+    assert_eq!(llm.calls(), 0, "cancelled run must not call the model");
+    let control = WorkflowRepository::run_control(kernel.as_ref(), &run_id)
+        .await
+        .unwrap();
+    assert_eq!(control.status.as_str(), "cancelled");
+}
+
+#[tokio::test]
+async fn cancel_during_first_structured_call_returns_cancelled() {
+    let llm: Arc<BlockingMockLlm> = Arc::new(BlockingMockLlm::new("不会被用到"));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p8-cancel-first-call").await;
+    let novel = runtime
+        .director
+        .create_novel("调用中取消", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_structured_run(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p8-cancel-first-call-open",
+    )
+    .await;
+    let worker = runtime.worker.clone();
+    let tick = tokio::spawn(async move { worker.tick().await });
+    for _ in 0..50 {
+        if llm.calls() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(llm.calls(), 1, "tick must reach the model before cancel");
+    runtime.worker.cancel_generation(&run_id);
+    let outcome = tick.await.unwrap().unwrap();
+    match outcome {
+        TickOutcome::Advanced { status, .. } => assert_eq!(status, "cancelled"),
+        other => panic!("expected Advanced(cancelled), got {other:?}"),
+    }
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "story_macro")
+    );
+}
+
+#[tokio::test]
+async fn cancel_then_new_run_for_same_chapter_is_allowed() {
+    let llm = Arc::new(ScriptedLlm::new(vec![]));
+    let (_dir, kernel, runtime) = runtime_for(llm, "p8-cancel-restart").await;
+    let novel = runtime
+        .director
+        .create_novel("取消后重开", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let first = open_structured_run(&runtime, &novel.id, &chapter.id, "p8-restart-open-1").await;
+    runtime
+        .director
+        .cancel("p8-restart-cancel", &first)
+        .await
+        .unwrap();
+    let second = open_structured_run(&runtime, &novel.id, &chapter.id, "p8-restart-open-2").await;
+    assert_ne!(first, second);
+    let control = WorkflowRepository::run_control(kernel.as_ref(), &second)
+        .await
+        .unwrap();
+    assert!(
+        matches!(control.status.as_str(), "queued" | "running"),
+        "a new run must be claimable after the previous run was cancelled"
+    );
 }
 
 #[tokio::test]

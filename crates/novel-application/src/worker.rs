@@ -1339,6 +1339,8 @@ async fn execute_structured(
         text
     });
     let started = worker.clock.now_ms();
+    let repair_cancel = cancel.clone();
+    let original_prompt = prompt.clone();
     let generated = worker
         .llm
         .generate_with_protocol(
@@ -1347,7 +1349,7 @@ async fn execute_structured(
                 model: route.model_id(&claimed.contract.model).to_string(),
                 prompt,
                 endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
-                api_key,
+                api_key: api_key.clone(),
                 allow_localhost_http: route
                     .allow_localhost_http(claimed.contract.allow_localhost_http),
                 max_output_tokens: claimed.contract.token_budget,
@@ -1402,37 +1404,136 @@ async fn execute_structured(
     } else {
         raw
     };
+    let mut usage = response.usage.clone();
     let payload = match validate_structured_output(step_id, &raw) {
         Ok(payload) => payload,
-        Err(error) => {
-            worker
-                .runs
-                .mark_attempt_fenced(
-                    &claimed.fence,
-                    &claimed.run_id,
-                    &attempt_id,
-                    AttemptPhase::Interrupted.as_str(),
-                    None,
-                    worker.clock.now_ms(),
-                )
-                .await?;
-            return worker
-                .pause(
-                    claimed,
-                    StopSignalKind::DataIntegrity,
-                    &error,
-                    Some(step_id.into()),
+        Err(first_error) => {
+            // 结构化输出可能是被截断的 JSON，或字段类型/必填字段不符合契约。
+            // 只做一次有界修复调用：把原始输出与校验错误交给模型，要求只返回完整 JSON。
+            let repair_prompt =
+                structured_repair_prompt(step_id, &original_prompt, &first_error, &raw)?;
+            let repair_request_id = worker.ids.new_id();
+            let (repair_sender, mut repair_receiver) = tokio::sync::mpsc::channel::<String>(64);
+            let repair_collect = tokio::spawn(async move {
+                let mut text = String::new();
+                while let Some(delta) = repair_receiver.recv().await {
+                    text.push_str(&delta);
+                }
+                text
+            });
+            let repair_generated = worker
+                .llm
+                .generate_with_protocol(
+                    LlmRequest {
+                        request_id: repair_request_id,
+                        model: route.model_id(&claimed.contract.model).to_string(),
+                        prompt: repair_prompt,
+                        endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
+                        api_key: api_key.clone(),
+                        allow_localhost_http: route
+                            .allow_localhost_http(claimed.contract.allow_localhost_http),
+                        max_output_tokens: claimed.contract.token_budget,
+                    },
+                    route.protocol(claimed.contract.protocol.as_deref()),
+                    route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
+                    repair_sender,
+                    repair_cancel,
                 )
                 .await;
+            let repair_raw = repair_collect.await.unwrap_or_default();
+            match repair_generated {
+                Ok(repair_response) => {
+                    accumulate_usage(&mut usage, &repair_response.usage);
+                    let repair_text = if repair_raw.trim().is_empty() {
+                        repair_response.text
+                    } else {
+                        repair_raw
+                    };
+                    match validate_structured_output(step_id, &repair_text) {
+                        Ok(payload) => payload,
+                        Err(repair_error) => {
+                            record_usage_before_stop(
+                                worker,
+                                claimed,
+                                step_id,
+                                &request_id,
+                                &summary,
+                                started,
+                                &usage,
+                            )
+                            .await?;
+                            worker
+                                .runs
+                                .mark_attempt_fenced(
+                                    &claimed.fence,
+                                    &claimed.run_id,
+                                    &attempt_id,
+                                    AttemptPhase::Interrupted.as_str(),
+                                    None,
+                                    worker.clock.now_ms(),
+                                )
+                                .await?;
+                            return worker
+                                .pause(
+                                    claimed,
+                                    StopSignalKind::DataIntegrity,
+                                    &format!("{first_error}；修复重试仍失败：{repair_error}"),
+                                    Some(step_id.into()),
+                                )
+                                .await;
+                        }
+                    }
+                }
+                Err(repair_error) => {
+                    record_usage_before_stop(
+                        worker,
+                        claimed,
+                        step_id,
+                        &request_id,
+                        &summary,
+                        started,
+                        &usage,
+                    )
+                    .await?;
+                    worker
+                        .runs
+                        .mark_attempt_fenced(
+                            &claimed.fence,
+                            &claimed.run_id,
+                            &attempt_id,
+                            AttemptPhase::Interrupted.as_str(),
+                            None,
+                            worker.clock.now_ms(),
+                        )
+                        .await?;
+                    // 修复调用同样受取消令牌控制：用户取消时必须进入 cancelled，
+                    // 不能退化成可恢复的 ProviderUnavailable 暂停。
+                    if matches!(repair_error, novel_llm::LlmError::Cancelled) {
+                        return worker
+                            .write(
+                                claimed,
+                                ControlEvent::Cancel,
+                                "run_cancelled",
+                                Some(step_id.into()),
+                                &serde_json::json!({ "reason": repair_error.to_string() })
+                                    .to_string(),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await;
+                    }
+                    return worker
+                        .pause(
+                            claimed,
+                            StopSignalKind::ProviderUnavailable,
+                            &format!("结构化修复请求失败：{repair_error}"),
+                            Some(step_id.into()),
+                        )
+                        .await;
+                }
+            }
         }
-    };
-    let payload = if step_id == "chapter_list" {
-        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
-        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-        validate_chapter_plan_references(&payload, &cast, &volume)?
-    } else {
-        payload
     };
     worker
         .runs
@@ -1445,11 +1546,19 @@ async fn execute_structured(
                 &request_id,
                 &summary,
                 started,
-                &response.usage,
+                &usage,
             ),
             worker.clock.now_ms(),
         )
         .await?;
+    let payload = if step_id == "chapter_list" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
+        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
+        validate_chapter_plan_references(&payload, &cast, &volume)?
+    } else {
+        payload
+    };
     if step_id == "consistency_review" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
         let next_version = artifacts
@@ -1689,6 +1798,82 @@ async fn structured_prompt(
         novel_prompt::resolve(id, version).map_err(|_| AppError::validation("提示词版本不存在"))?;
     novel_prompt::render(asset.template, &vars)
         .map_err(|_| AppError::validation("提示词缺少必要上下文"))
+}
+
+fn structured_step_requirement(step_id: &str) -> &'static str {
+    match step_id {
+        "story_macro" => {
+            "expansion.mystery_box 必须是单个非空字符串，不能是数组，也不能省略；conflict_layers 必须是对象或数组；setpiece_seeds 必须是字符串数组；expansion 与 decomposition 的所有文本字段尽量精简，字段名使用 snake_case。"
+        }
+        "character_cast" => {
+            "members 至少 3 人、relations 至少 2 条；字段名使用 name、role、castRole、storyFunction、sourceName、targetName、surfaceRelation。"
+        }
+        "volume_strategy" => {
+            "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
+        }
+        "chapter_list" => {
+            "chapters 非空，chapterOrder 唯一；字段名使用 title、volumeTitle、summary、characterNames。"
+        }
+        "consistency_review" => {
+            "只输出 issues 数组；每项包含 type、severity、evidence、suggestion。"
+        }
+        _ => "只输出完整 JSON。",
+    }
+}
+
+fn structured_repair_prompt(
+    step_id: &str,
+    original_prompt: &str,
+    error: &str,
+    raw: &str,
+) -> Result<String, AppError> {
+    let asset = novel_prompt::resolve("structured_repair", "structured-repair-v1")
+        .map_err(|_| AppError::integrity("结构化修复提示词版本不存在"))?;
+    let mut vars = BTreeMap::new();
+    vars.insert("step_id".to_string(), step_id.to_string());
+    vars.insert(
+        "step_requirement".to_string(),
+        structured_step_requirement(step_id).to_string(),
+    );
+    vars.insert("original_prompt".to_string(), original_prompt.to_string());
+    vars.insert("error".to_string(), error.to_string());
+    vars.insert("raw".to_string(), raw.to_string());
+    novel_prompt::render(asset.template, &vars)
+        .map_err(|_| AppError::integrity("结构化修复提示词渲染失败"))
+}
+
+fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
+    total.prompt_tokens = match (total.prompt_tokens, extra.prompt_tokens) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    };
+    total.completion_tokens = match (total.completion_tokens, extra.completion_tokens) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    };
+}
+
+/// 结构化调用即使最终校验失败，也已经发生了模型请求；在进入暂停/取消前先记录
+/// 已获得的 usage，避免失败路径把成本静默丢掉。使用非栅栏写入，保证取消竞争下
+/// 不会因控制版本变化而丢失调用记录。
+async fn record_usage_before_stop(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    usage: &TokenUsage,
+) -> Result<(), AppError> {
+    worker
+        .runs
+        .record_invocation(invocation(
+            worker, claimed, step_id, request_id, summary, started, usage,
+        ))
+        .await?;
+    Ok(())
 }
 
 async fn draft_prompt(
