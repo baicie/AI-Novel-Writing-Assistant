@@ -119,10 +119,10 @@ fn rename_alias_keys(value: &mut serde_json::Value, aliases: &[(&str, &str)]) {
         return;
     };
     for (camel, snake) in aliases {
-        if !map.contains_key(*snake) {
-            if let Some(alias_value) = map.remove(*camel) {
-                map.insert((*snake).to_string(), alias_value);
-            }
+        if !map.contains_key(*snake)
+            && let Some(alias_value) = map.remove(*camel)
+        {
+            map.insert((*snake).to_string(), alias_value);
         }
     }
 }
@@ -171,15 +171,15 @@ fn normalize_story_macro(value: &mut serde_json::Value) {
                 coerce_text_field(field);
             }
         }
-        if let Some(layers) = expansion.get_mut("conflict_layers") {
-            if let Some(text) = layers.as_str() {
-                *layers = serde_json::json!({ "external": text });
-            }
+        if let Some(layers) = expansion.get_mut("conflict_layers")
+            && let Some(text) = layers.as_str()
+        {
+            *layers = serde_json::json!({ "external": text });
         }
-        if let Some(seeds) = expansion.get_mut("setpiece_seeds") {
-            if let Some(text) = seeds.as_str() {
-                *seeds = serde_json::json!([text]);
-            }
+        if let Some(seeds) = expansion.get_mut("setpiece_seeds")
+            && let Some(text) = seeds.as_str()
+        {
+            *seeds = serde_json::json!([text]);
         }
     }
     if let Some(decomposition) = value.get_mut("decomposition") {
