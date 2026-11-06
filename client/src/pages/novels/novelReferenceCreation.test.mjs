@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildNovelCreatePayload,
   createDefaultNovelBasicFormState,
   patchNovelBasicForm,
 } from "./novelBasicInfo.shared.ts";
@@ -42,4 +43,13 @@ test("reference-based original creation keeps structure reference and clears con
   assert.equal(form.continuationBookAnalysisId, "");
   assert.equal(form.referenceBookAnalysisId, "analysis-1");
   assert.deepEqual(form.referenceBookAnalysisSections, sections);
+});
+
+
+test("manual creation is a professional project so desktop opens the chapter workbench", () => {
+  const form = patchNovelBasicForm(createDefaultNovelBasicFormState(), {
+    title: "长篇验收",
+  });
+  const payload = buildNovelCreatePayload(form);
+  assert.equal(payload.creationExperience, "professional");
 });
