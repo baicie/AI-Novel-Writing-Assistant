@@ -479,7 +479,10 @@ mod tests {
         let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
         let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
         assert_eq!(value["expansion"]["expanded_premise"], "前提一；前提二");
-        assert_eq!(value["expansion"]["conflict_layers"]["external"], "外部压力");
+        assert_eq!(
+            value["expansion"]["conflict_layers"]["external"],
+            "外部压力"
+        );
         assert_eq!(value["expansion"]["setpiece_seeds"][0], "场面");
         assert_eq!(value["decomposition"]["selling_point"], "卖点一；卖点二");
     }

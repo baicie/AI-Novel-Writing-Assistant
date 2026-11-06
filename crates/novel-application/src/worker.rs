@@ -1413,8 +1413,7 @@ async fn execute_structured(
             let repair_prompt =
                 structured_repair_prompt(step_id, &original_prompt, &first_error, &raw)?;
             let repair_request_id = worker.ids.new_id();
-            let (repair_sender, mut repair_receiver) =
-                tokio::sync::mpsc::channel::<String>(64);
+            let (repair_sender, mut repair_receiver) = tokio::sync::mpsc::channel::<String>(64);
             let repair_collect = tokio::spawn(async move {
                 let mut text = String::new();
                 while let Some(delta) = repair_receiver.recv().await {
@@ -1468,9 +1467,7 @@ async fn execute_structured(
                                 .pause(
                                     claimed,
                                     StopSignalKind::DataIntegrity,
-                                    &format!(
-                                        "{first_error}；修复重试仍失败：{repair_error}"
-                                    ),
+                                    &format!("{first_error}；修复重试仍失败：{repair_error}"),
                                     Some(step_id.into()),
                                 )
                                 .await;
