@@ -7,7 +7,8 @@ import type {
 } from "axios";
 import { AxiosError as AxiosErrorClass, AxiosHeaders } from "axios";
 import type { ApiResponse } from "@ai-novel/shared/types/api";
-import type { Chapter } from "@ai-novel/shared/types/novel";
+import type { Chapter, Character } from "@ai-novel/shared/types/novel";
+import type { NovelWorldView } from "@ai-novel/shared/types/novelWorld";
 import type { NovelDetailResponse, NovelListResponse } from "@/api/novel/shared";
 import { APP_RUNTIME } from "@/lib/constants";
 import * as transport from "./desktopTransport";
@@ -68,6 +69,21 @@ function unsupported(config: InternalAxiosRequestConfig): never {
       },
     },
   );
+}
+
+function routeError(
+  message: string,
+  code: string,
+  config: InternalAxiosRequestConfig,
+  status: number,
+): never {
+  throw new AxiosErrorClass(message, code, config, null, {
+    status,
+    statusText: code,
+    headers: {},
+    config,
+    data: { success: false, error: code, code, message },
+  });
 }
 
 
@@ -243,16 +259,7 @@ async function loadNovel(id: string): Promise<NovelDetailResponse> {
     transport.listCharacters(id),
   ]);
   const response = detailToNovel(detail, chapters, volumes);
-  response.characters = characters.map((character) => ({
-    id: character.id,
-    name: character.name,
-    role: character.role,
-    personality: character.personality ?? null,
-    development: character.arc ?? null,
-    novelId: character.novelId,
-    createdAt: iso(character.createdAt),
-    updatedAt: iso(character.updatedAt),
-  }));
+  response.characters = characters.map(toCharacterShape);
   const list = summaryToListItem({
     ...detail,
     creationExperience: detail.creationExperience,
@@ -262,6 +269,76 @@ async function loadNovel(id: string): Promise<NovelDetailResponse> {
   });
   response.workspaceSourceRoute = `/novels/${list.id}`;
   return response;
+}
+
+function toCharacterShape(character: transport.CharacterSnapshot): Character {
+  const profile = character.profile ?? {};
+  const profileText = (key: string) => {
+    const value = profile[key];
+    return typeof value === "string" && value.trim() ? value : null;
+  };
+  return {
+    id: character.id,
+    name: character.name,
+    role: character.role,
+    personality: character.personality ?? profileText("personality"),
+    development: character.arc ?? profileText("development"),
+    background: profileText("background"),
+    outerGoal: profileText("outerGoal"),
+    currentGoal: profileText("currentGoal") ?? profileText("outerGoal"),
+    relationToProtagonist: profileText("relationToProtagonist"),
+    storyFunction: profileText("storyFunction"),
+    novelId: character.novelId,
+    createdAt: iso(character.createdAt),
+    updatedAt: iso(character.updatedAt),
+  };
+}
+
+/**
+ * 桌面本地内核没有独立的小说世界副本表：本书世界通过 novel.world_id 绑定
+ * 世界库里的一份世界。这里把两者组合成界面需要的 NovelWorldView。
+ */
+function buildNovelWorldView(
+  novel: transport.NovelDetail,
+  world: transport.World | null,
+  sourceType: "manual" | "imported",
+): NovelWorldView {
+  const novelWorld = world
+    ? {
+        id: world.id,
+        novelId: novel.id,
+        sourceWorldId: world.id,
+        sourceType,
+        title: world.name,
+        coverSummary: world.overviewSummary || world.description || null,
+        syncEnabled: false,
+        syncDirection: "none" as const,
+        syncBaseVersion: 1,
+        lastSyncedAt: null,
+        syncPendingChangeCount: 0,
+        syncPendingSections: [],
+        syncPendingSummary: null,
+        hasStructuredData: false,
+        hasStorySlice: false,
+        storySliceBuiltAt: null,
+        createdAt: iso(world.createdAt),
+        updatedAt: iso(world.updatedAt),
+      }
+    : null;
+  return {
+    hasNovelWorld: Boolean(novelWorld),
+    novelWorld,
+    handbook: null,
+    assets: [],
+    syncHistory: [],
+  };
+}
+
+function randomCharacterId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `character-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 async function listNovelPage(config: AxiosRequestConfig): Promise<ApiResponse<NovelListResponse>> {
@@ -573,6 +650,133 @@ async function route(config: InternalAxiosRequestConfig): Promise<unknown> {
       updatedAt: iso(world.updatedAt),
     })));
   }
+  const novelCharacters = path.match(/^\/novels\/([^/]+)\/characters$/);
+  if (novelCharacters) {
+    const id = decodeURIComponent(novelCharacters[1]!);
+    if (method === "get") {
+      return ok((await transport.listCharacters(id)).map(toCharacterShape));
+    }
+    if (method === "post") {
+      const payload = asRecord(config.data);
+      const name = typeof payload.name === "string" ? payload.name.trim() : "";
+      if (!name) {
+        routeError("人物名字不能为空。", "VALIDATION", config, 400);
+      }
+      const role = typeof payload.role === "string" && payload.role.trim()
+        ? payload.role.trim()
+        : "配角";
+      const profile: Record<string, unknown> = {};
+      for (const key of [
+        "personality",
+        "background",
+        "development",
+        "outerGoal",
+        "currentGoal",
+        "relationToProtagonist",
+        "storyFunction",
+        "fear",
+        "wound",
+        "secret",
+        "moralLine",
+        "appearance",
+        "voiceTexture",
+      ]) {
+        const value = payload[key];
+        if (typeof value === "string" && value.trim()) {
+          profile[key] = value.trim();
+        }
+      }
+      const created = await transport.createCharacter({
+        id: randomCharacterId(),
+        novelId: id,
+        name,
+        role,
+        profile,
+      });
+      return ok(toCharacterShape(created));
+    }
+  }
+
+  const novelWorld = path.match(/^\/novels\/([^/]+)\/novel-world(?:\/(manual|import|generate|save-to-library|sync-diff))?$/);
+  if (novelWorld) {
+    const id = decodeURIComponent(novelWorld[1]!);
+    const action = novelWorld[2];
+    const novel = await transport.getNovel(id);
+    const worlds = await transport.listWorlds();
+    const currentWorld = worlds.find((world) => world.id === novel.worldId) ?? null;
+    if (!action && method === "get") {
+      return ok(buildNovelWorldView(novel, currentWorld, "imported"));
+    }
+    if (action === "sync-diff" && method === "get") {
+      return ok({
+        canSync: false,
+        reason: "桌面版的世界设定独立保存在本地，暂不与外部世界库同步。",
+        novelWorldId: currentWorld?.id ?? null,
+        sourceWorldId: currentWorld?.id ?? null,
+        sourceWorldName: currentWorld?.name ?? null,
+        differenceCount: 0,
+        differences: [],
+      });
+    }
+    if (action === "manual" && method === "post") {
+      const payload = asRecord(config.data);
+      const title = typeof payload.title === "string" && payload.title.trim()
+        ? payload.title.trim()
+        : "未命名世界";
+      const summary = typeof payload.coverSummary === "string" ? payload.coverSummary.trim() : "";
+      const world = await transport.createWorld({
+        name: title,
+        description: summary,
+        overviewSummary: summary,
+      });
+      const updated = await transport.updateNovel({ novelId: id, worldId: world.id });
+      return ok(buildNovelWorldView(updated, world, "manual"));
+    }
+    if (action === "import" && method === "post") {
+      const payload = asRecord(config.data);
+      const worldId = typeof payload.worldId === "string" ? payload.worldId : "";
+      const world = worlds.find((item) => item.id === worldId);
+      if (!world) {
+        routeError("没有找到这个世界。", "NOT_FOUND", config, 404);
+      }
+      const updated = await transport.updateNovel({ novelId: id, worldId: world.id });
+      return ok(buildNovelWorldView(updated, world, "imported"));
+    }
+    if (action === "generate" && method === "post") {
+      routeError(
+        "桌面版暂不支持自动生成世界，请使用自定义空白手册或从样本库导入。",
+        "NOT_MIGRATED",
+        config,
+        501,
+      );
+    }
+    if (action === "save-to-library" && method === "post") {
+      return ok(buildNovelWorldView(novel, currentWorld, "manual"));
+    }
+  }
+
+  const novelWorldSlice = path.match(/^\/novels\/([^/]+)\/world-slice$/);
+  if (novelWorldSlice && method === "get") {
+    const id = decodeURIComponent(novelWorldSlice[1]!);
+    const [novel, worlds] = await Promise.all([
+      transport.getNovel(id),
+      transport.listWorlds(),
+    ]);
+    const world = worlds.find((item) => item.id === novel.worldId) ?? null;
+    return ok({
+      hasWorld: Boolean(world),
+      worldId: world?.id ?? null,
+      worldName: world?.name ?? null,
+      slice: null,
+      overrides: {},
+      availableRules: [],
+      availableForces: [],
+      availableLocations: [],
+      storyInputSource: null,
+      isStale: false,
+    });
+  }
+
   const novelDetail = path.match(/^\/novels\/([^/]+)$/);
   if (novelDetail) {
     const id = decodeURIComponent(novelDetail[1]!);

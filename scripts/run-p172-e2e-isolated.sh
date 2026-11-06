@@ -34,6 +34,7 @@ if [[ ${#SPECS[@]} -eq 0 ]]; then
     e2e/p17-3-context.e2e.js
     e2e/p17-4-plot-timeline.e2e.js
     e2e/p17-4-7-chapter-creation.e2e.js
+    e2e/p17-4-7-agent-d-fix.e2e.js
   )
 fi
 

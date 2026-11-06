@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { APP_RUNTIME } from "@/lib/constants";
 import type { CharacterCreateDialogProps } from "./characterPanel.types";
 
 interface CharacterCreateDialogFullProps extends CharacterCreateDialogProps {
@@ -45,7 +46,9 @@ export default function CharacterCreateDialog(props: CharacterCreateDialogFullPr
   const [storyFunction, setStoryFunction] = useState("");
   const [wizardKeywords, setWizardKeywords] = useState("");
   const [autoGenerateProfile, setAutoGenerateProfile] = useState(true);
+  const [manualGoal, setManualGoal] = useState("");
   const previousQuickCreating = useRef(isQuickCreating);
+  const isDesktop = APP_RUNTIME === "desktop";
 
   useEffect(() => {
     if (previousQuickCreating.current && !isQuickCreating && !quickCharacterForm.name.trim()) {
@@ -54,6 +57,7 @@ export default function CharacterCreateDialog(props: CharacterCreateDialogFullPr
       setStoryFunction("");
       setWizardKeywords("");
       setAutoGenerateProfile(true);
+      setManualGoal("");
     }
     previousQuickCreating.current = isQuickCreating;
   }, [isQuickCreating, onOpenChange, quickCharacterForm.name]);
@@ -69,21 +73,37 @@ export default function CharacterCreateDialog(props: CharacterCreateDialogFullPr
     });
   };
 
+  // 桌面本地内核直接创建角色，不依赖模型；当前目标与关系随角色档案一起保存。
+  const handleManualCreate = () => {
+    onQuickCreateCharacter({
+      name: quickCharacterForm.name,
+      role: quickCharacterForm.role,
+      relationToProtagonist,
+      outerGoal: manualGoal,
+      currentGoal: manualGoal,
+      autoGenerateProfile: false,
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>新增角色</DialogTitle>
           <DialogDescription>
-            适合快速补齐阵容占位。创建后可在角色资产控制台继续完善档案、外显、资源和事件。
+            {isDesktop
+              ? "适合快速补齐阵容占位。创建后可在角色资产控制台查看角色。"
+              : "适合快速补齐阵容占位。创建后可在角色资产控制台继续完善档案、外显、资源和事件。"}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+        <div className={isDesktop ? "space-y-3" : "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]"}>
           <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-4">
             <div className="space-y-1">
-              <div className="font-medium">快速创建</div>
+              <div className="font-medium">{isDesktop ? "创建角色" : "快速创建"}</div>
               <div className="text-xs text-muted-foreground">
-                先建立可上场的人物，再让 AI 补齐性格、背景和当前目标。
+                {isDesktop
+                  ? "先建立可上场的人物；当前目标与关系会随角色档案一起保存。"
+                  : "先建立可上场的人物，再让 AI 补齐性格、背景和当前目标。"}
               </div>
             </div>
             <Input
@@ -103,34 +123,63 @@ export default function CharacterCreateDialog(props: CharacterCreateDialogFullPr
               <option value="情感线">情感线</option>
               <option value="功能角色">功能角色</option>
             </SelectControl>
-            <Input
-              placeholder="与主角关系（如：试探合作）"
-              value={relationToProtagonist}
-              onChange={(event) => setRelationToProtagonist(event.target.value)}
-            />
-            <Input
-              placeholder="在故事中的作用（如：推动真相线）"
-              value={storyFunction}
-              onChange={(event) => setStoryFunction(event.target.value)}
-            />
-            <Input
-              placeholder="角色关键词（逗号分隔）"
-              value={wizardKeywords}
-              onChange={(event) => setWizardKeywords(event.target.value)}
-            />
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={autoGenerateProfile}
-                onChange={(event) => setAutoGenerateProfile(event.target.checked)}
-              />
-              自动补齐性格、背景、成长弧和当前状态
-            </label>
-            <AiButton onClick={handleQuickCreate} disabled={isQuickCreating || !quickCharacterForm.name.trim()}>
-              {isQuickCreating ? "生成中..." : "AI 生成角色卡"}
-            </AiButton>
+            {!isDesktop ? (
+              <>
+                <Input
+                  placeholder="与主角关系（如：试探合作）"
+                  value={relationToProtagonist}
+                  onChange={(event) => setRelationToProtagonist(event.target.value)}
+                />
+                <Input
+                  placeholder="在故事中的作用（如：推动真相线）"
+                  value={storyFunction}
+                  onChange={(event) => setStoryFunction(event.target.value)}
+                />
+                <Input
+                  placeholder="角色关键词（逗号分隔）"
+                  value={wizardKeywords}
+                  onChange={(event) => setWizardKeywords(event.target.value)}
+                />
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={autoGenerateProfile}
+                    onChange={(event) => setAutoGenerateProfile(event.target.checked)}
+                  />
+                  自动补齐性格、背景、成长弧和当前状态
+                </label>
+                <AiButton onClick={handleQuickCreate} disabled={isQuickCreating || !quickCharacterForm.name.trim()}>
+                  {isQuickCreating ? "生成中..." : "AI 生成角色卡"}
+                </AiButton>
+              </>
+            ) : (
+              <>
+                <Input
+                  placeholder="当前目标（例如：三个月内突破）"
+                  value={manualGoal}
+                  onChange={(event) => setManualGoal(event.target.value)}
+                />
+                <Input
+                  placeholder="与主角关系（如：试探合作）"
+                  value={relationToProtagonist}
+                  onChange={(event) => setRelationToProtagonist(event.target.value)}
+                />
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={handleManualCreate}
+                  disabled={isQuickCreating || !quickCharacterForm.name.trim()}
+                >
+                  {isQuickCreating ? "创建中..." : "直接创建空白角色"}
+                </Button>
+                <div className="text-xs leading-5 text-muted-foreground">
+                  不需要模型。当前目标与关系会保存到角色档案。
+                </div>
+              </>
+            )}
           </div>
 
+          {!isDesktop ? (
           <div className="space-y-3 rounded-xl border border-border/70 bg-background p-4">
             <div className="space-y-1">
               <div className="font-medium">从基础角色库导入</div>
@@ -186,6 +235,7 @@ export default function CharacterCreateDialog(props: CharacterCreateDialogFullPr
               </div>
             )}
           </div>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

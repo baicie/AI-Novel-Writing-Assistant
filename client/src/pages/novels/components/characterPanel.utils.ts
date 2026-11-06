@@ -25,6 +25,8 @@ export interface QuickCharacterCreatePayload {
   role: string;
   relationToProtagonist?: string;
   storyFunction?: string;
+  outerGoal?: string;
+  currentGoal?: string;
   keywords?: string;
   autoGenerateProfile?: boolean;
 }

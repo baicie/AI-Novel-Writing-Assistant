@@ -599,14 +599,17 @@ impl NovelRepository for SqliteKernel {
         &self,
         character: NewCharacter,
     ) -> Result<CharacterSnapshot, PortError> {
+        let profile = serde_json::to_string(&character.profile)
+            .unwrap_or_else(|_| "{}".to_string());
         sqlx::query(
             "INSERT INTO character(id, novel_id, name, role, profile_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, '{}', ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&character.id)
         .bind(&character.novel_id)
         .bind(&character.name)
         .bind(&character.role)
+        .bind(&profile)
         .bind(character.now_ms)
         .bind(character.now_ms)
         .execute(&self.pool)
@@ -617,9 +620,9 @@ impl NovelRepository for SqliteKernel {
             novel_id: character.novel_id,
             name: character.name,
             role: character.role,
-            personality: None,
-            arc: None,
-            profile: serde_json::json!({}),
+            personality: character.profile.get("personality").and_then(|value| value.as_str()).map(str::to_string),
+            arc: character.profile.get("development").and_then(|value| value.as_str()).map(str::to_string),
+            profile: character.profile,
             created_at: character.now_ms,
             updated_at: character.now_ms,
         })
