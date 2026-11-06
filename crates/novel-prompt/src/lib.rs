@@ -59,6 +59,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_list\n依据卷策略输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames）。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
         },
         PromptAsset {
+            id: "chapter_list",
+            version: "chapter-list-v2",
+            family: "director",
+            template: "STEP:chapter_list\n依据 story_macro、卷策略与人物阵容输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames、obligations）。obligations 是本章必须遵守的结构化义务数组，可以为空但不能省略；每项包含 id、type、description、enforcement、participants、source、evidence。type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory。required_event 写本章必须发生的关键事件；forbidden_event 写不得提前或错误发生的事件；causal_constraint 写关键因果；ordering_constraint 写关键顺序；continuity_constraint 写已确认历史事实约束。id 使用 ch{chapterOrder}-{类型缩写}-{序号}，全书唯一。只把会改变剧情因果、参与者或时间顺序的要求写成 hard；普通文学描写写成 advisory 或不要写成义务。不得引用未来章节才揭示的事实。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
+        },
+        PromptAsset {
             id: "structured_repair",
             version: "structured-repair-v1",
             family: "director",
@@ -71,6 +77,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题和已确认上下文修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
         },
         PromptAsset {
+            id: "chapter_repair",
+            version: "chapter-repair-v2",
+            family: "director",
+            template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题、已确认上下文和本章硬约束修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。不得改写本章硬约束中的关键事件、参与者、因果与顺序，也不得通过修改计划来迁就正文；只在正文层面修复。\n本章硬约束义务：\n{{obligations}}\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
+        },
+        PromptAsset {
             id: "memory_extraction",
             version: "memory-extraction-v1",
             family: "memory",
@@ -81,6 +93,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             version: "consistency-review-v1",
             family: "director",
             template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；无问题用空数组）。不要返回 Markdown。不要把调用失败当作没有问题。\n{{context}}",
+        },
+        PromptAsset {
+            id: "consistency_review",
+            version: "consistency-review-v2",
+            family: "director",
+            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；如违反结构化章节义务，必须填写 obligationId，且只能使用上下文中列出的义务 ID；必要时填写 violationType、needsAuthorConfirmation；无问题用空数组）。evidence 必须逐字引用候选正文，不得引用历史正文。不要把调用失败或无法判断当作没有问题；不得编造 obligationId。不要返回 Markdown。\n{{context}}",
         },
         PromptAsset {
             id: "chapter_selection_rewrite",
@@ -167,5 +185,38 @@ mod tests {
                 "缺少 {key} 时必须拒绝渲染"
             );
         }
+    }
+
+    #[test]
+    fn free_draft_v1_remains_a_single_prompt_without_obligations() {
+        let asset = resolve("chapter_draft", "chapter-draft-v1").unwrap();
+        assert!(!asset.template.contains("{{context}}"));
+        assert!(!asset.template.contains("obligations"));
+        let mut vars = BTreeMap::new();
+        vars.insert("brief".into(), "自由创作".into());
+        let rendered = render(asset.template, &vars).unwrap();
+        assert!(rendered.contains("自由创作"));
+    }
+
+    #[test]
+    fn obligation_aware_prompts_are_versioned_and_require_the_slot() {
+        assert!(resolve("chapter_list", "chapter-list-v1").is_ok());
+        assert!(resolve("chapter_list", "chapter-list-v2").is_ok());
+        assert!(resolve("consistency_review", "consistency-review-v2").is_ok());
+        assert!(resolve("chapter_repair", "chapter-repair-v2").is_ok());
+
+        let repair = resolve("chapter_repair", "chapter-repair-v2").unwrap();
+        let mut vars = BTreeMap::new();
+        vars.insert("context".into(), "上下文".into());
+        vars.insert("issues".into(), "[]".into());
+        vars.insert("candidate".into(), "候选".into());
+        assert!(
+            render(repair.template, &vars).is_err(),
+            "missing obligations must not render with an empty slot"
+        );
+        vars.insert("obligations".into(), "[ch1-req-1] 硬约束".into());
+        let rendered = render(repair.template, &vars).unwrap();
+        assert!(rendered.contains("ch1-req-1"));
+        assert!(rendered.contains("不得改写"));
     }
 }

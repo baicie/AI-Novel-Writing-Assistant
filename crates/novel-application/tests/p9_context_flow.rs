@@ -184,7 +184,7 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
         .find(|artifact| artifact.artifact_type == "context")
         .expect("context artifact");
     let payload: serde_json::Value = serde_json::from_str(&context.payload_json).unwrap();
-    assert_eq!(payload["trace"]["assemblyVersion"], "director-context-v1");
+    assert_eq!(payload["trace"]["assemblyVersion"], "director-context-v2");
     assert!(
         payload["trace"]["sources"]
             .as_array()

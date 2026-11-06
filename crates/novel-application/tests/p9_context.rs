@@ -199,7 +199,7 @@ async fn context_is_real_traceable_deterministic_and_scoped() {
     .unwrap();
     assert_eq!(first.prompt_text, second.prompt_text);
     assert_eq!(first.trace.content_hash, second.trace.content_hash);
-    assert_eq!(first.trace.assembly_version, "director-context-v1");
+    assert_eq!(first.trace.assembly_version, "director-context-v2");
     assert!(first.prompt_text.contains("宗门以剑为尊"));
     assert!(first.prompt_text.contains("林动"));
     assert!(first.prompt_text.contains("第一章正式正文"));

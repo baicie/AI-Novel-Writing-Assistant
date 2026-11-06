@@ -26,6 +26,7 @@ mod knowledge;
 #[allow(clippy::too_many_arguments)]
 mod memory;
 mod native_tasks;
+mod obligations;
 mod plot;
 #[allow(clippy::too_many_arguments)]
 mod ports;

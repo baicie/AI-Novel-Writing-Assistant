@@ -310,13 +310,14 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
         }
         "chapter_list" => {
             let chapters = value
-                .get("chapters")
-                .and_then(serde_json::Value::as_array)
+                .get_mut("chapters")
+                .and_then(serde_json::Value::as_array_mut)
                 .ok_or("章节计划缺少 chapters")?;
             if chapters.is_empty() {
                 return Err("章节计划不能为空".into());
             }
             let mut orders = std::collections::BTreeSet::new();
+            let mut obligation_ids = std::collections::BTreeSet::new();
             for chapter in chapters {
                 for key in ["title", "volumeTitle", "summary"] {
                     required_string(chapter, key)?;
@@ -331,6 +332,11 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                 if chapter.get("characterNames").is_some_and(|v| !v.is_array()) {
                     return Err("章节计划 characterNames 必须是数组".into());
                 }
+                crate::obligations::normalize_chapter_obligations(
+                    chapter,
+                    order,
+                    &mut obligation_ids,
+                )?;
             }
         }
         "consistency_review" => {
@@ -345,6 +351,18 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                 for key in ["type", "severity", "evidence", "suggestion"] {
                     required_string(issue, key)?;
                 }
+                if issue
+                    .get("obligationId")
+                    .is_some_and(|value| !value.is_null() && !value.is_string())
+                {
+                    return Err("审校 obligationId 必须是字符串".into());
+                }
+                if issue
+                    .get("needsAuthorConfirmation")
+                    .is_some_and(|value| !value.is_null() && !value.is_boolean())
+                {
+                    return Err("审校 needsAuthorConfirmation 必须是布尔值".into());
+                }
                 let issue_id = issue
                     .get("issueId")
                     .or_else(|| issue.get("id"))
@@ -357,7 +375,7 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                         )
                     });
                 let identity = format!(
-                    "{}|{}|{}",
+                    "{}|{}|{}|{}",
                     issue
                         .get("type")
                         .and_then(serde_json::Value::as_str)
@@ -368,6 +386,10 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                         .unwrap_or_default(),
                     issue
                         .get("suggestion")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    issue
+                        .get("obligationId")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or_default(),
                 );
@@ -395,6 +417,12 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
                     "description": description,
                     "evidence": issue["evidence"],
                     "suggestion": issue["suggestion"],
+                    "obligationId": issue.get("obligationId").cloned().unwrap_or(serde_json::Value::Null),
+                    "violationType": issue.get("violationType").cloned().unwrap_or(serde_json::Value::Null),
+                    "needsAuthorConfirmation": issue
+                        .get("needsAuthorConfirmation")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
                     "sourceRef": issue.get("sourceRef").cloned().unwrap_or(serde_json::Value::Null),
                 }));
             }
@@ -518,5 +546,50 @@ mod tests {
         assert_eq!(value["expansion"]["mystery_box"], "谜一；谜二");
         assert_eq!(value["expansion"]["expanded_premise"], "前提");
         assert_eq!(value["decomposition"]["selling_point"], "卖点");
+    }
+
+    #[test]
+    fn chapter_list_normalizes_obligations_and_assigns_stable_ids() {
+        let raw = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "林动撞见灭口",
+                "characterNames": ["林动"],
+                "obligations": [{
+                    "type": "requiredEvent",
+                    "description": "林动亲眼撞见老铁匠被杀",
+                    "participants": ["林动", "老铁匠"],
+                    "evidence": ["第1章计划"]
+                }]
+            }]
+        })
+        .to_string();
+        let output = validate_structured_output("chapter_list", &raw).expect("章节计划应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        let obligation = &value["chapters"][0]["obligations"][0];
+        assert_eq!(obligation["id"], "ch1-req-1");
+        assert_eq!(obligation["chapterOrder"], 1);
+        assert_eq!(obligation["type"], "required_event");
+        assert_eq!(obligation["enforcement"], "hard");
+        assert_eq!(obligation["participants"][0], "林动");
+    }
+
+    #[test]
+    fn legacy_chapter_list_without_obligations_remains_readable() {
+        let raw = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"]
+            }]
+        })
+        .to_string();
+        let output = validate_structured_output("chapter_list", &raw).expect("旧计划应兼容");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        assert!(value["chapters"][0].get("obligations").is_none());
     }
 }

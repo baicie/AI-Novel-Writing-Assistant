@@ -13,7 +13,7 @@ use crate::error::AppError;
 use crate::hash::sha256_hex;
 use crate::ports::NovelRepository;
 
-pub const CONTEXT_ASSEMBLY_VERSION: &str = "director-context-v1";
+pub const CONTEXT_ASSEMBLY_VERSION: &str = "director-context-v2";
 pub const DEFAULT_CONTEXT_TOKEN_BUDGET: u64 = 24_000;
 pub const DEFAULT_OUTPUT_RESERVE: u64 = 8_000;
 /// 预览入口的硬上限：任何调用方都不能把整本书塞进一次上下文。
@@ -54,6 +54,12 @@ pub struct ContextTrace {
 pub struct ContextAssembly {
     pub prompt_text: String,
     pub trace: ContextTrace,
+    /// 目标章节使用的 chapter_list 产物版本；旧计划没有章节义务时仍会填写。
+    pub chapter_plan_version: Option<i64>,
+    /// 目标章节的结构化义务 ID，供 Writer/Reviewer/Repair 追踪。
+    pub obligation_ids: Vec<String>,
+    /// 已渲染的硬约束文本；为空表示旧计划没有结构化义务。
+    pub obligations_text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -144,6 +150,47 @@ fn chapter_plan_for_target(
         .cloned()
 }
 
+/// Resolve the frozen target chapter plan from the latest non-stale chapter_list
+/// artifact. This is used by review/repair so they never fall back to the whole
+/// book plan (which would leak future chapters into the current context).
+pub(crate) fn target_plan_from_artifacts(
+    artifacts: &[ArtifactView],
+    target_order: i32,
+) -> Result<serde_json::Value, AppError> {
+    let (artifact, missing) = artifact_source(artifacts, "chapter_list", book_scope());
+    let artifact = artifact.ok_or_else(|| {
+        AppError::integrity(format!(
+            "缺少可用的章节计划（{}），不能生成或审校没有计划约束的正文。",
+            missing.unwrap_or("missing")
+        ))
+    })?;
+    let plan = payload(&artifact.payload_json, "chapter_list")?;
+    plan.get("chapters")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|chapters| {
+            chapters.iter().find(|chapter| {
+                chapter
+                    .get("chapterOrder")
+                    .and_then(serde_json::Value::as_i64)
+                    == Some(i64::from(target_order))
+            })
+        })
+        .cloned()
+        .ok_or_else(|| {
+            AppError::integrity(format!(
+                "章节计划缺少目标章节 {target_order}，不能生成或审校没有计划约束的正文。"
+            ))
+        })
+}
+
+pub(crate) fn target_obligations_from_artifacts(
+    artifacts: &[ArtifactView],
+    target_order: i32,
+) -> Result<Vec<crate::obligations::ChapterObligation>, AppError> {
+    let plan = target_plan_from_artifacts(artifacts, target_order)?;
+    Ok(crate::obligations::parse_obligations(&plan))
+}
+
 /// Assemble chapter context from the frozen run artifacts and the confirmed
 /// SQLite novel/chapter/character/world snapshot.
 pub async fn assemble_director_context(
@@ -214,6 +261,9 @@ async fn assemble_context(
     let target = novels.get_chapter(novel_id, target_chapter_id).await?;
     let mut drafts: Vec<SourceDraft> = Vec::new();
     let mut blocked_reasons: Vec<String> = Vec::new();
+    let mut chapter_plan_version: Option<i64> = None;
+    let mut obligation_ids: Vec<String> = Vec::new();
+    let mut obligations_text = String::new();
 
     let seed = serde_json::json!({
         "title": novel.title,
@@ -267,9 +317,23 @@ async fn assemble_context(
         let value = payload(&artifact.payload_json, artifact_type)?;
         let text = if artifact_type == "chapter_list" {
             match chapter_plan_for_target(&value, &target) {
-                Some(target_plan) => serde_json::to_string(&target_plan)
-                    .map_err(|_| AppError::integrity("章节计划无法序列化"))?,
+                Some(target_plan) => {
+                    let obligations = crate::obligations::parse_obligations(&target_plan);
+                    chapter_plan_version = Some(artifact.version);
+                    obligation_ids = crate::obligations::obligation_ids(&obligations);
+                    obligations_text = crate::obligations::render_obligations(&obligations);
+                    serde_json::to_string(&target_plan)
+                        .map_err(|_| AppError::integrity("章节计划无法序列化"))?
+                }
                 None => {
+                    let reason = format!(
+                        "目标章节 {} 没有章节计划（chapterOrder 不匹配或计划缺失），不能生成没有计划约束的正文。",
+                        target.sort_order
+                    );
+                    if strict {
+                        return Err(AppError::integrity(reason));
+                    }
+                    blocked_reasons.push(reason);
                     drafts.push(SourceDraft {
                         source_type: artifact_type,
                         source_id: format!(
@@ -277,7 +341,7 @@ async fn assemble_context(
                             artifact.scope, artifact.version
                         ),
                         source_version: Some(artifact.version),
-                        source_status: artifact.status.as_str().to_string(),
+                        source_status: "target_chapter_missing".into(),
                         text: String::new(),
                         mandatory: false,
                         priority,
@@ -298,6 +362,20 @@ async fn assemble_context(
             mandatory,
             priority,
         });
+        if artifact_type == "chapter_list" && !obligations_text.is_empty() {
+            drafts.push(SourceDraft {
+                source_type: "chapter_obligations",
+                source_id: format!(
+                    "chapter_obligations:{}:{}",
+                    artifact.scope, artifact.version
+                ),
+                source_version: Some(artifact.version),
+                source_status: artifact.status.as_str().to_string(),
+                text: obligations_text.clone(),
+                mandatory: true,
+                priority,
+            });
+        }
     }
 
     let characters = novels.list_characters(novel_id).await?;
@@ -524,6 +602,9 @@ async fn assemble_context(
     Ok(AssemblyOutcome {
         assembly: ContextAssembly {
             prompt_text,
+            chapter_plan_version,
+            obligation_ids,
+            obligations_text,
             trace: ContextTrace {
                 assembly_version: CONTEXT_ASSEMBLY_VERSION.to_string(),
                 target_chapter_id: target.id,
