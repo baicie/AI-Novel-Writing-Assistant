@@ -93,9 +93,37 @@ fn required_string(value: &serde_json::Value, key: &str) -> Result<(), String> {
     }
 }
 
+/// 模型常把 story_macro.mystery_box 写成字符串数组；下游和校验都按字符串使用。
+/// 这是对已解析结构化输出的确定性归一化，不改变模型决策。
+fn normalize_story_macro(value: &mut serde_json::Value) {
+    let Some(expansion) = value
+        .get_mut("expansion")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    let Some(mystery_box) = expansion.get_mut("mystery_box") else {
+        return;
+    };
+    let Some(items) = mystery_box.as_array() else {
+        return;
+    };
+    let joined = items
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("；");
+    *mystery_box = serde_json::Value::String(joined);
+}
+
 pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<String, String> {
-    let value: serde_json::Value =
+    let mut value: serde_json::Value =
         serde_json::from_str(raw).map_err(|_| "模型输出不是合法 JSON".to_string())?;
+    if step_id == "story_macro" {
+        normalize_story_macro(&mut value);
+    }
     match step_id {
         "story_macro" => {
             let expansion = value.get("expansion").ok_or("Story Macro 缺少 expansion")?;
@@ -304,4 +332,40 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
         _ => return Err("未知的结构化步骤".into()),
     }
     serde_json::to_string(&value).map_err(|_| "结构化产物无法序列化".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_structured_output;
+
+    #[test]
+    fn story_macro_normalizes_mystery_box_array_to_string() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expanded_premise": "前提",
+                "protagonist_core": "主角",
+                "conflict_engine": "冲突",
+                "conflict_layers": { "external": "外部压力" },
+                "mystery_box": ["谜一", "谜二"],
+                "emotional_line": "成长",
+                "setpiece_seeds": ["场面"],
+                "tone_reference": "冷峻"
+            },
+            "decomposition": {
+                "selling_point": "卖点",
+                "core_conflict": "冲突",
+                "main_hook": "钩子",
+                "progression_loop": "循环",
+                "growth_path": "成长",
+                "ending_flavor": "结局"
+            },
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+
+        let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
+        assert_eq!(value["expansion"]["mystery_box"], "谜一；谜二");
+    }
 }
