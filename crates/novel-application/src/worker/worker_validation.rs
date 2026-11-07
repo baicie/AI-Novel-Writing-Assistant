@@ -38,6 +38,7 @@ pub(crate) fn validate_chapter_plan_references(
     payload: &str,
     cast: &serde_json::Value,
     volume: &serde_json::Value,
+    macro_payload: &serde_json::Value,
 ) -> Result<String, AppError> {
     let plan: serde_json::Value =
         serde_json::from_str(payload).map_err(|_| AppError::integrity("章节计划无法解析"))?;
@@ -55,6 +56,17 @@ pub(crate) fn validate_chapter_plan_references(
         .flatten()
         .filter_map(|volume| volume.get("title").and_then(serde_json::Value::as_str))
         .collect();
+    let key_events: Vec<&serde_json::Value> = macro_payload
+        .get("keyEvents")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default();
+    let mut key_events_by_id = std::collections::BTreeMap::new();
+    for event in &key_events {
+        if let Some(id) = event.get("id").and_then(serde_json::Value::as_str) {
+            key_events_by_id.insert(id, *event);
+        }
+    }
     let chapters = plan
         .get("chapters")
         .and_then(serde_json::Value::as_array)
@@ -75,6 +87,81 @@ pub(crate) fn validate_chapter_plan_references(
                 if !member_names.contains(name) {
                     return Err(AppError::validation("章节计划引用了不存在的人物"));
                 }
+            }
+        }
+        let chapter_order = chapter
+            .get("chapterOrder")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or_default();
+        let obligations = chapter
+            .get("obligations")
+            .and_then(serde_json::Value::as_array);
+        if let Some(obligations) = obligations {
+            for obligation in obligations {
+                let Some(source_event_id) = obligation
+                    .get("sourceEventId")
+                    .and_then(serde_json::Value::as_str)
+                else {
+                    continue;
+                };
+                let event = key_events_by_id.get(source_event_id).ok_or_else(|| {
+                    AppError::validation(format!(
+                        "章节计划第 {chapter_order} 章引用了不存在的 story_macro.keyEvents：{source_event_id}"
+                    ))
+                })?;
+                if event
+                    .get("chapterOrder")
+                    .and_then(serde_json::Value::as_i64)
+                    != Some(chapter_order)
+                {
+                    return Err(AppError::validation(format!(
+                        "章节计划第 {chapter_order} 章的 sourceEventId {source_event_id} 指向了其他章节的关键事件"
+                    )));
+                }
+                if event.get("type").and_then(serde_json::Value::as_str)
+                    != obligation.get("type").and_then(serde_json::Value::as_str)
+                {
+                    return Err(AppError::validation(format!(
+                        "章节计划第 {chapter_order} 章的关键事件 {source_event_id} 类型与义务不一致"
+                    )));
+                }
+            }
+        }
+        for event in &key_events {
+            if event
+                .get("chapterOrder")
+                .and_then(serde_json::Value::as_i64)
+                != Some(chapter_order)
+            {
+                continue;
+            }
+            if event.get("enforcement").and_then(serde_json::Value::as_str) != Some("hard") {
+                continue;
+            }
+            let event_id = event
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let covered = obligations.is_some_and(|items| {
+                items.iter().any(|obligation| {
+                    obligation
+                        .get("sourceEventId")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(event_id)
+                        && obligation
+                            .get("enforcement")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("hard")
+                })
+            });
+            if !covered {
+                let description = event
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default();
+                return Err(AppError::validation(format!(
+                    "章节计划第 {chapter_order} 章未覆盖 story_macro 关键事件 {event_id}：{description}"
+                )));
             }
         }
     }
@@ -246,6 +333,7 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
             {
                 return Err("Story Macro constraints/issues 必须是数组".into());
             }
+            crate::obligations::normalize_story_key_events(&mut value)?;
         }
         "character_cast" => {
             let members = value
@@ -445,7 +533,7 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
 
 #[cfg(test)]
 mod tests {
-    use super::validate_structured_output;
+    use super::{validate_chapter_plan_references, validate_structured_output};
 
     #[test]
     fn story_macro_normalizes_mystery_box_array_to_string() {
@@ -546,6 +634,103 @@ mod tests {
         assert_eq!(value["expansion"]["mystery_box"], "谜一；谜二");
         assert_eq!(value["expansion"]["expanded_premise"], "前提");
         assert_eq!(value["decomposition"]["selling_point"], "卖点");
+    }
+
+    #[test]
+    fn story_macro_key_events_are_normalized() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expanded_premise": "前提",
+                "protagonist_core": "主角",
+                "conflict_engine": "冲突",
+                "conflict_layers": { "external": "外部压力" },
+                "mystery_box": "谜",
+                "emotional_line": "成长",
+                "setpiece_seeds": ["场面"],
+                "tone_reference": "冷峻"
+            },
+            "decomposition": {
+                "selling_point": "卖点",
+                "core_conflict": "冲突",
+                "main_hook": "钩子",
+                "progression_loop": "循环",
+                "growth_path": "成长",
+                "ending_flavor": "结局"
+            },
+            "keyEvents": [{
+                "chapterOrder": 1,
+                "type": "requiredEvent",
+                "description": "林动亲眼撞见老铁匠被灭口",
+                "participants": ["林动", "老铁匠"]
+            }],
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+        let output = validate_structured_output("story_macro", &raw).expect("story macro 应通过");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON");
+        assert_eq!(value["keyEvents"][0]["id"], "ch1-event-1");
+        assert_eq!(value["keyEvents"][0]["type"], "required_event");
+    }
+
+    #[test]
+    fn empty_story_macro_key_events_are_rejected() {
+        let raw = serde_json::json!({
+            "expansion": {
+                "expanded_premise": "前提", "protagonist_core": "主角",
+                "conflict_engine": "冲突", "conflict_layers": {"external": "外部压力"},
+                "mystery_box": "谜", "emotional_line": "成长",
+                "setpiece_seeds": ["场面"], "tone_reference": "冷峻"
+            },
+            "decomposition": {
+                "selling_point": "卖点", "core_conflict": "冲突", "main_hook": "钩子",
+                "progression_loop": "循环", "growth_path": "成长", "ending_flavor": "结局"
+            },
+            "keyEvents": [],
+            "constraints": [],
+            "issues": []
+        })
+        .to_string();
+        let error = validate_structured_output("story_macro", &raw).unwrap_err();
+        assert!(error.contains("不能为空"), "{error}");
+    }
+
+    #[test]
+    fn chapter_plan_must_cover_hard_story_key_events() {
+        let cast = serde_json::json!({"members": [{"name": "林动"}]});
+        let volume = serde_json::json!({"volumes": [{"title": "卷一"}]});
+        let macro_payload = serde_json::json!({
+            "keyEvents": [{
+                "id": "ch1-event-1",
+                "chapterOrder": 1,
+                "type": "required_event",
+                "description": "林动亲眼撞见老铁匠被灭口",
+                "enforcement": "hard"
+            }]
+        });
+        let covered = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1, "title": "第一章", "volumeTitle": "卷一",
+                "summary": "林动撞见灭口", "characterNames": ["林动"],
+                "obligations": [{
+                    "id": "ch1-req-1", "chapterOrder": 1, "type": "required_event",
+                    "description": "林动亲眼撞见老铁匠被灭口", "enforcement": "hard",
+                    "sourceEventId": "ch1-event-1"
+                }]
+            }]
+        })
+        .to_string();
+        assert!(validate_chapter_plan_references(&covered, &cast, &volume, &macro_payload).is_ok());
+
+        let missing = covered.replace(",\"sourceEventId\":\"ch1-event-1\"", "");
+        let error =
+            validate_chapter_plan_references(&missing, &cast, &volume, &macro_payload).unwrap_err();
+        assert!(error.to_string().contains("未覆盖"), "{error}");
+
+        let unknown = covered.replace("ch1-event-1", "missing-event");
+        let error =
+            validate_chapter_plan_references(&unknown, &cast, &volume, &macro_payload).unwrap_err();
+        assert!(error.to_string().contains("不存在"), "{error}");
     }
 
     #[test]
