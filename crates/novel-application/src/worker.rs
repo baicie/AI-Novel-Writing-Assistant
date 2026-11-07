@@ -1219,6 +1219,20 @@ impl Worker {
         reason: &str,
         step_id: Option<String>,
     ) -> Result<TickOutcome, AppError> {
+        self.pause_with_artifact(claimed, signal, reason, step_id, None)
+            .await
+    }
+
+    /// Pause and persist a diagnostic artifact in the same control write, so a
+    /// failed structured step leaves its raw output for post-mortem analysis.
+    async fn pause_with_artifact(
+        &self,
+        claimed: &ClaimedRun,
+        signal: StopSignalKind,
+        reason: &str,
+        step_id: Option<String>,
+        artifact: Option<NewArtifact>,
+    ) -> Result<TickOutcome, AppError> {
         let pause = RunPause {
             kind: match signal {
                 StopSignalKind::MigrationReviewRequired => PauseKind::MigrationReview,
@@ -1235,7 +1249,7 @@ impl Worker {
             "run_paused",
             step_id,
             &serde_json::json!({ "reason": reason }).to_string(),
-            None,
+            artifact,
             None,
             None,
         )
@@ -1525,12 +1539,26 @@ async fn execute_structured(
                         worker.clock.now_ms(),
                     )
                     .await?;
+                let artifact = structured_failure_artifact(
+                    worker,
+                    claimed,
+                    spec,
+                    step_id,
+                    &first_error,
+                    None,
+                    &raw,
+                    None,
+                    &usage,
+                );
                 return worker
-                    .pause(
+                    .pause_with_artifact(
                         claimed,
                         StopSignalKind::DataIntegrity,
-                        &format!("一致性审校输出无效，已停止，不能当作零问题通过：{first_error}"),
+                        &format!(
+                            "一致性审校输出无效，已停止，不能当作零问题通过：{first_error}；原始输出已保存为 structured_failure 产物。"
+                        ),
                         Some(step_id.into()),
+                        Some(artifact),
                     )
                     .await;
             }
@@ -1599,12 +1627,26 @@ async fn execute_structured(
                                     worker.clock.now_ms(),
                                 )
                                 .await?;
+                            let artifact = structured_failure_artifact(
+                                worker,
+                                claimed,
+                                spec,
+                                step_id,
+                                &first_error,
+                                Some(&repair_error),
+                                &raw,
+                                Some(&repair_text),
+                                &usage,
+                            );
                             return worker
-                                .pause(
+                                .pause_with_artifact(
                                     claimed,
                                     StopSignalKind::DataIntegrity,
-                                    &format!("{first_error}；修复重试仍失败：{repair_error}"),
+                                    &format!(
+                                        "{first_error}；修复重试仍失败：{repair_error}；原始输出已保存为 structured_failure 产物。"
+                                    ),
                                     Some(step_id.into()),
+                                    Some(artifact),
                                 )
                                 .await;
                         }
@@ -1649,12 +1691,27 @@ async fn execute_structured(
                             )
                             .await;
                     }
+                    let repair_error_text = repair_error.to_string();
+                    let artifact = structured_failure_artifact(
+                        worker,
+                        claimed,
+                        spec,
+                        step_id,
+                        &first_error,
+                        Some(&repair_error_text),
+                        &raw,
+                        None,
+                        &usage,
+                    );
                     return worker
-                        .pause(
+                        .pause_with_artifact(
                             claimed,
                             StopSignalKind::ProviderUnavailable,
-                            &format!("结构化修复请求失败：{repair_error}"),
+                            &format!(
+                                "结构化修复请求失败：{repair_error_text}；原始输出已保存为 structured_failure 产物。"
+                            ),
                             Some(step_id.into()),
+                            Some(artifact),
                         )
                         .await;
                 }
@@ -2162,6 +2219,65 @@ fn repair_usage_reached_cap(usage: &TokenUsage, budget: u64) -> bool {
     usage
         .completion_tokens
         .is_some_and(|tokens| tokens >= budget)
+}
+
+/// Structured planning failures used to pause with only a one-line reason; the
+/// raw model output was lost, which made M1 failures impossible to diagnose
+/// without spending another paid call. Persist the raw outputs as a diagnostic
+/// artifact (redacted, bounded) in the same pause write.
+const STRUCTURED_FAILURE_RAW_LIMIT: usize = 200_000;
+
+fn truncate_diagnostic(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(limit).collect();
+    out.push_str("\n...[truncated]");
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn structured_failure_artifact(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    spec: &StepSpec,
+    step_id: &str,
+    first_error: &str,
+    repair_error: Option<&str>,
+    first_raw: &str,
+    repair_raw: Option<&str>,
+    usage: &TokenUsage,
+) -> NewArtifact {
+    let now = worker.clock.now_ms();
+    let scope = match spec.scope {
+        StepScope::Book => book_scope().to_string(),
+        StepScope::Chapter => chapter_scope(&claimed.contract.target_chapter_id),
+    };
+    let payload = serde_json::json!({
+        "stepId": step_id,
+        "firstError": first_error,
+        "repairError": repair_error,
+        "firstRaw": truncate_diagnostic(&redact_secrets(first_raw), STRUCTURED_FAILURE_RAW_LIMIT),
+        "repairRaw": repair_raw
+            .map(|text| truncate_diagnostic(&redact_secrets(text), STRUCTURED_FAILURE_RAW_LIMIT)),
+        "promptTokens": usage.prompt_tokens,
+        "completionTokens": usage.completion_tokens,
+        "model": claimed.contract.model,
+        "createdAt": now,
+    })
+    .to_string();
+    NewArtifact {
+        id: worker.ids.new_id(),
+        novel_id: claimed.novel_id.clone(),
+        run_id: Some(claimed.run_id.clone()),
+        artifact_type: "structured_failure".into(),
+        scope,
+        status: "confirmed".into(),
+        protected_user_content: false,
+        payload_json: payload.clone(),
+        content_sha256: sha256_hex(payload.as_bytes()),
+        created_at: now,
+    }
 }
 
 fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
