@@ -27,10 +27,12 @@ use crate::ports::{
     PromoteOutcome, WorkflowRepository,
 };
 
+mod context_budget;
 mod worker_validation;
 
+pub(super) use context_budget::context_payload;
 pub(super) use worker_validation::{
-    context_payload, latest_payload, truncate_chars, validate_chapter_plan_references,
+    latest_payload, truncate_chars, validate_chapter_plan_references,
     validate_structured_output_with,
 };
 
