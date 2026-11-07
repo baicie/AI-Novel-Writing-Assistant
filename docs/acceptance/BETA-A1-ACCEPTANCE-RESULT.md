@@ -15,12 +15,12 @@
 | 项 | 值 |
 | --- | --- |
 | `beta` 验收基线 | `90925ddd93ca041dae44778feceebf49eafad278` |
-| `beta` 当前 HEAD | `1d2adaf13d4b2996bff81b30e31dea09b90619a2`（PR #25 合并后） |
+| `beta` 当前 HEAD | `d66d565c254c8a70f11c5b5c833f50fba5f50518`（PR #26 合并后） |
 | `main` | `eff69f2`，未修改 |
 | PR #23 | 已合并；合并提交 `90925ddd` |
 | PR #24 | 已合并；合并提交 `1d21ba6b`（修复截断 P1） |
 | PR #25 | 已合并；合并提交 `1d2adaf1`（结构化失败诊断） |
-| PR #26 | Draft（Planner 关键事件覆盖；未合并） |
+| PR #26 | 已合并；合并提交 `d66d565c`（Planner 关键事件覆盖） |
 | 验收分支 | `acceptance/beta-a1`（从 `origin/beta` 创建） |
 | 桌面构建树 | 与 `6ddf96cc` 完全一致（`git diff 6ddf96cc 90925ddd` 为空），E2E 应用由此树重新构建 |
 | 数据目录 | 每个 E2E spec 独立 `mktemp -d`，不接触正式作品 |
@@ -435,8 +435,9 @@ bash scripts/run-p172-e2e-isolated.sh \
    撞见老铁匠被灭口”，但 `chapter_list` 没有生成对应的 required_event，反而生成
    `ch1-req-2`“靠近铁匠铺，尚未目击命案，只为询问玉佩来历”。Writer 按 macro 写目击，
    Reviewer 正确报 `ch1-req-2` 冲突与 `ch1-con-1` 视角越界；一次 Repair 后仍残留 2 条 high，
-   按设计停在 Safety。Draft PR #26 已加入 `story-macro-v2` 的 `keyEvents`、
-   `chapter-list-v3` 的覆盖规则与确定性覆盖校验；待评审/合并后再授权复测。
+   按设计停在 Safety。PR #26 已合并到 beta（`d66d565c`）：`story-macro-v2` 输出
+   `keyEvents`，`chapter-list-v3` 必须逐条覆盖并带 `sourceEventId`，未覆盖会在 Writer
+   前暂停；待新的明确授权后复测。
 9. **结构化修复的 usage 可能少计一次调用**：第一次 beta 最终 M1 的暂停原因显示执行了
    结构化修复，但 run usage 只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
 10. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
@@ -460,6 +461,7 @@ bash scripts/run-p172-e2e-isolated.sh \
 - PR #24 合并到 beta：`1d21ba6b`；beta 树与修复分支 `8eae5d40` 一致。
 - PR #25 合并到 beta：`1d2adaf1`；`structured_failure` 诊断测试 15 + 3 + 6 + 9 通过，
   CI（Rust/前端/Linux/macOS Bundle/Kernel/发布脚本）全部通过。
+- PR #26 合并到 beta：`d66d565c`；Planner 覆盖测试 227 + 17 + 6 通过，CI 全部通过。
 - 第一次 beta 最终 M1：`story_macro` 结构化输出失败（非法 JSON；修复后缺
   `protagonist_core`），应用 DataIntegrity 暂停，无候选/正文；模型输出质量失败。
 - 带诊断重试：8 次调用、34,336 prompt / 65,286 completion；一次 Repair 后仍有 2 条 high，
@@ -473,11 +475,11 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 评审 Draft PR #26（`fix/beta-a1-planner-coverage`）：它把 `story_macro` 的关键事件
-   结构化到 `keyEvents`，要求 `chapter_list` 逐条覆盖并带 `sourceEventId`；未覆盖时在
-   Writer 前暂停。CI 通过并合并后，再决定是否重试 M1。
-2. 评估是否换用结构化规划与计划一致性更稳定的模型；任何重试都需新的明确授权、模型与
-   费用上限，并保留 `structured_failure`/Run 产物作为证据。
+1. 在 beta `d66d565c` 上经明确授权重试最终 M1：`story_macro` 必须输出 `keyEvents`，
+   `chapter_list` 必须逐条覆盖；若 Plan 仍生成冲突义务或漏覆盖，Run 会在 Writer 前暂停，
+   并保留计划/审校/诊断产物。
+2. 若重试仍失败，读取 Run 产物判断是模型未输出 keyEvents、覆盖校验拦截，还是 Reviewer/
+   Repair 残留；再决定换模型或进一步修 Planner，不在无证据时反复调 Prompt。
 3. 由真实作者阅读候选并记录 1–5 分与修改成本；本次候选停在最终确认门前，未提交正文。
 4. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
 5. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
