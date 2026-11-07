@@ -5,7 +5,7 @@
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
 | `ENGINEERING_READY` | **YES** | PR #24 已合并到 beta（`1d21ba6b`）；CI 全部通过；应用在 Planner 失败时正确 fail-closed |
-| `M1_ACCEPTANCE` | **M1_FAIL** | beta `1d21ba6b` 最终 M1 在 `story_macro` 处失败：非法 JSON，结构化修复仍缺 `protagonist_core`；无候选、无正式正文 |
+| `M1_ACCEPTANCE` | **M1_FAIL** | beta `1d2adaf1` 带诊断重试：Planner 计划漏掉 story_macro 的“目击灭口”义务且生成冲突的 `ch1-req-2`；Reviewer 正确报 high，Repair 一次后仍残留，安全暂停 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
 | `PUBLIC_BETA_READINESS` | **NOT_READY** | M1_FAIL（Planner 结构化输出失败）、人工 GUI 未执行，不能用 Mock/E2E 代替 |
@@ -289,8 +289,42 @@ PR #24 变更：修复输出预算至少 16,384 token；completion 达到预算�
 正确：一次结构化修复后仍不合格即 `DataIntegrity` 暂停，没有候选、没有正式正文，也没有
 把失败当成零问题。
 
-没有重试本次 M1：任务禁止无根据的连续付费调用。若继续，需要先决定是换模型，还是先补
-Planner 输出诊断（保留失败原始输出/提高结构化规划预算），再获得新的明确授权。
+当时没有直接重试：任务禁止无根据的连续付费调用。后续用户单独授权带诊断重试，结果见 5.5。
+
+### 5.5 带诊断重试（beta `1d2adaf1`，最终结果）
+
+用户单独授权后，在含 PR #25 的 beta 上重试：
+
+| 项 | 值 |
+| --- | --- |
+| Run | `f8ac6f39-425b-4255-8d73-55fb279facf5` |
+| 模型 | `deepseek-v4.1-flash` |
+| 结果 | `paused` / `safety`：`有界修复后仍有一致性问题，已停在上限并保留候选，等待人工决策。` |
+| 调用 | 8 次；34,336 prompt / 65,286 completion tokens |
+| 候选 | draft 2,481 字 → repair 2,467 字；停在最终确认门前，未提交正文 |
+| 诊断产物 | 无 `structured_failure`（Planner 成功）；计划、两次审校与两个候选都在 Run 产物中 |
+
+**计划与失败原因**：
+
+- Planner 的 `chapter_list` 只为第 1 章生成：
+  - `ch1-req-1`：林动在雪夜巷道中先发现半埋的发光旧玉佩；
+  - `ch1-req-2`：林动靠近铁匠铺，**尚未目击命案**，只为询问玉佩来历；
+  - `ch1-con-1`：保持林动限知视角；
+  - `ch1-for-1`：不得提前揭示旧案真相。
+- `story_macro` 的约束要求第 1 章“发现玉佩后亲眼撞见老铁匠被灭口”，但 Planner **没有把
+  “目击灭口”写成 required_event**，反而生成了与它冲突的 `ch1-req-2`（尚未目击）。
+- Writer 依据 story_macro 写了目击灭口；Reviewer 正确发现候选违反 `ch1-req-2`，并报出
+  `ch1-con-1` 的限知视角越界（“像是有什么事没忙完，或是有人在”）。
+- 一次有界 Repair 只修掉了风灯/视角的部分问题，复验仍有 2 条 high：
+  `ch1-req-2`（目击与“尚未目击”冲突）与 `ch1-con-1`（推断越界）。Run 按设计停在
+  `Safety`，保留候选，不提交。
+
+**结论**：这是 Planner 的义务覆盖/一致性失败，不是 Reviewer 或 Repair 的代码缺陷。
+Reviewer 正确识别了冲突，Repair 受一次预算限制无法同时满足互相矛盾的义务。应用行为正确：
+残留 high 问题没有伪装成通过，候选被保留，Run 停在人工决策点。
+
+M1 最终为 **`M1_FAIL`**。不做无根据的再次重试；下一步应先处理 Planner 的义务覆盖与冲突，
+或换用更稳定的结构化规划模型，再由用户明确授权复测。
 
 ## 6. B1 桌面 GUI 自动化 smoke
 
@@ -392,15 +426,20 @@ bash scripts/run-p172-e2e-isolated.sh \
 5. 服务端 `chapterAcceptance` 义务模型与 Rust 领域模型尚未建立字段映射。
 6. 严格“每章至少一条 hard 义务”可能对过渡章节偏严；本次真实样本生成 7 条 hard 义务并
    通过，未出现误报，但仍需更多样本。
-7. **Planner 结构化输出稳定性**：最终 M1 中 `deepseek-v4.1-flash` 首次输出非法 JSON，
-   结构化修复后仍缺 `protagonist_core`，应用 fail-closed。同一模型在 90925ddd 上曾通过，
-   目前无法区分是模型随机性、网关截断还是输出预算不足；本次失败的原始输出已无法回溯。
-   PR #25 已合并到 beta（`1d2adaf1`）：`structured_failure` 诊断产物（脱敏、限长）会在下一次
-   失败时保留首次与修复原始输出、错误、token 与模型；本次失败的原始输出仍无法回溯。
-8. **结构化修复的 usage 可能少计一次调用**：暂停原因显示执行了结构化修复，但 run usage
-   只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
-9. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
-   不影响产品判断。
+7. **Planner 结构化输出稳定性**：第一次 beta 最终 M1 中 `deepseek-v4.1-flash` 首次输出
+   非法 JSON，结构化修复后仍缺 `protagonist_core`，应用 fail-closed。PR #25 已合并到 beta
+   （`1d2adaf1`）：`structured_failure` 诊断产物（脱敏、限长）会在下一次失败时保留首次与
+   修复原始输出、错误、token 与模型；第一次失败的原始输出仍无法回溯。
+8. **Planner 义务覆盖与一致性**：带诊断重试中，`story_macro` 要求第 1 章“发现玉佩后亲眼
+   撞见老铁匠被灭口”，但 `chapter_list` 没有生成对应的 required_event，反而生成
+   `ch1-req-2`“靠近铁匠铺，尚未目击命案，只为询问玉佩来历”。Writer 按 macro 写目击，
+   Reviewer 正确报 `ch1-req-2` 冲突与 `ch1-con-1` 视角越界；一次 Repair 后仍残留 2 条 high，
+   按设计停在 Safety。需要 Planner 的计划覆盖/冲突自检或更强的结构化规划模型，不能在
+   Prompt 里无证据地反复试。
+9. **结构化修复的 usage 可能少计一次调用**：第一次 beta 最终 M1 的暂停原因显示执行了
+   结构化修复，但 run usage 只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
+10. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
+    不影响产品判断。
 
 ### P3
 
@@ -420,8 +459,11 @@ bash scripts/run-p172-e2e-isolated.sh \
 - PR #24 合并到 beta：`1d21ba6b`；beta 树与修复分支 `8eae5d40` 一致。
 - PR #25 合并到 beta：`1d2adaf1`；`structured_failure` 诊断测试 15 + 3 + 6 + 9 通过，
   CI（Rust/前端/Linux/macOS Bundle/Kernel/发布脚本）全部通过。
-- beta 最终 M1：`story_macro` 结构化输出失败（非法 JSON；修复后缺 `protagonist_core`），
-  应用 DataIntegrity 暂停，无候选/正文；模型输出质量失败，不是应用崩溃。
+- 第一次 beta 最终 M1：`story_macro` 结构化输出失败（非法 JSON；修复后缺
+  `protagonist_core`），应用 DataIntegrity 暂停，无候选/正文；模型输出质量失败。
+- 带诊断重试：8 次调用、34,336 prompt / 65,286 completion；一次 Repair 后仍有 2 条 high，
+  停在 Safety。全部 M1 尝试合计 21 次已记录调用、86,802 prompt / 165,507 completion tokens；
+  第一次失败的结构化修复调用可能未计入，供应商实际计费以账单为准。
 - GUI smoke：11/11 spec 通过；创建导航 + 重启 2/2 通过。
 - 完整 workspace、client 与 CI 结果沿用同一树的最近一次通过记录（`6ddf96cc`，与 beta 树一致）：
   workspace 602 passed、test-harness 114 passed、client 290 passed、GitHub Actions 全部通过；
@@ -430,18 +472,20 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. PR #25 已合并到 beta（`1d2adaf1`），结构化失败的首次/修复原始输出会保留为
-   `structured_failure` 产物；下一次 M1 失败可直接诊断，不需要靠再付费调用猜原因。
-2. 在明确授权下重试一次最终 M1（同一模型或换更稳定的结构化输出模型）；重试前记录模型与
-   费用上限。若再次失败，直接读取 `structured_failure` 产物判断截断/别名/随机性，再决定
-   是否提高结构化规划输出预算；不要在无证据时反复调 Prompt。
-3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
-4. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
+1. 先处理 **Planner 义务覆盖/一致性**：让每一条 `story_macro` 关键事件必须落成 hard
+   `required_event`，并禁止与 macro 冲突的义务（例如“尚未目击” vs “必须目击”）。这属于
+   Planner schema/提示词契约，不是 Repair 或 Reviewer 的缺陷；需要设计后再改，不能靠
+   反复重跑碰运气。
+2. 评估是否换用结构化规划与计划一致性更稳定的模型；任何重试都需新的明确授权、模型与
+   费用上限，并保留 `structured_failure`/Run 产物作为证据。
+3. 由真实作者阅读候选并记录 1–5 分与修改成本；本次候选停在最终确认门前，未提交正文。
+4. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+5. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 
 ## 10. 最终裁决
 
-- `ENGINEERING_READY`：**YES**（#24 已合并，CI 通过；应用在 Planner 失败时正确暂停）
-- `M1_ACCEPTANCE`：**M1_FAIL**（beta `1d21ba6b` 最终 M1 在 `story_macro` 结构化输出处失败）
+- `ENGINEERING_READY`：**YES**（#24/#25 已合并，CI 通过；应用在 Planner/Repair 失败时正确暂停）
+- `M1_ACCEPTANCE`：**M1_FAIL**（带诊断重试仍残留在 `ch1-req-2`/`ch1-con-1` 两条 high）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
 - `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 FAIL 与人工 GUI 未完成）
