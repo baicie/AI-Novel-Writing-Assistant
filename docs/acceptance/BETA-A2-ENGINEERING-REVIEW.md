@@ -161,7 +161,7 @@ server typecheck                                   PASS
 Native E2E                                        见下
 ```
 
-Native E2E：从 Beta-A2 工作树重新构建 E2E 应用，使用独立数据目录运行 3 个 spec：
+Native E2E：在模块拆分后重新构建 Beta-A2 E2E 应用，使用独立数据目录重跑 3 个 spec：
 
 | Spec | 结果 |
 | --- | --- |
@@ -169,8 +169,14 @@ Native E2E：从 Beta-A2 工作树重新构建 E2E 应用，使用独立数据�
 | `author-journey` | PASS（1/1；mock 已补 keyEvents/sourceEventId） |
 | `p17-3-context` | PASS（4/4；上下文来源与冻结 Run） |
 
-3/3 spec 全部通过。完整 11-spec 套件没有全部重跑；原因：本轮变更范围是 Planner 契约、
-上下文预算与客户端 Prompt 版本，其他 spec 未触及对应路径。E2E 不是人工验收。
+3/3 spec 全部通过（模块拆分后重新构建并重跑）。完整 11-spec 套件没有全部重跑；原因：
+本轮变更范围是 Planner 契约、上下文预算与客户端 Prompt 版本，其他 spec 未触及对应路径。
+E2E 不是人工验收。
+
+并发说明：一次全量 workspace 运行与 E2E 应用并行时，`chapter_history` 的
+`restore_protects_local_drafts_and_records_provenance` 因 SQLite busy 冲突失败；停止
+E2E 应用后单独重跑为 **621 passed，0 failed**。该失败是测试环境并发冲突，不是代码回归；
+最终计数以干净重跑为准。
 
 ## 8. 未完成任务及原因
 
