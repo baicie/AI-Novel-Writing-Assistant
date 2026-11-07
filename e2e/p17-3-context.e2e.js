@@ -55,7 +55,7 @@ const script = [
     volumes: [{ volumeOrder: 1, title: "山门卷", roleLabel: "开局", coreReward: "入门", planningMode: "hard" }],
   }),
   JSON.stringify({
-    chapters: [{ chapterOrder: 1, title: "第一章", volumeTitle: "山门卷", summary: "入山", characterNames: ["林动"] }],
+    chapters: [{ chapterOrder: 1, title: "第一章", volumeTitle: "山门卷", summary: "入山", characterNames: ["林动"], obligations: [{ id: "ch1-req-1", type: "required_event", description: "林动按计划入山", enforcement: "hard", participants: ["林动"] }] }],
   }),
   "他推开门，屋里没有人。",
   JSON.stringify({ issues: [] }),

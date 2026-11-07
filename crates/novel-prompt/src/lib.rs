@@ -35,6 +35,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:chapter_draft\n你是小说作者。必须严格依据下面已经确认的上下文写本章正文，不要引入与上下文冲突的事实，不要输出解释。\n章节目标：{{brief}}\n已确认上下文：\n{{context}}",
         },
         PromptAsset {
+            id: "chapter_draft",
+            version: "chapter-draft-v3",
+            family: "chapter",
+            template: "STEP:chapter_draft\n你是小说作者。必须严格依据下面已经确认的上下文写本章正文，不要引入与上下文冲突的事实，不要输出解释。\n章节目标：{{brief}}\n已确认上下文：\n{{context}}\n章节义务：\n{{obligations}}\n硬约束必须遵守，不得改写关键事件、参与者、因果与顺序；创作建议可以合理取舍，但不能为了满足建议而破坏硬约束或已确认事实。",
+        },
+        PromptAsset {
             id: "story_macro",
             version: "story-macro-v1",
             family: "director",
@@ -62,7 +68,7 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             id: "chapter_list",
             version: "chapter-list-v2",
             family: "director",
-            template: "STEP:chapter_list\n依据 story_macro、卷策略与人物阵容输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames、obligations）。obligations 是本章必须遵守的结构化义务数组，可以为空但不能省略；每项包含 id、type、description、enforcement、participants、source、evidence。type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory。required_event 写本章必须发生的关键事件；forbidden_event 写不得提前或错误发生的事件；causal_constraint 写关键因果；ordering_constraint 写关键顺序；continuity_constraint 写已确认历史事实约束。id 使用 ch{chapterOrder}-{类型缩写}-{序号}，全书唯一。只把会改变剧情因果、参与者或时间顺序的要求写成 hard；普通文学描写写成 advisory 或不要写成义务。不得引用未来章节才揭示的事实。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
+            template: "STEP:chapter_list\n依据 story_macro、卷策略与人物阵容输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames、obligations）。obligations 是本章必须遵守的结构化义务数组，不能省略且每章至少一条 hard 义务；每项包含 id、type、description、enforcement、participants、source、evidence。type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory。required_event 写本章必须发生的关键事件；forbidden_event 写不得提前或错误发生的事件；causal_constraint 写关键因果；ordering_constraint 写关键顺序；continuity_constraint 写已确认历史事实约束。id 使用 ch{chapterOrder}-{类型缩写}-{序号}，全书唯一。只把会改变剧情因果、参与者或时间顺序的要求写成 hard；普通文学描写写成 advisory 或不要写成义务。不得引用未来章节才揭示的事实。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
         },
         PromptAsset {
             id: "structured_repair",
@@ -80,7 +86,7 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             id: "chapter_repair",
             version: "chapter-repair-v2",
             family: "director",
-            template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题、已确认上下文和本章硬约束修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。不得改写本章硬约束中的关键事件、参与者、因果与顺序，也不得通过修改计划来迁就正文；只在正文层面修复。\n本章硬约束义务：\n{{obligations}}\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
+            template: "STEP:chapter_repair\n你是小说修订编辑。根据审校问题、已确认上下文和本章章节义务修订候选正文。只输出修订后的完整正文，不要解释，不要 Markdown。硬约束必须保留：不得改写硬约束中的关键事件、参与者、因果与顺序，也不得通过修改计划来迁就正文；创作建议可以合理取舍，但不得为满足建议而破坏硬约束或已确认事实。\n本章章节义务：\n{{obligations}}\n已确认上下文：\n{{context}}\n审校问题：\n{{issues}}\n待修订候选：\n{{candidate}}",
         },
         PromptAsset {
             id: "memory_extraction",
@@ -98,7 +104,7 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             id: "consistency_review",
             version: "consistency-review-v2",
             family: "director",
-            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；如违反结构化章节义务，必须填写 obligationId，且只能使用上下文中列出的义务 ID；必要时填写 violationType、needsAuthorConfirmation；无问题用空数组）。evidence 必须逐字引用候选正文，不得引用历史正文。不要把调用失败或无法判断当作没有问题；不得编造 obligationId。不要返回 Markdown。\n{{context}}",
+            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；如违反结构化章节义务，必须填写 obligationId，且只能使用上下文中列出的义务 ID；必要时填写 violationType、needsAuthorConfirmation；无问题用空数组）。evidence 必须逐字引用候选正文，不得引用历史正文。没有采用 advisory 建议不构成问题；只有违反 hard 义务或造成已确认事实冲突时才报告。不要把调用失败或无法判断当作没有问题；不得编造 obligationId。不要返回 Markdown。\n{{context}}",
         },
         PromptAsset {
             id: "chapter_selection_rewrite",
@@ -142,7 +148,7 @@ mod tests {
 
     #[test]
     fn version_must_match_and_missing_variables_fail() {
-        assert!(resolve("chapter_draft", "chapter-draft-v3").is_err());
+        assert!(resolve("chapter_draft", "chapter-draft-v4").is_err());
         let asset = resolve("chapter_draft", "chapter-draft-v1").unwrap();
         let mut vars = BTreeMap::new();
         vars.insert("brief".into(), "林动入山".into());
@@ -187,6 +193,18 @@ mod tests {
         }
     }
 
+    /// 已暂停的历史 Run 可能冻结在 v2：v2 模板不能被本轮修改改写。
+    #[test]
+    fn legacy_draft_v2_still_renders_without_an_obligations_slot() {
+        let asset = resolve("chapter_draft", "chapter-draft-v2").unwrap();
+        assert!(!asset.template.contains("{{obligations}}"));
+        let mut vars = BTreeMap::new();
+        vars.insert("brief".into(), "本章目标".into());
+        vars.insert("context".into(), "已确认上下文".into());
+        let rendered = render(asset.template, &vars).unwrap();
+        assert!(rendered.contains("已确认上下文"));
+    }
+
     #[test]
     fn free_draft_v1_remains_a_single_prompt_without_obligations() {
         let asset = resolve("chapter_draft", "chapter-draft-v1").unwrap();
@@ -217,6 +235,24 @@ mod tests {
         vars.insert("obligations".into(), "[ch1-req-1] 硬约束".into());
         let rendered = render(repair.template, &vars).unwrap();
         assert!(rendered.contains("ch1-req-1"));
-        assert!(rendered.contains("不得改写"));
+        assert!(rendered.contains("硬约束必须保留"));
+        assert!(rendered.contains("创作建议可以合理取舍"));
+
+        let review = resolve("consistency_review", "consistency-review-v2").unwrap();
+        assert!(review.template.contains("advisory"));
+        assert!(review.template.contains("不构成问题"));
+
+        let draft = resolve("chapter_draft", "chapter-draft-v3").unwrap();
+        let mut vars = BTreeMap::new();
+        vars.insert("brief".into(), "本章目标".into());
+        vars.insert("context".into(), "已确认上下文".into());
+        assert!(
+            render(draft.template, &vars).is_err(),
+            "v3 must not silently render without the obligations slot"
+        );
+        vars.insert("obligations".into(), "【硬约束】ch1-req-1".into());
+        let rendered = render(draft.template, &vars).unwrap();
+        assert!(rendered.contains("ch1-req-1"));
+        assert!(rendered.contains("创作建议可以合理取舍"));
     }
 }

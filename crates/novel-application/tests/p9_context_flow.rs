@@ -42,10 +42,10 @@ async fn context_artifact_feeds_the_real_draft_prompt_with_confirmed_facts() {
         "relations":[{"sourceName":"林动","targetName":"苏晚","surfaceRelation":"同门"},{"sourceName":"林动","targetName":"陆沉","surfaceRelation":"敌对"}]}).to_string();
     let volume = serde_json::json!({"volumes":[{"volumeOrder":1,"title":"山门卷","roleLabel":"开局","coreReward":"入门","planningMode":"hard"}]}).to_string();
     let chapters = serde_json::json!({"chapters":[
-        {"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"]},
-        {"chapterOrder":2,"title":"第二章","volumeTitle":"山门卷","summary":"相遇","characterNames":["林动","苏晚"]},
-        {"chapterOrder":3,"title":"第三章","volumeTitle":"山门卷","summary":"夜战","characterNames":["林动","陆沉"]},
-        {"chapterOrder":4,"title":"第四章","volumeTitle":"山门卷","summary":"祖祠前夜","characterNames":["林动","陆沉"]}
+        {"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"林动按计划入山","enforcement":"hard","participants":["林动"]}]},
+        {"chapterOrder":2,"title":"第二章","volumeTitle":"山门卷","summary":"相遇","characterNames":["林动","苏晚"],"obligations":[{"id":"ch2-req-1","type":"required_event","description":"林动按计划与苏晚相遇","enforcement":"hard","participants":["林动","苏晚"]}]},
+        {"chapterOrder":3,"title":"第三章","volumeTitle":"山门卷","summary":"夜战","characterNames":["林动","陆沉"],"obligations":[{"id":"ch3-req-1","type":"required_event","description":"林动按计划夜战","enforcement":"hard","participants":["林动","陆沉"]}]},
+        {"chapterOrder":4,"title":"第四章","volumeTitle":"山门卷","summary":"祖祠前夜","characterNames":["林动","陆沉"],"obligations":[{"id":"ch4-req-1","type":"required_event","description":"林动在祖祠前夜按计划拔剑","enforcement":"hard","participants":["林动","陆沉"]}]}
     ]}).to_string();
     let review = serde_json::json!({"issues":[]}).to_string();
     let llm = Arc::new(ScriptedLlm::new(vec![

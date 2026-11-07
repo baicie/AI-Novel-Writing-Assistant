@@ -562,6 +562,29 @@ impl Worker {
                 )
                 .await;
         }
+        // advisory 只是建议：未采用不触发修复，也不阻塞章节完成。
+        let issues: Vec<serde_json::Value> = issues
+            .into_iter()
+            .filter(|issue| {
+                issue
+                    .get("obligationEnforcement")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("advisory")
+            })
+            .collect();
+        if issues.is_empty() {
+            return self
+                .finish_step(
+                    claimed,
+                    spec,
+                    "confirmed",
+                    false,
+                    &serde_json::json!({ "status": "advisory_only" }).to_string(),
+                    None,
+                    None,
+                )
+                .await;
+        }
         let repair_budget = match claimed.contract.plan_version.as_str() {
             novel_workflow::PRODUCTION_PLAN_VERSION => claimed.contract.repair_budget,
             novel_workflow::PRODUCTION_PLAN_VERSION_V2 => claimed.contract.max_automatic_retries,
@@ -1611,13 +1634,30 @@ async fn execute_structured(
             .novels
             .get_chapter(&claimed.novel_id, &claimed.contract.target_chapter_id)
             .await?;
-        let pinned = pinned_chapter_plan_version(
+        let pinned = match pinned_chapter_plan_version(
             &artifacts,
             &claimed.contract.target_chapter_id,
+            target.sort_order,
             &claimed.run_id,
-        );
+        ) {
+            Ok(version) => version,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error.to_string(),
+                )
+                .await;
+            }
+        };
         let obligations =
-            match target_obligations_from_artifacts(&artifacts, target.sort_order, pinned) {
+            match target_obligations_from_artifacts(&artifacts, target.sort_order, Some(pinned)) {
                 Ok(obligations) => obligations,
                 Err(error) => {
                     return pause_review_validation_error(
@@ -1636,8 +1676,64 @@ async fn execute_structured(
             };
         let allowed: std::collections::BTreeSet<String> =
             obligations.iter().map(|item| item.id.clone()).collect();
-        match crate::obligations::validate_review_obligation_ids(&payload, &allowed) {
+        let payload = match crate::obligations::validate_review_obligation_ids(&payload, &allowed) {
             Ok(payload) => payload,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error,
+                )
+                .await;
+            }
+        };
+        let payload = match crate::obligations::annotate_review_obligations(&payload, &obligations)
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error,
+                )
+                .await;
+            }
+        };
+        let candidate = match worker.runs.latest_candidate(&claimed.run_id).await? {
+            Some(candidate) => candidate,
+            None => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    "一致性审校缺少候选正文，无法核验审校证据。",
+                )
+                .await;
+            }
+        };
+        match crate::obligations::validate_review_evidence(
+            &payload,
+            &candidate.content,
+            &obligations,
+        ) {
+            Ok(()) => payload,
             Err(error) => {
                 return pause_review_validation_error(
                     worker,
@@ -1959,7 +2055,7 @@ async fn structured_prompt(
                 .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
             let mut context = prompt_text.to_string();
             context.push_str(
-                "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；evidence 必须逐字引用候选正文；不得引用历史正文。\n",
+                "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；没有采用 advisory 建议不构成问题；evidence 必须逐字引用候选正文并能在候选正文中定位；不得引用历史正文。\n",
             );
             context.push_str("\n候选正文：");
             context.push_str(&truncate_chars(&candidate.content, 20_000));
@@ -1987,7 +2083,7 @@ fn structured_step_requirement(step_id: &str) -> &'static str {
             "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
         }
         "chapter_list" => {
-            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组（可为空但不能省略）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。"
+            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。"
         }
         "consistency_review" => {
             "只输出 issues 数组；每项包含 type、severity、evidence、suggestion；违反章节义务时 obligationId 必须来自上下文中的义务 ID。"
@@ -2105,7 +2201,7 @@ async fn draft_prompt(
     let mut vars = BTreeMap::new();
     vars.insert("brief".into(), title.to_string());
     let mut obligations_text = String::new();
-    if version == "chapter-draft-v2" {
+    if version == "chapter-draft-v2" || version == "chapter-draft-v3" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
         let context = latest_run_context_payload(
             &artifacts,
@@ -2123,11 +2219,20 @@ async fn draft_prompt(
             .to_string();
         vars.insert("context".into(), prompt_text.to_string());
     }
+    if version == "chapter-draft-v3" {
+        // v3 把义务块放进模板本身，Prompt 版本与实际内容一致，不再依赖渲染后追加。
+        let block = if obligations_text.trim().is_empty() {
+            "（本章没有结构化义务；沿用已确认上下文，不得改写已确认事件）".to_string()
+        } else {
+            obligations_text.clone()
+        };
+        vars.insert("obligations".into(), block);
+    }
     let rendered = novel_prompt::render(asset.template, &vars)
         .map_err(|_| AppError::validation("正文提示词缺少章节上下文"))?;
     if version == "chapter-draft-v2" && !obligations_text.trim().is_empty() {
         return Ok(format!(
-            "{rendered}\n\n本章硬约束义务（来自冻结章节计划，必须遵守；不得改写关键事件、参与者、因果与顺序）：\n{obligations_text}\n如果正文与硬约束冲突，必须调整正文，不能修改计划。"
+            "{rendered}\n\n章节义务（来自冻结章节计划；硬约束必须遵守，创作建议可以合理取舍）：\n{obligations_text}\n如果正文与硬约束冲突，必须调整正文，不能修改计划。"
         ));
     }
     Ok(rendered)

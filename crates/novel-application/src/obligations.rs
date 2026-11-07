@@ -91,9 +91,13 @@ fn parse_one(value: &Value) -> Option<ChapterObligation> {
     })
 }
 
-/// Normalize one chapter's obligations in place. Missing IDs are generated from
-/// the chapter order and position; duplicate explicit IDs are rejected because a
-/// reviewer reference would be ambiguous.
+/// Normalize one chapter's obligations in place for a freshly generated plan.
+///
+/// `chapter-list-v2` requires every chapter to declare its obligations. A
+/// missing array, a malformed array, an empty array, or a chapter with no hard
+/// obligation is rejected: silently treating that as a legacy plan would let the
+/// writer proceed without any structured plot contract. Historical plans stay
+/// readable through [`parse_obligations`], which keeps the lenient read path.
 pub(crate) fn normalize_chapter_obligations(
     chapter: &mut Value,
     chapter_order: i64,
@@ -103,7 +107,9 @@ pub(crate) fn normalize_chapter_obligations(
         return Err("章节计划项必须是对象".into());
     };
     let Some(raw) = object.remove("obligations") else {
-        return Ok(());
+        return Err(format!(
+            "章节计划第 {chapter_order} 章缺少 obligations 数组；chapter-list-v2 要求每章显式输出结构化义务，不能静默降级为旧计划。"
+        ));
     };
     let items = raw
         .as_array()
@@ -144,6 +150,14 @@ pub(crate) fn normalize_chapter_obligations(
             "source": source,
             "evidence": evidence,
         }));
+    }
+    if !normalized
+        .iter()
+        .any(|item| item.get("enforcement").and_then(Value::as_str) == Some("hard"))
+    {
+        return Err(format!(
+            "章节计划第 {chapter_order} 章没有 hard 义务（obligations 为空或全部是 advisory）；每章至少需要一条不可改写的关键义务，不能在没有剧情契约的情况下继续生成正文。"
+        ));
     }
     object.insert("obligations".into(), Value::Array(normalized));
     Ok(())
@@ -276,29 +290,233 @@ fn generated_id(
     }
 }
 
+/// Render obligations for the writer, reviewer, and repair prompts. Hard and
+/// advisory obligations are separate sections with different wording: only hard
+/// obligations are plot contracts; advisory items are suggestions that a repair
+/// may drop.
 pub(crate) fn render_obligations(items: &[ChapterObligation]) -> String {
     let mut output = String::new();
-    for item in items {
-        let label = if item.enforcement == "hard" {
-            "硬约束"
-        } else {
-            "创作建议"
-        };
-        output.push_str(&format!(
-            "- [{}][{}][{}] {}\n",
-            item.id, label, item.kind, item.description
-        ));
-        if !item.participants.is_empty() {
-            output.push_str(&format!("  参与者：{}\n", item.participants.join("、")));
+    let hard: Vec<&ChapterObligation> = items
+        .iter()
+        .filter(|item| item.enforcement == "hard")
+        .collect();
+    let advisory: Vec<&ChapterObligation> = items
+        .iter()
+        .filter(|item| item.enforcement != "hard")
+        .collect();
+    if !hard.is_empty() {
+        output.push_str("【硬约束｜必须遵守，不可擅自改写】\n");
+        for item in hard {
+            push_obligation_line(&mut output, item);
         }
-        if item.source != "chapter_plan" {
-            output.push_str(&format!("  来源：{}\n", item.source));
+    }
+    if !advisory.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
         }
-        if let Some(evidence) = &item.evidence {
-            output.push_str(&format!("  依据：{evidence}\n"));
+        output.push_str("【创作建议｜可合理取舍，不构成本章失败】\n");
+        for item in advisory {
+            push_obligation_line(&mut output, item);
         }
     }
     output
+}
+
+fn push_obligation_line(output: &mut String, item: &ChapterObligation) {
+    output.push_str(&format!(
+        "- [{}][{}] {}\n",
+        item.id, item.kind, item.description
+    ));
+    if !item.participants.is_empty() {
+        output.push_str(&format!("  参与者：{}\n", item.participants.join("、")));
+    }
+    if item.source != "chapter_plan" {
+        output.push_str(&format!("  来源：{}\n", item.source));
+    }
+    if let Some(evidence) = &item.evidence {
+        output.push_str(&format!("  依据：{evidence}\n"));
+    }
+}
+
+/// Classify review issues by the enforcement of the obligation they cite and
+/// rewrite the review payload so the workflow guard only counts hard issues.
+/// Advisory-only feedback stays visible in `issueDetails` but must not trigger a
+/// repair or block the chapter.
+pub(crate) fn annotate_review_obligations(
+    payload: &str,
+    obligations: &[ChapterObligation],
+) -> Result<String, String> {
+    let enforcement: std::collections::BTreeMap<&str, &str> = obligations
+        .iter()
+        .map(|item| (item.id.as_str(), item.enforcement.as_str()))
+        .collect();
+    let mut value: Value =
+        serde_json::from_str(payload).map_err(|_| "审校结果不是合法 JSON".to_string())?;
+    let Some(issues) = value.get_mut("issueDetails").and_then(Value::as_array_mut) else {
+        return Ok(payload.to_string());
+    };
+    let mut hard = 0usize;
+    let mut advisory = 0usize;
+    for issue in issues.iter_mut() {
+        let Some(object) = issue.as_object_mut() else {
+            continue;
+        };
+        let obligation_id = object
+            .get("obligationId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        match obligation_id {
+            Some(id) => {
+                let Some(level) = enforcement.get(id) else {
+                    return Err(format!("审校引用了不存在的章节义务：{id}"));
+                };
+                object.insert(
+                    "obligationEnforcement".into(),
+                    Value::String((*level).to_string()),
+                );
+                if *level == "hard" {
+                    hard += 1;
+                } else {
+                    advisory += 1;
+                }
+            }
+            // 没有引用义务的普通审校问题仍按需要修复的问题处理。
+            None => hard += 1,
+        }
+    }
+    if let Some(object) = value.as_object_mut() {
+        object.insert("issues".into(), Value::from(hard));
+        object.insert("advisoryIssueCount".into(), Value::from(advisory));
+        let status = if hard == 0 && advisory == 0 {
+            "clean"
+        } else if hard == 0 {
+            "advisory_only"
+        } else {
+            "issues_found"
+        };
+        object.insert("status".into(), Value::String(status.into()));
+        object.insert(
+            "reviewOutcome".into(),
+            Value::String(
+                if hard == 0 && advisory == 0 {
+                    "review_succeeded_no_issues"
+                } else if hard == 0 {
+                    "review_succeeded_with_advisory_notes"
+                } else {
+                    "review_succeeded_with_issues"
+                }
+                .into(),
+            ),
+        );
+    }
+    serde_json::to_string(&value).map_err(|_| "审校结果无法序列化".into())
+}
+
+/// Hard-obligation violations must quote the current candidate. The check is
+/// deliberately narrow: it only proves the quoted text exists in the candidate
+/// after whitespace normalization; it does not judge semantics.
+pub(crate) fn validate_review_evidence(
+    payload: &str,
+    candidate: &str,
+    obligations: &[ChapterObligation],
+) -> Result<(), String> {
+    let hard_ids: BTreeSet<&str> = obligations
+        .iter()
+        .filter(|item| item.enforcement == "hard")
+        .map(|item| item.id.as_str())
+        .collect();
+    let value: Value =
+        serde_json::from_str(payload).map_err(|_| "审校结果不是合法 JSON".to_string())?;
+    let Some(issues) = value.get("issueDetails").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let candidate = normalize_quote(candidate);
+    for issue in issues {
+        let Some(obligation_id) = issue
+            .get("obligationId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        if !hard_ids.contains(obligation_id) {
+            continue;
+        }
+        let evidence = issue
+            .get("evidence")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| format!("审校问题 {obligation_id} 缺少正文证据"))?;
+        if !quote_is_located(evidence, &candidate) {
+            return Err(format!(
+                "审校问题 {obligation_id} 的证据无法在当前候选正文中定位：{evidence}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_quote(text: &str) -> String {
+    text.chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>()
+}
+
+fn trim_quote_marks(text: &str) -> &str {
+    text.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '「'
+                | '」'
+                | '『'
+                | '』'
+                | '，'
+                | '。'
+                | '、'
+                | '；'
+                | '：'
+                | '！'
+                | '？'
+                | ','
+                | '.'
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+        )
+    })
+}
+
+/// Ellipsis-separated quotes are accepted only when every segment is present in
+/// order; this keeps multi-sentence quotes verifiable without treating a single
+/// keyword as proof.
+fn quote_is_located(evidence: &str, normalized_candidate: &str) -> bool {
+    let segments: Vec<String> = evidence
+        .replace("...", "…")
+        .split('…')
+        .map(trim_quote_marks)
+        .map(normalize_quote)
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return false;
+    }
+    let mut cursor = 0usize;
+    for segment in segments {
+        let Some(found) = normalized_candidate[cursor..].find(&segment) else {
+            return false;
+        };
+        cursor += found + segment.len();
+    }
+    true
 }
 
 pub(crate) fn obligation_ids(items: &[ChapterObligation]) -> Vec<String> {
@@ -372,6 +590,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_empty_or_advisory_only_obligations() {
+        let mut missing = json!({"chapterOrder": 1});
+        let mut used = BTreeSet::new();
+        let error = normalize_chapter_obligations(&mut missing, 1, &mut used).unwrap_err();
+        assert!(error.contains("缺少 obligations"), "{error}");
+
+        let mut empty = json!({"chapterOrder": 1, "obligations": []});
+        let mut used = BTreeSet::new();
+        let error = normalize_chapter_obligations(&mut empty, 1, &mut used).unwrap_err();
+        assert!(error.contains("没有 hard 义务"), "{error}");
+
+        let mut advisory_only = json!({
+            "chapterOrder": 1,
+            "obligations": [{
+                "type": "continuity_constraint",
+                "description": "保持文风一致",
+                "enforcement": "advisory"
+            }]
+        });
+        let mut used = BTreeSet::new();
+        let error = normalize_chapter_obligations(&mut advisory_only, 1, &mut used).unwrap_err();
+        assert!(error.contains("没有 hard 义务"), "{error}");
+    }
+
+    #[test]
     fn rejects_duplicate_explicit_ids() {
         let mut chapter = json!({
             "chapterOrder": 1,
@@ -382,6 +625,96 @@ mod tests {
         });
         let mut used = BTreeSet::new();
         assert!(normalize_chapter_obligations(&mut chapter, 1, &mut used).is_err());
+    }
+
+    fn obligation(id: &str, enforcement: &str) -> ChapterObligation {
+        ChapterObligation {
+            id: id.into(),
+            chapter_order: 1,
+            kind: "required_event".into(),
+            description: format!("{id} 描述"),
+            enforcement: enforcement.into(),
+            participants: vec!["林动".into()],
+            source: "chapter_plan".into(),
+            evidence: None,
+        }
+    }
+
+    #[test]
+    fn rendering_separates_hard_and_advisory_wording() {
+        let items = vec![
+            obligation("ch1-req-1", "hard"),
+            obligation("ch1-adv-1", "advisory"),
+        ];
+        let rendered = render_obligations(&items);
+        assert!(rendered.contains("【硬约束｜必须遵守"));
+        assert!(rendered.contains("【创作建议｜可合理取舍"));
+        let advisory_section = rendered
+            .split("【创作建议")
+            .nth(1)
+            .expect("advisory section");
+        assert!(!advisory_section.contains("必须"));
+        assert!(!advisory_section.contains("禁止改写"));
+    }
+
+    #[test]
+    fn rendering_omits_an_empty_advisory_section() {
+        let rendered = render_obligations(&[obligation("ch1-req-1", "hard")]);
+        assert!(rendered.contains("【硬约束"));
+        assert!(!rendered.contains("【创作建议"));
+        assert!(render_obligations(&[]).is_empty());
+    }
+
+    #[test]
+    fn advisory_issues_do_not_count_as_repairable_hard_issues() {
+        let obligations = vec![
+            obligation("ch1-req-1", "hard"),
+            obligation("ch1-adv-1", "advisory"),
+        ];
+        let payload = r#"{"issues":2,"issueDetails":[
+            {"obligationId":"ch1-adv-1","type":"style","severity":"low","evidence":"a","suggestion":"b"},
+            {"obligationId":"ch1-req-1","type":"timeline","severity":"high","evidence":"c","suggestion":"d"}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 1);
+        assert_eq!(value["advisoryIssueCount"], 1);
+        assert_eq!(
+            value["issueDetails"][0]["obligationEnforcement"],
+            "advisory"
+        );
+        assert_eq!(value["issueDetails"][1]["obligationEnforcement"], "hard");
+
+        let advisory_only = r#"{"issues":1,"issueDetails":[
+            {"obligationId":"ch1-adv-1","type":"style","severity":"low","evidence":"a","suggestion":"b"}
+        ]}"#;
+        let annotated = annotate_review_obligations(advisory_only, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 0);
+        assert_eq!(value["status"], "advisory_only");
+    }
+
+    #[test]
+    fn hard_issue_evidence_must_be_locatable_in_the_candidate() {
+        let obligations = vec![
+            obligation("ch1-req-1", "hard"),
+            obligation("ch1-adv-1", "advisory"),
+        ];
+        let candidate = "雪夜里，林动赶到时老铁匠已经死亡。";
+        let matching = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"timeline","severity":"high","evidence":"“林动 赶到时老铁匠已经死亡”","suggestion":"改为亲眼撞见"}
+        ]}"#;
+        assert!(validate_review_evidence(matching, candidate, &obligations).is_ok());
+
+        let invented = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"timeline","severity":"high","evidence":"林动亲手杀死了老铁匠","suggestion":"改为亲眼撞见"}
+        ]}"#;
+        assert!(validate_review_evidence(invented, candidate, &obligations).is_err());
+
+        let advisory = r#"{"issueDetails":[
+            {"obligationId":"ch1-adv-1","type":"style","severity":"low","evidence":"这条建议没有采用","suggestion":"可忽略"}
+        ]}"#;
+        assert!(validate_review_evidence(advisory, candidate, &obligations).is_ok());
     }
 
     #[test]

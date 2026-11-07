@@ -10,6 +10,7 @@ fn artifact(ty: &str, scope: &str, payload: serde_json::Value) -> ArtifactView {
         artifact_type: ty.into(),
         scope: scope.into(),
         version: 1,
+        run_id: None,
         status: ArtifactStatus::Confirmed,
         protected_user_content: false,
         payload_json: payload.to_string(),

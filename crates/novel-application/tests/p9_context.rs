@@ -12,6 +12,7 @@ fn artifact(ty: &str, version: i64, scope: &str, payload: serde_json::Value) -> 
         artifact_type: ty.into(),
         scope: scope.into(),
         version,
+        run_id: None,
         status: ArtifactStatus::Confirmed,
         protected_user_content: false,
         payload_json: payload.to_string(),

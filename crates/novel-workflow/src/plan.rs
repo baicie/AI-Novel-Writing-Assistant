@@ -324,6 +324,7 @@ mod tests {
             artifact_type: kind.into(),
             scope: scope.into(),
             version,
+            run_id: None,
             status,
             protected_user_content: status == ArtifactStatus::UserEdited,
             payload_json: payload.into(),

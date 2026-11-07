@@ -25,6 +25,7 @@ fn artifact(ty: &str, version: i64, scope: &str, payload: serde_json::Value) -> 
         artifact_type: ty.into(),
         scope: scope.into(),
         version,
+        run_id: None,
         status: ArtifactStatus::Confirmed,
         protected_user_content: false,
         payload_json: payload.to_string(),
@@ -335,7 +336,7 @@ fn chapter_list_v2_and_repair_v2_templates_carry_the_contract() {
 
 fn runtime_prompts() -> BTreeMap<String, String> {
     let mut prompts = BTreeMap::new();
-    prompts.insert("chapter_draft".into(), "chapter-draft-v2".into());
+    prompts.insert("chapter_draft".into(), "chapter-draft-v3".into());
     prompts.insert("chapter_repair".into(), "chapter-repair-v2".into());
     prompts
 }
@@ -464,6 +465,13 @@ fn chapter_list() -> String {
                         "description":"先听见异响，再撞见灭口",
                         "enforcement":"hard",
                         "participants":["林动"]
+                    },
+                    {
+                        "id":"ch1-adv-1",
+                        "type":"continuity_constraint",
+                        "description":"可以补一句雪夜环境描写",
+                        "enforcement":"advisory",
+                        "participants":["林动"]
                     }
                 ]
             },
@@ -488,12 +496,39 @@ fn chapter_list_with_unknown_character() -> String {
     plan.to_string()
 }
 
+fn chapter_list_without_obligations() -> String {
+    let mut plan: serde_json::Value = serde_json::from_str(&chapter_list()).unwrap();
+    for chapter in plan["chapters"].as_array_mut().expect("chapters") {
+        chapter
+            .as_object_mut()
+            .expect("chapter")
+            .remove("obligations");
+    }
+    plan.to_string()
+}
+
+fn chapter_list_with_empty_obligations() -> String {
+    let mut plan: serde_json::Value = serde_json::from_str(&chapter_list()).unwrap();
+    for chapter in plan["chapters"].as_array_mut().expect("chapters") {
+        chapter["obligations"] = serde_json::json!([]);
+    }
+    plan.to_string()
+}
+
 fn clean_review() -> String {
     r#"{"issues":[]}"#.to_string()
 }
 
 fn known_issue_review() -> String {
-    r#"{"issues":[{"type":"timeline","severity":"high","evidence":"主角到达时老铁匠已经死亡","suggestion":"改为主角亲眼撞见灭口","obligationId":"ch1-req-1"}]}"#.to_string()
+    r#"{"issues":[{"type":"timeline","severity":"high","evidence":"林动赶到时，老铁匠已经死亡","suggestion":"改为主角亲眼撞见灭口","obligationId":"ch1-req-1"}]}"#.to_string()
+}
+
+fn advisory_only_review() -> String {
+    r#"{"issues":[{"type":"style","severity":"low","evidence":"没有补雪夜环境描写","suggestion":"可以补一句","obligationId":"ch1-adv-1","needsAuthorConfirmation":true}]}"#.to_string()
+}
+
+fn invented_evidence_review() -> String {
+    r#"{"issues":[{"type":"timeline","severity":"high","evidence":"林动亲手杀死了老铁匠","suggestion":"改为主角亲眼撞见灭口","obligationId":"ch1-req-1"}]}"#.to_string()
 }
 
 fn unknown_issue_review() -> String {
@@ -574,7 +609,8 @@ async fn planner_writer_and_reviewer_receive_the_obligation_contract() {
         .expect("draft prompt");
     assert!(writer.contains("ch1-req-1"));
     assert!(writer.contains("林动亲眼撞见老铁匠被杀"));
-    assert!(writer.contains("本章硬约束义务"));
+    assert!(writer.contains("【硬约束｜必须遵守"));
+    assert!(writer.contains("【创作建议｜可合理取舍"));
 
     let reviewer = prompts
         .iter()
@@ -715,7 +751,7 @@ async fn repair_prompt_carries_obligation_ids() {
         ("STEP:character_cast", scripted_cast()),
         ("STEP:volume_strategy", scripted_volume()),
         ("STEP:chapter_list", chapter_list()),
-        ("STEP:chapter_draft", "候选正文".into()),
+        ("STEP:chapter_draft", "林动赶到时，老铁匠已经死亡。".into()),
         ("STEP:consistency_review", known_issue_review()),
         ("STEP:chapter_repair", "修复后的候选正文".into()),
         ("STEP:consistency_review", clean_review()),
@@ -762,8 +798,11 @@ async fn repair_prompt_carries_obligation_ids() {
         .find(|prompt| prompt.contains("STEP:chapter_repair"))
         .expect("repair prompt");
     assert!(repair.contains("ch1-req-1"));
-    assert!(repair.contains("本章硬约束义务"));
-    assert!(repair.contains("不得改写"));
+    assert!(repair.contains("本章章节义务"));
+    assert!(repair.contains("硬约束必须保留"));
+    assert!(repair.contains("创作建议可以合理取舍"));
+    assert!(repair.contains("【硬约束｜必须遵守"));
+    assert!(repair.contains("【创作建议｜可合理取舍"));
 
     let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
         .await
@@ -785,10 +824,159 @@ async fn repair_prompt_carries_obligation_ids() {
     let payload: serde_json::Value = serde_json::from_str(&review.payload_json).unwrap();
     let issue = &payload["issueDetails"][0];
     assert_eq!(issue["obligationId"], "ch1-req-1");
+    assert_eq!(issue["obligationEnforcement"], "hard");
     assert!(
         issue["evidence"]
             .as_str()
             .is_some_and(|evidence| evidence.contains("老铁匠")),
         "reviewer evidence must be preserved: {issue}"
+    );
+}
+
+#[tokio::test]
+async fn chapter_list_without_obligations_pauses_before_writing() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list_without_obligations()),
+        ("STEP:chapter_list", chapter_list_without_obligations()),
+        ("STEP:chapter_draft", "不应到达的正文".into()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-missing-obligations").await;
+    let novel = runtime.director.create_novel("缺少义务", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-missing-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+    let prompts = llm.prompts();
+    assert_eq!(
+        prompts
+            .iter()
+            .filter(|prompt| prompt.contains("STEP:chapter_list"))
+            .count(),
+        2,
+        "missing obligations must be rejected once and fail after the bounded repair"
+    );
+    assert!(
+        !prompts
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_draft")),
+        "an invalid chapter plan must never reach the writer"
+    );
+}
+
+#[tokio::test]
+async fn empty_or_advisory_only_obligations_are_rejected() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list_with_empty_obligations()),
+        ("STEP:chapter_list", chapter_list_with_empty_obligations()),
+        ("STEP:chapter_draft", "不应到达的正文".into()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-empty-obligations").await;
+    let novel = runtime.director.create_novel("空义务", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-empty-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_draft")),
+        "an empty obligation array is not a valid v2 plan"
+    );
+}
+
+#[tokio::test]
+async fn advisory_only_review_does_not_trigger_repair_or_block_completion() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list()),
+        ("STEP:chapter_draft", "林动赶到时，老铁匠已经死亡。".into()),
+        ("STEP:consistency_review", advisory_only_review()),
+    ]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p17410-advisory").await;
+    let novel = runtime.director.create_novel("建议义务", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-advisory-open").await;
+    let (status, _signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "succeeded");
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_repair")),
+        "an unimplemented advisory must not trigger a repair call"
+    );
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    let review = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "consistency_review")
+        .max_by_key(|artifact| artifact.version)
+        .expect("review artifact");
+    let payload: serde_json::Value = serde_json::from_str(&review.payload_json).unwrap();
+    assert_eq!(payload["issues"], 0);
+    assert_eq!(payload["advisoryIssueCount"], 1);
+    assert_eq!(
+        payload["issueDetails"][0]["obligationEnforcement"],
+        "advisory"
+    );
+    assert_eq!(payload["issueDetails"][0]["needsAuthorConfirmation"], true);
+}
+
+#[tokio::test]
+async fn review_evidence_must_be_locatable_in_the_current_candidate() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list()),
+        ("STEP:chapter_draft", "林动赶到时，老铁匠已经死亡。".into()),
+        ("STEP:consistency_review", invented_evidence_review()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-evidence").await;
+    let novel = runtime.director.create_novel("伪造证据", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-evidence-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+    let prompts = llm.prompts();
+    assert_eq!(
+        prompts
+            .iter()
+            .filter(|prompt| prompt.contains("STEP:consistency_review"))
+            .count(),
+        1
+    );
+    assert!(
+        !prompts
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_repair")),
+        "fabricated evidence must fail closed instead of driving a repair"
     );
 }

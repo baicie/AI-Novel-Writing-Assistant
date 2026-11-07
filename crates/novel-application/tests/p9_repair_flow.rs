@@ -40,7 +40,7 @@ fn volume() -> String {
     serde_json::json!({"volumes":[{"volumeOrder":1,"title":"山门卷","roleLabel":"开局","coreReward":"入门","planningMode":"hard"}]}).to_string()
 }
 fn chapters() -> String {
-    serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"]}]}).to_string()
+    serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"按计划推进本章关键事件","enforcement":"hard","participants":["林动"]}]}]}).to_string()
 }
 fn issues() -> String {
     serde_json::json!({"issues":[

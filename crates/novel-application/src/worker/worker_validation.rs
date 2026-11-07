@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_chapter_list_without_obligations_remains_readable() {
+    fn generated_chapter_list_without_obligations_is_rejected() {
         let raw = serde_json::json!({
             "chapters": [{
                 "chapterOrder": 1,
@@ -588,8 +588,75 @@ mod tests {
             }]
         })
         .to_string();
-        let output = validate_structured_output("chapter_list", &raw).expect("旧计划应兼容");
-        let value: serde_json::Value = serde_json::from_str(&output).expect("输出应是 JSON");
-        assert!(value["chapters"][0].get("obligations").is_none());
+        let error = validate_structured_output("chapter_list", &raw).unwrap_err();
+        assert!(
+            error.contains("缺少 obligations"),
+            "new plans must not silently fall back to the legacy contract: {error}"
+        );
+    }
+
+    #[test]
+    fn generated_chapter_list_with_invalid_obligations_is_rejected() {
+        let wrong_type = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"],
+                "obligations": "林动必须入山"
+            }]
+        })
+        .to_string();
+        assert!(validate_structured_output("chapter_list", &wrong_type).is_err());
+
+        let empty = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"],
+                "obligations": []
+            }]
+        })
+        .to_string();
+        let error = validate_structured_output("chapter_list", &empty).unwrap_err();
+        assert!(
+            error.contains("没有 hard 义务"),
+            "an empty obligation list is not a valid v2 plan: {error}"
+        );
+
+        let all_advisory = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"],
+                "obligations": [{
+                    "type": "continuity_constraint",
+                    "description": "保持文风一致",
+                    "enforcement": "advisory"
+                }]
+            }]
+        })
+        .to_string();
+        let error = validate_structured_output("chapter_list", &all_advisory).unwrap_err();
+        assert!(error.contains("没有 hard 义务"), "{error}");
+    }
+
+    #[test]
+    fn historical_plan_without_obligations_remains_readable() {
+        let plan = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"]
+            }]
+        });
+        assert!(crate::obligations::parse_obligations(&plan["chapters"][0]).is_empty());
     }
 }
