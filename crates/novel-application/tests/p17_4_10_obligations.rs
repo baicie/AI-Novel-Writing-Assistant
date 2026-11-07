@@ -981,6 +981,51 @@ async fn review_evidence_must_be_locatable_in_the_current_candidate() {
     );
 }
 
+/// Beta-A1 诊断：结构化步骤失败时保留首次与修复的原始输出，便于不重跑付费模型即可定位。
+#[tokio::test]
+async fn structured_failure_artifact_keeps_raw_outputs_for_diagnosis() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", "不是 JSON".into()),
+        ("STEP:story_macro", "仍然不是 JSON".into()),
+    ]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "beta-a1-diag").await;
+    let novel = runtime
+        .director
+        .create_novel("结构化失败诊断", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "beta-a1-diag-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 20).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    let diagnostic = artifacts
+        .iter()
+        .find(|artifact| artifact.artifact_type == "structured_failure")
+        .expect("structured_failure artifact");
+    let payload: serde_json::Value = serde_json::from_str(&diagnostic.payload_json).unwrap();
+    assert_eq!(payload["stepId"], "story_macro");
+    assert_eq!(payload["firstRaw"], "不是 JSON");
+    assert_eq!(payload["repairRaw"], "仍然不是 JSON");
+    assert!(
+        payload["firstError"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
+    assert!(
+        payload["repairError"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
+}
 /// Beta-A1 运行时探针：直接检查 worker 本轮实际发送的 Prompt 文本与产物，
 /// 用版本独有的模板措辞证明运行时确实使用了 chapter-list-v2 / chapter-draft-v3 /
 /// consistency-review-v2 / chapter-repair-v2，而不是只检查源码默认值。
