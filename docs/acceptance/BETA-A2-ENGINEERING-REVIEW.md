@@ -21,7 +21,7 @@
 | `beta` 基线 | `d66d565c254c8a70f11c5b5c833f50fba5f50518` |
 | `main` | `eff69f229727ab90f4102c05cfc705116cb1ded5`，未修改 |
 | 工作分支 | `fix/beta-a2-planner-invariants` |
-| 代码 HEAD | `5a6bae18`（关键事件强制、规范内容、上下文预算） |
+| 代码 HEAD | `5634d0c4`（关键事件强制、规范内容、上下文预算、模块拆分） |
 | 客户端/E2E HEAD | `ab22d638`（固定 v2/v3 与 mock 夹具） |
 | 报告提交 | 见 PR 最新提交（仅文档） |
 | PR | 见第 12 节 |
@@ -75,7 +75,9 @@
 2. Planner 结构化输出稳定性仍依赖模型；`structured_failure` 已保留原始输出，便于下一次
    失败直接诊断。
 3. Reviewer 的文学语义判断仍依赖模型；确定性代码只保证引用、规范内容与覆盖。
-4. `worker.rs` 仍超过 1,300 行硬阈值，后续按职责拆分。
+4. `worker.rs` 仍超过 1,300 行硬阈值（已知 P2）；本轮把 Planner 上下文预算拆到
+   `worker/context_budget.rs`，`worker_validation.rs` 已降到 1,046 行，Worker 主体仍需后续
+   按职责拆分。
 
 ## 4. 失败先行测试与证据
 
@@ -106,6 +108,8 @@
   合法 JSON，keyEvents 完整保留。
 - `planner_context_fails_when_mandatory_events_exceed_budget`：必选事件超预算 → 明确失败，
   不返回截断 JSON。
+- 模块拆分：`worker/context_budget.rs`（299 行）承接上下文预算；`worker_validation.rs`
+  1,046 行；拆分仅移动代码，行为由同一组测试覆盖。
 
 ## 5. Phase C：作者输入来源（缺口）
 
