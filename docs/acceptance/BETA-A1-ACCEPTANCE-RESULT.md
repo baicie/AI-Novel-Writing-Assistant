@@ -4,11 +4,11 @@
 
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
-| `ENGINEERING_READY` | **YES** | PR #24 已合并到 beta（`1d21ba6b`）；CI 全部通过；16k 修复复测收敛 |
-| `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | 主样本通过；8192 修复截断导致 M1_FAIL；16k 复测 Reviewer/Repair 均通过，待 #24 合并后的最终 M1 与作者评分 |
+| `ENGINEERING_READY` | **YES** | PR #24 已合并到 beta（`1d21ba6b`）；CI 全部通过；应用在 Planner 失败时正确 fail-closed |
+| `M1_ACCEPTANCE` | **M1_FAIL** | beta `1d21ba6b` 最终 M1 在 `story_macro` 处失败：非法 JSON，结构化修复仍缺 `protagonist_core`；无候选、无正式正文 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
-| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1 最终复测/作者评分未完成、人工 GUI 未执行，不能用 Mock/E2E 代替 |
+| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1_FAIL（Planner 结构化输出失败）、人工 GUI 未执行，不能用 Mock/E2E 代替 |
 
 ## 1. 基线
 
@@ -259,17 +259,37 @@ review2 5,688 / 1,124。主样本 6 次 + 两次探针各 3 次，合计 12 次�
 第一次探针的根因是确定性契约缺陷：旧实现把达到 8192 输出上限的截断修复文本保存为候选，
 复验自然继续报 `ch1-req-1`。16k 复测证明提高修复输出预算后 Reviewer/Repair 能收敛。
 
-#### M1 判定
+#### 阶段性判定（已被 5.4 最终 M1 覆盖）
 
-**`M1_RETEST_PENDING`**。
+当时为 **`M1_RETEST_PENDING`**：
 
 - beta `90925ddd` 上的 M1 为 **FAIL**：8192 修复截断导致失败路径不收敛。
 - 16k 修复复测已经收敛；PR #24 已合并到 beta（`1d21ba6b`），CI 全部通过。
-- 最终 M1 需在 beta `1d21ba6b` 上跑一次完整 M1（或等价 worker 级失败路径）并由作者阅读
-  评分；在完成前不标 `M1_PASS`。
+- 后续在 beta 上执行最终 M1，结果见 5.4（Planner 结构化输出失败，M1_FAIL）。
 
 PR #24 变更：修复输出预算至少 16,384 token；completion 达到预算时不再保存候选，
 记录 usage 并进入 DataIntegrity 暂停；新增 repair budget / 截断判定单元测试。
+
+### 5.4 beta 最终 M1（`1d21ba6b`，含 #24）
+
+| 项 | 值 |
+| --- | --- |
+| Run | `4d4bd5f1-75ba-4690-95ee-4c60d599353d` |
+| 模型 | `deepseek-v4.1-flash` |
+| 结果 | `paused` / `data_integrity` |
+| 失败位置 | Planner（`story_macro`） |
+| 暂停原因 | `模型输出不是合法 JSON；修复重试仍失败：结构化产物缺少非空字段 protagonist_core` |
+| 产物 | 仅 `novel_seed`；无 story_macro/cast/volume/chapter_list/context/正文/审校 |
+| usage | 记录 1 次调用，1,960 prompt / 11,029 completion tokens；暂停原因显示结构化修复也执行过，调用数可能少计一次 |
+| 质量债务 | 0 |
+
+判定：**`M1_FAIL`**（Planner 结构化输出失败，未进入章节义务链路）。这次失败不是 #24 引入的
+回归——#24 只改 bounded repair；同一模型在 90925ddd 的主样本曾通过 story_macro。应用行为
+正确：一次结构化修复后仍不合格即 `DataIntegrity` 暂停，没有候选、没有正式正文，也没有
+把失败当成零问题。
+
+没有重试本次 M1：任务禁止无根据的连续付费调用。若继续，需要先决定是换模型，还是先补
+Planner 输出诊断（保留失败原始输出/提高结构化规划预算），再获得新的明确授权。
 
 ## 6. B1 桌面 GUI 自动化 smoke
 
@@ -356,13 +376,9 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ### P1
 
-1. **修复输出截断被保存为候选**：M1 失败路径探针中 Repair 的 completion tokens 正好为 8192，
-   返回 641 字且在“他喊了声”处中断；旧实现仍保存该候选，复验残留 `ch1-req-1`，修复路径
-   无法收敛。PR #24 已修复并合并到 beta（`1d21ba6b`）：提高修复输出预算到至少 16,384 token，
-   并在达到上限时 fail-closed（记录 usage、标记 attempt 中断、DataIntegrity 暂停）。
-   16k 复测已收敛，PR #24 CI 全部通过。
-2. 其余核心流程未发现可复现阻断；11/11 GUI spec 与 2/2 重启验收通过，主样本 Writer 遵守
-   核心 hard 义务。
+无开放 P1。修复输出截断 P1 已由 PR #24 修复并合并到 beta（`1d21ba6b`）：修复输出预算至少
+16,384 token，达到上限时 fail-closed；16k 复测收敛，CI 全部通过。最终 M1 在 Planner 处失败
+属于模型结构化输出稳定性问题（见 P2），不是已证实的确定性代码 P1。
 
 ### P2
 
@@ -375,7 +391,12 @@ bash scripts/run-p172-e2e-isolated.sh \
 5. 服务端 `chapterAcceptance` 义务模型与 Rust 领域模型尚未建立字段映射。
 6. 严格“每章至少一条 hard 义务”可能对过渡章节偏严；本次真实样本生成 7 条 hard 义务并
    通过，未出现误报，但仍需更多样本。
-7. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
+7. **Planner 结构化输出稳定性**：最终 M1 中 `deepseek-v4.1-flash` 首次输出非法 JSON，
+   结构化修复后仍缺 `protagonist_core`，应用 fail-closed。同一模型在 90925ddd 上曾通过，
+   目前无法区分是模型随机性、网关截断还是输出预算不足；失败原始输出没有被保留。
+8. **结构化修复的 usage 可能少计一次调用**：暂停原因显示执行了结构化修复，但 run usage
+   只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
+9. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
    不影响产品判断。
 
 ### P3
@@ -394,6 +415,8 @@ bash scripts/run-p172-e2e-isolated.sh \
 - 失败路径复测：8192 预算 FAIL（截断）；16,384 预算 PASS（Reviewer 6 issues 含 `ch1-req-1`，
   Repair 1,512 字完整，复验 `issues=0`）。
 - PR #24 合并到 beta：`1d21ba6b`；beta 树与修复分支 `8eae5d40` 一致。
+- beta 最终 M1：`story_macro` 结构化输出失败（非法 JSON；修复后缺 `protagonist_core`），
+  应用 DataIntegrity 暂停，无候选/正文；模型输出质量失败，不是应用崩溃。
 - GUI smoke：11/11 spec 通过；创建导航 + 重启 2/2 通过。
 - 完整 workspace、client 与 CI 结果沿用同一树的最近一次通过记录（`6ddf96cc`，与 beta 树一致）：
   workspace 602 passed、test-harness 114 passed、client 290 passed、GitHub Actions 全部通过；
@@ -402,15 +425,17 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 在 beta `1d21ba6b` 上执行最终 M1（主样本 + 失败路径；16k 预算）并由作者阅读评分；
-   完成后才能把 M1 从 `M1_RETEST_PENDING` 推进到 PASS/FAIL。
-2. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
-3. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
+1. 先补 Planner 失败诊断（保留结构化失败的原始输出，判断截断/别名/模型随机性），再决定
+   是否提高结构化规划输出预算；不要在无证据时反复调 Prompt。
+2. 换用结构化输出更稳定的模型，或同一模型在明确授权下重试一次最终 M1；重试前记录模型与
+   费用上限，仍禁止自动连续调用。
+3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+4. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 
 ## 10. 最终裁决
 
-- `ENGINEERING_READY`：**YES**（P1 修复已合并到 beta `1d21ba6b`，CI 与 16k 复测通过）
-- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（16k 复测收敛；待 beta 上的最终 M1 与作者评分）
+- `ENGINEERING_READY`：**YES**（#24 已合并，CI 通过；应用在 Planner 失败时正确暂停）
+- `M1_ACCEPTANCE`：**M1_FAIL**（beta `1d21ba6b` 最终 M1 在 `story_macro` 结构化输出处失败）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
-- `PUBLIC_BETA_READINESS`：**NOT_READY**（最终 M1 与人工 GUI 未完成）
+- `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 FAIL 与人工 GUI 未完成）
