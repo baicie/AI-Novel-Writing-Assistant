@@ -5,7 +5,7 @@
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
 | `ENGINEERING_READY` | **YES** | PR #24 已合并到 beta（`1d21ba6b`）；CI 全部通过；应用在 Planner 失败时正确 fail-closed |
-| `M1_ACCEPTANCE` | **M1_FAIL** | beta `1d2adaf1` 带诊断重试：Planner 计划漏掉 story_macro 的“目击灭口”义务且生成冲突的 `ch1-req-2`；Reviewer 正确报 high，Repair 一次后仍残留，安全暂停 |
+| `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | beta `d66d565c` 带 Planner 覆盖重试：keyEvents/义务逐条覆盖，Reviewer clean，候选 2,412 字；仅剩作者阅读评分 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
 | `PUBLIC_BETA_READINESS` | **NOT_READY** | M1_FAIL（Planner 结构化输出失败）、人工 GUI 未执行，不能用 Mock/E2E 代替 |
@@ -327,6 +327,31 @@ Reviewer 正确识别了冲突，Repair 受一次预算限制无法同时满足�
 M1 最终为 **`M1_FAIL`**。不做无根据的再次重试；下一步应先处理 Planner 的义务覆盖与冲突，
 或换用更稳定的结构化规划模型，再由用户明确授权复测。
 
+### 5.6 Planner 覆盖修复后的 M1 重试（beta `d66d565c`）
+
+| 项 | 值 |
+| --- | --- |
+| Run | `c62263b7-d65a-422e-bca3-0e904abb65ad` |
+| 模型 | `deepseek-v4.1-flash` |
+| 状态 | `waiting_approval`（最终确认门，未提交正文） |
+| 调用 | 6 次；18,594 prompt / 47,921 completion tokens |
+| 候选 | 2,412 字；仅 draft，未触发 Repair |
+| Reviewer | `issues=0`、`advisoryIssueCount=0`；clean |
+| story_macro.keyEvents | KE-001 拾玉、KE-002 目击灭口、KE-003 禁止事后到达、KE-004 禁止提前揭示、KE-005 因果、KE-006 连续性（advisory） |
+| chapter_list 覆盖 | 6 条义务均带 `sourceEventId`；类型一致；无“尚未目击”冲突义务；覆盖校验通过 |
+| ContextTrace | obligationIds 6 条；义务文本含“来源事件”；Writer 收到冻结计划 |
+
+正文核验：
+
+- 林动先在雪夜拾得发光玉佩，随后在铁匠铺窗缝外亲眼看见老周头被斗篷人灭口；
+- 凶手察觉并追杀，林动携玉佩逃亡；没有“到达时已死”的事后改写；
+- 未揭示主谋、玉佩真正来历或旧案全貌，只留“林……”与旧案物件等线索；
+- 归属、因果、顺序与受限视角均与计划一致；Reviewer 未发现 high 问题。
+
+**阶段性结论**：Planner 覆盖修复生效，主样本与失败路径（16k 探针）均通过工程一致性检查。
+M1 仍保持 `M1_RETEST_PENDING`，只差作者对这篇 2,412 字正文的阅读评分与修改成本；人工 GUI
+仍为 `MANUAL_GUI_NOT_RUN`。
+
 ## 6. B1 桌面 GUI 自动化 smoke
 
 ### 6.1 构建与运行
@@ -431,13 +456,10 @@ bash scripts/run-p172-e2e-isolated.sh \
    非法 JSON，结构化修复后仍缺 `protagonist_core`，应用 fail-closed。PR #25 已合并到 beta
    （`1d2adaf1`）：`structured_failure` 诊断产物（脱敏、限长）会在下一次失败时保留首次与
    修复原始输出、错误、token 与模型；第一次失败的原始输出仍无法回溯。
-8. **Planner 义务覆盖与一致性**：带诊断重试中，`story_macro` 要求第 1 章“发现玉佩后亲眼
-   撞见老铁匠被灭口”，但 `chapter_list` 没有生成对应的 required_event，反而生成
-   `ch1-req-2`“靠近铁匠铺，尚未目击命案，只为询问玉佩来历”。Writer 按 macro 写目击，
-   Reviewer 正确报 `ch1-req-2` 冲突与 `ch1-con-1` 视角越界；一次 Repair 后仍残留 2 条 high，
-   按设计停在 Safety。PR #26 已合并到 beta（`d66d565c`）：`story-macro-v2` 输出
-   `keyEvents`，`chapter-list-v3` 必须逐条覆盖并带 `sourceEventId`，未覆盖会在 Writer
-   前暂停；待新的明确授权后复测。
+8. **Planner 义务覆盖与一致性**：带诊断重试暴露的 `story_macro` 目击义务漏覆盖与
+   `ch1-req-2` 冲突，已由 PR #26（`d66d565c`）修复：keyEvents + 逐条覆盖 + sourceEventId
+   校验。复测中 6 条 keyEvents 全部覆盖，Reviewer clean；该 P2 已关闭，后续只需关注模型
+   稳定性。
 9. **结构化修复的 usage 可能少计一次调用**：第一次 beta 最终 M1 的暂停原因显示执行了
    结构化修复，但 run usage 只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
 10. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
@@ -475,11 +497,10 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 在 beta `d66d565c` 上经明确授权重试最终 M1：`story_macro` 必须输出 `keyEvents`，
-   `chapter_list` 必须逐条覆盖；若 Plan 仍生成冲突义务或漏覆盖，Run 会在 Writer 前暂停，
-   并保留计划/审校/诊断产物。
-2. 若重试仍失败，读取 Run 产物判断是模型未输出 keyEvents、覆盖校验拦截，还是 Reviewer/
-   Repair 残留；再决定换模型或进一步修 Planner，不在无证据时反复调 Prompt。
+1. 由作者阅读本次 2,412 字候选，记录 1–5 分与修改成本；接受则 M1 可推进到 PASS，
+   否则记录 M1_FAIL/修改项，不自动重跑。
+2. 由真实作者按第 7 节流程完成人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+3. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 3. 由真实作者阅读候选并记录 1–5 分与修改成本；本次候选停在最终确认门前，未提交正文。
 4. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
 5. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
@@ -487,7 +508,7 @@ bash scripts/run-p172-e2e-isolated.sh \
 ## 10. 最终裁决
 
 - `ENGINEERING_READY`：**YES**（#24/#25 已合并，CI 通过；应用在 Planner/Repair 失败时正确暂停）
-- `M1_ACCEPTANCE`：**M1_FAIL**（带诊断重试仍残留在 `ch1-req-2`/`ch1-con-1` 两条 high）
+- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（Planner 覆盖修复后主样本通过，待作者阅读评分）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
 - `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 FAIL 与人工 GUI 未完成）
