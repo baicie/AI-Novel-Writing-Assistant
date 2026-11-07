@@ -2,7 +2,7 @@
 
 ## 结论
 
-**ENGINEERING_STATUS：READY_FOR_REVIEW。**
+**ENGINEERING_STATUS：NEEDS_FIX（评审发现 Planner 输入未按 Run 冻结的 P1）。**
 **PLANNER_CONTRACT：PARTIAL。**
 **M1_ACCEPTANCE：RETEST_PENDING（Beta-A2 HEAD 需要新的真实模型验收；Beta-A1 HEAD 已有一次授权 PASS）。**
 **GUI_AUTOMATED：PASS（见第 7 节）。**
@@ -11,8 +11,9 @@
 
 本轮修复了三个确定性契约缺陷：story-macro-v2 缺失 keyEvents 时静默通过、sourceEventId
 只校验形式不校验规范内容、Planner 上下文按字符截断可能损坏 JSON/丢失关键事件。
-作者“当前章节目标”没有独立的持久化字段，只能写进小说简介；这是明确的数据模型缺口，
-本轮不凭空新增剧情要求，记录为 PARTIAL 原因。
+评审又发现一个未修复的 P1：Planner 的 book 输入没有按 Run 冻结，context 之前的计划/
+story_macro 更新可能混入当前 Run。作者“当前章节目标”没有独立的持久化字段，只能写进
+小说简介；这是明确的数据模型缺口，本轮不凭空新增剧情要求，记录为 PARTIAL 原因。
 
 ## 1. 基线与最终 HEAD
 
@@ -45,6 +46,18 @@
 ### P0
 
 无。
+
+### P1（评审发现，未修复）——必须先处理
+
+**Planner 输入没有按 Run 冻结。** `structured_prompt` 的 character_cast / volume_strategy /
+chapter_list 上下文，以及 `assemble_context` 的 book 来源，仍使用 `latest_payload` /
+`artifact_source` 的最新版本；`RunContract` 没有记录 open 时的 story_macro / character_cast /
+volume_strategy / chapter_list 版本。场景：Run-A 在 context 之前暂停，作者更新 story_macro
+或 chapter_list，Run-A 恢复后会读取新版本，混入 Run-B/作者的更新。
+
+现有 R2 测试只覆盖 context 产物生成之后的 review/repair pinning；没有覆盖 context 生成前的
+plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（或按 run_id 选本 Run 产物），
+让 Planner/Context 使用冻结版本，并补交错 Run 测试。这是 PR #27 合并前的阻断项。
 
 ### P1（已修复）
 
@@ -135,7 +148,9 @@
 
 ## 6. Run 与版本一致性（Phase E）
 
-已确认并复用既有确定性测试，无需改代码：
+**评审结论：不完整。** 已有测试覆盖 **context 产物生成之后**的 review/repair 版本固定，
+但没有覆盖 **context 之前的 Planner book 输入更新**；见第 3 节 P1。以下测试仍然有效，
+但不能证明 Phase E 全部通过：
 
 - `review_pins_the_context_plan_version_per_run`：Run-A/Run-B 各自读取自己的 context 计划版本。
 - `a_reviewing_run_keeps_its_own_frozen_plan`：Run-A 审校固定版本 1，不被版本 2 替换。
@@ -144,7 +159,8 @@
 - `missing_plan_version_is_recovered_from_trace_hash`：旧 context 用来源 hash 定位冻结计划。
 - `unrecoverable_plan_version_fails_closed`：无法定位时暂停。
 
-本轮全量测试通过；未复现新的版本混用缺陷，因此没有修改 Run/CAS/租约逻辑。
+本轮全量测试通过，但没有构造“context 前更新 story_macro/chapter_list”的交错测试。
+该窗口存在真实混用风险，PR #27 不应在修复前合并。
 
 ## 7. 工程测试与 CI
 
@@ -210,10 +226,11 @@ Mock 通过只代表工程链路与 fail-closed 行为，不把 M1 改为 PASS�
 
 ## 8. 未完成任务及原因
 
-1. Phase C 章节目标字段：数据模型缺口，需要迁移 + UI + contract，未在时间盒内实现。
-2. Phase F usage 逐次调用：时间不足，保留 P2 与复现证据，未改代码。
-3. Native E2E 的完整套件没有全部重跑；本轮只跑与 Planner 契约/章节创建相关的冒烟。
-4. 真实 M1 复测未执行；Beta-A2 新合同需要新的明确授权、模型与预算。
+1. **Phase E P1**：Planner 输入未按 Run 冻结；评审发现，未修复。
+2. Phase C 章节目标字段：数据模型缺口，需要迁移 + UI + contract，未在时间盒内实现。
+3. Phase F usage 逐次调用：时间不足，保留 P2 与复现证据，未改代码。
+4. Native E2E 的完整套件没有全部重跑；本轮只跑与 Planner 契约/章节创建相关的冒烟。
+5. 真实 M1 复测未执行；Beta-A2 新合同需要新的明确授权、模型与预算。
 
 ## 9. M1 最新真实验收状态
 
@@ -231,7 +248,9 @@ Mock 通过只代表工程链路与 fail-closed 行为，不把 M1 改为 PASS�
 
 ## 11. 下一阶段建议
 
-1. 评审并合并本 Draft PR（不在本轮自动合并）。
+1. **先修 Phase E P1**：在 `open_run` 冻结 story_macro/character_cast/volume_strategy/
+   chapter_list 版本，或让 Planner/Context 按 run_id 选本 Run 产物；补交错 Run 测试。
+   修复前不合并本 Draft PR。
 2. 为 M1 执行器固定 `story_macro: story-macro-v2` / `chapter_list: chapter-list-v3`，
    在新的明确授权、模型与预算下重跑 M1；Mock 通过不能标 M1 PASS。
 3. 设计并实现持久化章节目标字段（Phase C），补齐作者输入到 Planner 的可审计链路。
