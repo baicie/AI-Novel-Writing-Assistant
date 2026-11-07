@@ -47,6 +47,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             template: "STEP:story_macro\n你是资深小说作者与剧情策划。根据故事输入输出严格 JSON：expansion（expanded_premise、protagonist_core、conflict_engine、conflict_layers、mystery_box、emotional_line、setpiece_seeds、tone_reference）、decomposition（selling_point、core_conflict、main_hook、progression_loop、growth_path、major_payoffs、ending_flavor）、constraints、issues。不要输出 Markdown。\n故事输入：{{story_input}}",
         },
         PromptAsset {
+            id: "story_macro",
+            version: "story-macro-v2",
+            family: "director",
+            template: "STEP:story_macro\n你是资深小说作者与剧情策划。根据故事输入输出严格 JSON：expansion（expanded_premise、protagonist_core、conflict_engine、conflict_layers、mystery_box、emotional_line、setpiece_seeds、tone_reference）、decomposition（selling_point、core_conflict、main_hook、progression_loop、growth_path、major_payoffs、ending_flavor）、keyEvents、constraints、issues。keyEvents 是跨章节必须发生的关键事件数组，不能为空；每项包含 id、chapterOrder、type、description、participants、enforcement；type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory；id 全书唯一。必须把 constraints 中明确指定章节的关键事件写成 chapterOrder 对应的 keyEvent，例如“第1章必须……”必须有一条 chapterOrder=1 的 required_event；不得把同一事件写到多个章节，不得写与 constraints 相反的事件。不要输出 Markdown。\n故事输入：{{story_input}}",
+        },
+        PromptAsset {
             id: "character_cast",
             version: "character-cast-v1",
             family: "director",
@@ -69,6 +75,12 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             version: "chapter-list-v2",
             family: "director",
             template: "STEP:chapter_list\n依据 story_macro、卷策略与人物阵容输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames、obligations）。obligations 是本章必须遵守的结构化义务数组，不能省略且每章至少一条 hard 义务；每项包含 id、type、description、enforcement、participants、source、evidence。type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory。required_event 写本章必须发生的关键事件；forbidden_event 写不得提前或错误发生的事件；causal_constraint 写关键因果；ordering_constraint 写关键顺序；continuity_constraint 写已确认历史事实约束。id 使用 ch{chapterOrder}-{类型缩写}-{序号}，全书唯一。只把会改变剧情因果、参与者或时间顺序的要求写成 hard；普通文学描写写成 advisory 或不要写成义务。不得引用未来章节才揭示的事实。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
+        },
+        PromptAsset {
+            id: "chapter_list",
+            version: "chapter-list-v3",
+            family: "director",
+            template: "STEP:chapter_list\n依据 story_macro、卷策略与人物阵容输出严格 JSON：chapters（chapterOrder 从 1 递增且唯一，每章包含 title、volumeTitle、summary、characterNames、obligations）。obligations 是本章必须遵守的结构化义务数组，不能省略且每章至少一条 hard 义务；每项包含 id、type、description、enforcement、participants、source、evidence、sourceEventId。先读取 story_macro.keyEvents：对每一条 chapterOrder 等于本章的 hard 关键事件，必须生成一条同类型 hard 义务，sourceEventId 填该事件 id；不得省略、不得改写成相反含义（例如 macro 要求本章目击灭口，不得写成“尚未目击”或“到达时已死”）；不属于本章的 keyEvents 不得写入本章。summary 必须与 obligations 一致，summary 中出现的关键事件必须在 required_event 中。如果 story_macro 没有 keyEvents，按本章摘要生成义务。type 只能是 required_event、forbidden_event、participant、causal_constraint、ordering_constraint、continuity_constraint；enforcement 只能是 hard 或 advisory。id 使用 ch{chapterOrder}-{类型缩写}-{序号}，全书唯一。只把会改变剧情因果、参与者或时间顺序的要求写成 hard；普通文学描写写成 advisory 或不要写成义务。不得引用未来章节才揭示的事实。章节必须属于已规划的卷，人物引用必须来自人物阵容。\n{{context}}",
         },
         PromptAsset {
             id: "structured_repair",
@@ -203,6 +215,21 @@ mod tests {
         vars.insert("context".into(), "已确认上下文".into());
         let rendered = render(asset.template, &vars).unwrap();
         assert!(rendered.contains("已确认上下文"));
+    }
+
+    #[test]
+    fn planner_prompts_cover_story_key_events() {
+        let story = resolve("story_macro", "story-macro-v2").unwrap();
+        assert!(story.template.contains("keyEvents"));
+        assert!(story.template.contains("chapterOrder"));
+
+        let chapter = resolve("chapter_list", "chapter-list-v3").unwrap();
+        assert!(chapter.template.contains("keyEvents"));
+        assert!(chapter.template.contains("sourceEventId"));
+        assert!(chapter.template.contains("不得改写成相反含义"));
+
+        assert!(resolve("story_macro", "story-macro-v1").is_ok());
+        assert!(resolve("chapter_list", "chapter-list-v2").is_ok());
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub(crate) struct ChapterObligation {
     pub participants: Vec<String>,
     pub source: String,
     pub evidence: Option<String>,
+    pub source_event_id: Option<String>,
 }
 
 /// Parse already-normalized obligations from a target chapter plan. Older plans
@@ -88,6 +89,7 @@ fn parse_one(value: &Value) -> Option<ChapterObligation> {
             .unwrap_or("chapter_plan")
             .to_string(),
         evidence: optional_text(object.get("evidence")),
+        source_event_id: optional_text(object.get("sourceEventId")),
     })
 }
 
@@ -140,6 +142,7 @@ pub(crate) fn normalize_chapter_obligations(
         used_ids.insert(id.clone());
         let source = optional_text(item.get("source")).unwrap_or_else(|| "chapter_plan".into());
         let evidence = optional_text(item.get("evidence"));
+        let source_event_id = optional_text(item.get("sourceEventId"));
         normalized.push(json!({
             "id": id,
             "chapterOrder": chapter_order,
@@ -149,6 +152,7 @@ pub(crate) fn normalize_chapter_obligations(
             "participants": participants,
             "source": source,
             "evidence": evidence,
+            "sourceEventId": source_event_id,
         }));
     }
     if !normalized
@@ -160,6 +164,73 @@ pub(crate) fn normalize_chapter_obligations(
         ));
     }
     object.insert("obligations".into(), Value::Array(normalized));
+    Ok(())
+}
+
+/// Normalize the optional `story_macro.keyEvents` array. These are the
+/// chapter-level key events the planner must carry into `chapter_list`
+/// obligations; an empty array is rejected so a planner cannot silently skip
+/// coverage by emitting `keyEvents: []`.
+pub(crate) fn normalize_story_key_events(value: &mut Value) -> Result<(), String> {
+    let Some(raw) = value.get_mut("keyEvents") else {
+        return Ok(());
+    };
+    let items = raw
+        .as_array()
+        .ok_or_else(|| "story_macro.keyEvents 必须是数组".to_string())?;
+    if items.is_empty() {
+        return Err("story_macro.keyEvents 不能为空；至少列出一条关键事件".into());
+    }
+    let mut normalized = Vec::with_capacity(items.len());
+    let mut used = BTreeSet::new();
+    for (index, item) in items.iter().enumerate() {
+        let object = item
+            .as_object()
+            .ok_or_else(|| "story_macro.keyEvents 项必须是对象".to_string())?;
+        let chapter_order = object
+            .get("chapterOrder")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "story_macro.keyEvents 项缺少 chapterOrder".to_string())?;
+        if chapter_order < 1 {
+            return Err("story_macro.keyEvents.chapterOrder 必须从 1 开始".into());
+        }
+        let kind = normalize_kind(object.get("type").or_else(|| object.get("kind")))?;
+        let description = required_text(object.get("description"), "description")?;
+        let enforcement = normalize_enforcement(object.get("enforcement"))?;
+        let participants = normalize_participants(object.get("participants"))?;
+        let explicit = object
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let id = match explicit {
+            Some(id) => {
+                if !used.insert(id.to_string()) {
+                    return Err(format!("story_macro.keyEvents ID 重复：{id}"));
+                }
+                id.to_string()
+            }
+            None => {
+                let mut suffix = index + 1;
+                loop {
+                    let candidate = format!("ch{chapter_order}-event-{suffix}");
+                    if used.insert(candidate.clone()) {
+                        break candidate;
+                    }
+                    suffix += 1;
+                }
+            }
+        };
+        normalized.push(json!({
+            "id": id,
+            "chapterOrder": chapter_order,
+            "type": kind,
+            "description": description,
+            "enforcement": enforcement,
+            "participants": participants,
+        }));
+    }
+    value["keyEvents"] = Value::Array(normalized);
     Ok(())
 }
 
@@ -335,6 +406,9 @@ fn push_obligation_line(output: &mut String, item: &ChapterObligation) {
     }
     if let Some(evidence) = &item.evidence {
         output.push_str(&format!("  依据：{evidence}\n"));
+    }
+    if let Some(event_id) = &item.source_event_id {
+        output.push_str(&format!("  来源事件：{event_id}\n"));
     }
 }
 
@@ -590,6 +664,50 @@ mod tests {
     }
 
     #[test]
+    fn story_key_events_get_stable_ids_and_fields_normalized() {
+        let mut macro_value = json!({
+            "keyEvents": [{
+                "chapterOrder": 1,
+                "type": "requiredEvent",
+                "description": "林动亲眼撞见老铁匠被灭口",
+                "participants": ["林动", "老铁匠"],
+                "enforcement": "hard"
+            }]
+        });
+        normalize_story_key_events(&mut macro_value).unwrap();
+        let event = &macro_value["keyEvents"][0];
+        assert_eq!(event["id"], "ch1-event-1");
+        assert_eq!(event["type"], "required_event");
+        assert_eq!(event["enforcement"], "hard");
+        assert_eq!(event["participants"][0], "林动");
+    }
+
+    #[test]
+    fn empty_story_key_events_are_rejected() {
+        let mut macro_value = json!({"keyEvents": []});
+        let error = normalize_story_key_events(&mut macro_value).unwrap_err();
+        assert!(error.contains("不能为空"), "{error}");
+    }
+
+    #[test]
+    fn obligation_source_event_id_is_preserved() {
+        let mut chapter = json!({
+            "chapterOrder": 1,
+            "obligations": [{
+                "type": "required_event",
+                "description": "林动亲眼撞见老铁匠被灭口",
+                "sourceEventId": "ch1-event-1"
+            }]
+        });
+        let mut used = BTreeSet::new();
+        normalize_chapter_obligations(&mut chapter, 1, &mut used).unwrap();
+        let obligation = &chapter["obligations"][0];
+        assert_eq!(obligation["sourceEventId"], "ch1-event-1");
+        let parsed = parse_obligations(&chapter);
+        assert_eq!(parsed[0].source_event_id.as_deref(), Some("ch1-event-1"));
+    }
+
+    #[test]
     fn rejects_missing_empty_or_advisory_only_obligations() {
         let mut missing = json!({"chapterOrder": 1});
         let mut used = BTreeSet::new();
@@ -637,6 +755,7 @@ mod tests {
             participants: vec!["林动".into()],
             source: "chapter_plan".into(),
             evidence: None,
+            source_event_id: None,
         }
     }
 

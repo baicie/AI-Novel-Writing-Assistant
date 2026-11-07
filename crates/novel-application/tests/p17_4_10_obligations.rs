@@ -1026,3 +1026,103 @@ async fn structured_failure_artifact_keeps_raw_outputs_for_diagnosis() {
             .is_some_and(|text| !text.is_empty())
     );
 }
+
+fn story_macro_with_key_events() -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&story_macro()).unwrap();
+    value["keyEvents"] = serde_json::json!([{
+        "id": "ch1-event-1",
+        "chapterOrder": 1,
+        "type": "required_event",
+        "description": "林动亲眼撞见老铁匠被杀",
+        "participants": ["林动", "老铁匠"],
+        "enforcement": "hard"
+    }]);
+    value.to_string()
+}
+
+fn chapter_list_with_key_coverage() -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&chapter_list()).unwrap();
+    value["chapters"][0]["obligations"][0]["sourceEventId"] = serde_json::json!("ch1-event-1");
+    value.to_string()
+}
+
+#[tokio::test]
+async fn missing_story_key_event_coverage_pauses_before_writing() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro_with_key_events()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list()),
+        ("STEP:chapter_draft", "不应到达的正文".into()),
+        ("STEP:consistency_review", clean_review()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-coverage-missing").await;
+    let novel = runtime
+        .director
+        .create_novel("关键事件覆盖", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-coverage-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+    let detail = runtime
+        .director
+        .get_run_detail(&novel.id, &run_id)
+        .await
+        .unwrap();
+    assert!(
+        detail
+            .pause_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("未覆盖")),
+        "coverage error must be explicit: {:?}",
+        detail.pause_reason
+    );
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_draft")),
+        "an uncovered key event must not reach the writer"
+    );
+}
+
+#[tokio::test]
+async fn covered_story_key_events_reach_the_writer_with_source_id() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro_with_key_events()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list_with_key_coverage()),
+        ("STEP:chapter_draft", "候选正文".into()),
+        ("STEP:consistency_review", clean_review()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-coverage-ok").await;
+    let novel = runtime
+        .director
+        .create_novel("关键事件已覆盖", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-coverage-ok-open").await;
+    let (status, _signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "succeeded");
+    let writer = llm
+        .prompts()
+        .into_iter()
+        .find(|prompt| prompt.contains("STEP:chapter_draft"))
+        .expect("writer prompt");
+    assert!(
+        writer.contains("来源事件：ch1-event-1"),
+        "writer must receive the frozen key event reference"
+    );
+}

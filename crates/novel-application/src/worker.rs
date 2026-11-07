@@ -1862,7 +1862,8 @@ async fn execute_structured(
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
         let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
         let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-        match validate_chapter_plan_references(&payload, &cast, &volume) {
+        let macro_payload = latest_payload(&artifacts, "story_macro", book_scope())?;
+        match validate_chapter_plan_references(&payload, &cast, &volume, &macro_payload) {
             Ok(payload) => payload,
             Err(error) => {
                 worker
@@ -2096,7 +2097,7 @@ async fn structured_prompt(
                 "story_input".into(),
                 format!("{}\n{}", novel.title, novel.description),
             );
-            ("story_macro", "story-macro-v1", vars)
+            ("story_macro", "story-macro-v2", vars)
         }
         "character_cast" => {
             let mut vars = BTreeMap::new();
@@ -2124,7 +2125,7 @@ async fn structured_prompt(
                     24_000,
                 )?,
             );
-            ("chapter_list", "chapter-list-v2", vars)
+            ("chapter_list", "chapter-list-v3", vars)
         }
         "consistency_review" => {
             let candidate = worker
@@ -2173,7 +2174,7 @@ fn structured_step_requirement(step_id: &str) -> &'static str {
             "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
         }
         "chapter_list" => {
-            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。"
+            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。若 story_macro 有 keyEvents，本章每一条 hard keyEvent 必须有同类型 hard 义务，sourceEventId 与事件 id 一致；不得把其他章节的事件写进本章。"
         }
         "consistency_review" => {
             "只输出 issues 数组；每项包含 type、severity、evidence、suggestion；违反章节义务时 obligationId 必须来自上下文中的义务 ID。"
