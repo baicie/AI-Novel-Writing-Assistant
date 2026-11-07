@@ -645,6 +645,7 @@ impl Worker {
         let prompt = novel_prompt::render(repair_asset.template, &vars)
             .map_err(|_| AppError::validation("修订提示词缺少上下文"))?;
         let summary = summarize(&prompt);
+        let repair_max_output_tokens = repair_output_budget(claimed.contract.token_budget);
         let attempt_id = self.ids.new_id();
         self.runs
             .start_attempt_fenced(
@@ -723,7 +724,7 @@ impl Worker {
                     api_key,
                     allow_localhost_http: route
                         .allow_localhost_http(claimed.contract.allow_localhost_http),
-                    max_output_tokens: claimed.contract.token_budget,
+                    max_output_tokens: Some(repair_max_output_tokens),
                 },
                 route.protocol(claimed.contract.protocol.as_deref()),
                 route.reasoning_effort(claimed.contract.reasoning_effort.as_deref()),
@@ -780,6 +781,38 @@ impl Worker {
                     claimed,
                     StopSignalKind::DataIntegrity,
                     "修复模型返回了空正文，未生成修复候选。",
+                    Some("bounded_repair".into()),
+                )
+                .await;
+        }
+        if repair_usage_reached_cap(&response.usage, repair_max_output_tokens) {
+            record_usage_before_stop(
+                self,
+                claimed,
+                "bounded_repair",
+                &request_id,
+                &summary,
+                started,
+                &response.usage,
+            )
+            .await?;
+            self.runs
+                .mark_attempt_fenced(
+                    &claimed.fence,
+                    &claimed.run_id,
+                    &attempt_id,
+                    AttemptPhase::Interrupted.as_str(),
+                    None,
+                    self.clock.now_ms(),
+                )
+                .await?;
+            return self
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    &format!(
+                        "修复输出达到 {repair_max_output_tokens} token 上限，候选可能被截断，未保存。请提高修复输出预算后重试。"
+                    ),
                     Some("bounded_repair".into()),
                 )
                 .await;
@@ -2113,6 +2146,24 @@ fn structured_repair_prompt(
         .map_err(|_| AppError::integrity("结构化修复提示词渲染失败"))
 }
 
+/// Bounded repair rewrites the whole chapter. The default 8k output reserve is
+/// often consumed by reasoning tokens before the prose is complete, which used
+/// to persist a truncated candidate mid-sentence. Give repair a higher floor and
+/// fail closed when the provider still hits the cap.
+const REPAIR_MIN_OUTPUT_TOKENS: u64 = 16_384;
+
+fn repair_output_budget(contract_budget: Option<u64>) -> u64 {
+    contract_budget
+        .unwrap_or(DEFAULT_OUTPUT_RESERVE)
+        .max(REPAIR_MIN_OUTPUT_TOKENS)
+}
+
+fn repair_usage_reached_cap(usage: &TokenUsage, budget: u64) -> bool {
+    usage
+        .completion_tokens
+        .is_some_and(|tokens| tokens >= budget)
+}
+
 fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
     total.prompt_tokens = match (total.prompt_tokens, extra.prompt_tokens) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),
@@ -2416,5 +2467,38 @@ mod structured_validation_tests {
         assert_eq!(same, same_other_description);
         assert_ne!(same, different_evidence);
         assert_ne!(same, different_source);
+    }
+}
+
+#[cfg(test)]
+mod repair_budget_tests {
+    use super::*;
+
+    #[test]
+    fn repair_budget_has_a_higher_floor_than_draft() {
+        assert_eq!(repair_output_budget(Some(8_192)), REPAIR_MIN_OUTPUT_TOKENS);
+        assert_eq!(repair_output_budget(Some(32_000)), 32_000);
+        assert_eq!(
+            repair_output_budget(None),
+            DEFAULT_OUTPUT_RESERVE.max(REPAIR_MIN_OUTPUT_TOKENS)
+        );
+    }
+
+    #[test]
+    fn repair_usage_at_or_above_cap_is_treated_as_truncated() {
+        let at_cap = TokenUsage {
+            prompt_tokens: Some(10),
+            completion_tokens: Some(REPAIR_MIN_OUTPUT_TOKENS),
+        };
+        let below = TokenUsage {
+            prompt_tokens: Some(10),
+            completion_tokens: Some(REPAIR_MIN_OUTPUT_TOKENS - 1),
+        };
+        assert!(repair_usage_reached_cap(&at_cap, REPAIR_MIN_OUTPUT_TOKENS));
+        assert!(!repair_usage_reached_cap(&below, REPAIR_MIN_OUTPUT_TOKENS));
+        assert!(!repair_usage_reached_cap(
+            &TokenUsage::unknown(),
+            REPAIR_MIN_OUTPUT_TOKENS
+        ));
     }
 }
