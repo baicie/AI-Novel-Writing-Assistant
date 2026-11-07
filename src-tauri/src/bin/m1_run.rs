@@ -221,13 +221,14 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|error| format!("创建验收章节失败：{error}"))?;
 
+    let nonce = env("M1_RUN_NONCE").unwrap_or_else(|| novel_platform::now_ms().to_string());
     let mut prompts = BTreeMap::new();
     prompts.insert("chapter_draft".into(), "chapter-draft-v3".into());
     prompts.insert("chapter_repair".into(), "chapter-repair-v2".into());
     let opened = runtime
         .director
         .open_run(OpenRunInput {
-            command_id: "beta-a1-m1-open".into(),
+            command_id: format!("beta-a1-m1-open-{nonce}"),
             novel_id: novel.id.clone(),
             target_chapter_id: chapter.id.clone(),
             provider: "openai-compatible".into(),
@@ -271,7 +272,7 @@ async fn run() -> Result<(), String> {
                 if detail.usage.calls > max_calls {
                     let _ = runtime
                         .director
-                        .cancel(&format!("beta-a1-m1-cancel-{tick}"), &ticked_run)
+                        .cancel(&format!("beta-a1-m1-cancel-{nonce}-{tick}"), &ticked_run)
                         .await;
                     println!("M1_BUDGET_STOP calls={}", detail.usage.calls);
                     break;
@@ -287,7 +288,10 @@ async fn run() -> Result<(), String> {
                     }
                     runtime
                         .director
-                        .approve(&format!("beta-a1-m1-approve-{approvals}"), &ticked_run)
+                        .approve(
+                            &format!("beta-a1-m1-approve-{nonce}-{approvals}"),
+                            &ticked_run,
+                        )
                         .await
                         .map_err(|error| format!("确认规划门失败：{error}"))?;
                     approvals += 1;
