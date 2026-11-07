@@ -4,11 +4,11 @@
 
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
-| `ENGINEERING_READY` | **YES** | beta 基线 CI 全部通过；章节义务契约、恢复与取消测试通过；本轮仅新增验收探针测试 |
-| `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | 真实主样本已执行（6 次调用）：Writer 遵守核心 hard 义务、Reviewer 返回 clean；但 violation/Repair 失败路径未触发，作者阅读评分未执行 |
+| `ENGINEERING_READY` | **NO（P1 修复中）** | M1 失败路径探针发现修复截断 P1；Draft PR #24 已提交，待合并与复测 |
+| `M1_ACCEPTANCE` | **M1_FAIL** | 主样本通过核心一致性；失败路径探针 Reviewer PASS、Repair FAIL（8192 token 截断），修复未收敛 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
-| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1 失败路径与作者评分未完成、人工 GUI 未执行，不能用 Mock/E2E 代替 |
+| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1 FAIL（修复截断 P1）、人工 GUI 未执行，不能用 Mock/E2E 代替 |
 
 ## 1. 基线
 
@@ -230,16 +230,36 @@ cargo run -q -p novel-desktop --bin m1_run
   存在边界模糊；Reviewer 未报告。它不构成 high 级事件/因果矛盾，但说明参与者约束的
   语义判定仍依赖 Reviewer。
 
+### 5.3 失败路径探针（同一冻结上下文）
+
+用主 Run 的 context 与一份“事后到达”的违规候选执行 3 次真实调用：
+
+| 步骤 | 结果 |
+| --- | --- |
+| Reviewer 第一次 | 4 条 issue，包含 `ch1-req-1`，evidence 逐字引用违规候选；**Reviewer PASS** |
+| Repair | 返回 641 字，句子在“他喊了声”处中断；completion tokens 正好 8192；**输出被截断** |
+| Reviewer 复验 | 4 条 issue，残留 `ch1-req-1`；**Repair FAIL** |
+
+探针 usage：review1 4,696 prompt / 4,623 completion；repair 5,748 / 8,192；
+review2 5,050 / 7,387。主样本 + 探针合计 9 次调用、34,201 prompt / 70,970 completion tokens。
+探针产物：`/tmp/beta-a1-m1/real/m1-probe-8ee2c031-....json`。
+
+根因是确定性契约缺陷：旧实现把达到 8192 输出上限的截断修复文本保存为候选，复验自然继续
+报 `ch1-req-1`。Reviewer 能力已被证明；Repair 在整章重写时缺少足够输出预算，且没有在
+截断时 fail-closed。
+
 #### M1 判定
 
-**`M1_RETEST_PENDING`**。主样本证明 Writer 在本次计划下遵守了核心 hard 义务，原失败模式
-没有复现；但正式 M1 还缺两块证据：
+**`M1_FAIL`**。主样本证明 Writer 在本次计划下遵守核心 hard 义务，但失败路径探针显示
+Repair 截断且未收敛，不满足 M1 的“修复后收敛”条件。
 
-1. 失败路径探针：用同一上下文与一份“事后到达”的违规候选，验证 Reviewer 是否引用
-   `ch1-req-1` 与正文证据，以及 Repair 是否能修复且不引入新矛盾（预计 3 次调用）。
-2. 作者阅读与修改成本评分（人工）。
+已提交 Draft PR #24（`fix/beta-a1-repair-truncation`）：
 
-在上述证据完成前，不把 M1 标为 `M1_PASS`。
+- 修复输出预算提高到至少 16,384 token；
+- completion 达到预算时不再保存候选，记录 usage 并进入 DataIntegrity 暂停；
+- 新增 repair budget / 截断判定单元测试。
+
+M1 复测需在 #24 合并后重新授权执行；本轮不自动继续调用付费模型。
 
 ## 6. B1 桌面 GUI 自动化 smoke
 
@@ -326,8 +346,12 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ### P1
 
-未发现可复现的核心流程阻断。11/11 GUI spec 与 2/2 重启验收通过；M1 主样本完成 6 次调用，
-Writer 遵守核心 hard 义务；Reviewer/Repair 失败路径未触发，属于验收证据缺口，不是产品缺陷。
+1. **修复输出截断被保存为候选**：M1 失败路径探针中 Repair 的 completion tokens 正好为 8192，
+   返回 641 字且在“他喊了声”处中断；旧实现仍保存该候选，复验残留 `ch1-req-1`，修复路径
+   无法收敛。已提交 Draft PR #24：提高修复输出预算到至少 16,384 token，并在达到上限时
+   fail-closed（记录 usage、标记 attempt 中断、DataIntegrity 暂停），待合并与复测。
+2. 其余核心流程未发现可复现阻断；11/11 GUI spec 与 2/2 重启验收通过，主样本 Writer 遵守
+   核心 hard 义务。
 
 ### P2
 
@@ -340,9 +364,7 @@ Writer 遵守核心 hard 义务；Reviewer/Repair 失败路径未触发，属于
 5. 服务端 `chapterAcceptance` 义务模型与 Rust 领域模型尚未建立字段映射。
 6. 严格“每章至少一条 hard 义务”可能对过渡章节偏严；本次真实样本生成 7 条 hard 义务并
    通过，未出现误报，但仍需更多样本。
-7. M1 主样本中 Reviewer 与 Repair 的失败路径没有被触发；原“事后到达”违规没有复现，
-   因此“Reviewer 能否识别、Repair 能否修复”仍缺真实模型证据。
-8. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
+7. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
    不影响产品判断。
 
 ### P3
@@ -355,6 +377,8 @@ Writer 遵守核心 hard 义务；Reviewer/Repair 失败路径未触发，属于
 - `cargo clippy -p novel-application --all-targets -- -D warnings`：PASS。
 - 本轮新增验收测试：15 passed（含 Beta-A1 探针）。
 - 取消/恢复/修复套件：3 + 6 + 9 passed。
+- P1 修复分支 #24：repair budget/截断判定单元测试 2 passed；3 + 14 + 9 + 6 套件通过；
+  clippy `-D warnings` PASS。
 - GUI smoke：11/11 spec 通过；创建导航 + 重启 2/2 通过。
 - 完整 workspace、client 与 CI 结果沿用同一树的最近一次通过记录（`6ddf96cc`，与 beta 树一致）：
   workspace 602 passed、test-harness 114 passed、client 290 passed、GitHub Actions 全部通过；
@@ -363,19 +387,18 @@ Writer 遵守核心 hard 义务；Reviewer/Repair 失败路径未触发，属于
 
 ## 9. 下一阶段建议
 
-1. 对同一冻结上下文做一次“事后到达”违规候选的 Reviewer/Repair 失败路径探针（预计 3 次
-   调用，仍在 10 次上限内），验证 Reviewer 是否引用 `ch1-req-1` 与证据、Repair 是否修复
-   且不引入新矛盾。
-2. 由真实作者阅读本次 2,537 字主样本并记录 1–5 分与修改成本；完成后才能把 M1 从
-   `M1_RETEST_PENDING` 推进到 PASS/FAIL。
-3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
-4. 根据 M1 失败路径探针与人工结果再决定是否进入 M2–M10；不自动开始 P17.5。
-5. 若 GUI smoke 暴露 P0/P1，先修可复现问题；P2/P3 进入 Backlog。
+1. 评审并合并 Draft PR #24（`fix/beta-a1-repair-truncation`）；确认 CI 通过。
+2. 合并后重新授权一次 M1 失败路径探针（3 次调用），验证 16k 修复预算下 Reviewer/Repair
+   是否收敛；若收敛，再执行完整 M1 复测。
+3. 由真实作者阅读本次 2,537 字主样本并记录 1–5 分与修改成本；即使修复后复测，也仍需作者
+   对最终正文评分。
+4. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+5. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 
 ## 10. 最终裁决
 
-- `ENGINEERING_READY`：**YES**
-- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（主样本通过核心一致性；Reviewer/Repair 失败路径与作者评分未完成）
+- `ENGINEERING_READY`：**NO**（P1 修复截断；Draft PR #24 待合并与复测）
+- `M1_ACCEPTANCE`：**M1_FAIL**（主样本通过；失败路径 Reviewer PASS、Repair 截断未收敛）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
-- `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 失败路径/作者评分与人工 GUI 未完成）
+- `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 FAIL 与人工 GUI 未完成）
