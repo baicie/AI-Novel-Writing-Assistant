@@ -325,7 +325,10 @@ pub(crate) fn validate_review_obligation_ids(
             None | Some(Value::Null) => {}
             Some(Value::String(id)) => {
                 let id = id.trim();
-                if !id.is_empty() && !allowed.contains(id) {
+                if id.is_empty() {
+                    return Err("审校 obligationId 不能为空字符串".into());
+                }
+                if !allowed.contains(id) {
                     return Err(format!("审校引用了不存在的章节义务：{id}"));
                 }
             }
@@ -388,5 +391,7 @@ mod tests {
         assert!(validate_review_obligation_ids(valid, &allowed).is_ok());
         let invalid = r#"{"issueDetails":[{"obligationId":"missing","type":"timeline","severity":"high","evidence":"x","suggestion":"y"}]}"#;
         assert!(validate_review_obligation_ids(invalid, &allowed).is_err());
+        let empty = r#"{"issueDetails":[{"obligationId":" ","type":"timeline","severity":"high","evidence":"x","suggestion":"y"}]}"#;
+        assert!(validate_review_obligation_ids(empty, &allowed).is_err());
     }
 }

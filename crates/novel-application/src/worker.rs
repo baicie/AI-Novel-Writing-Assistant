@@ -14,8 +14,8 @@ use novel_workflow::{
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{
-    DEFAULT_OUTPUT_RESERVE, assemble_director_context, target_obligations_from_artifacts,
-    target_plan_from_artifacts,
+    DEFAULT_OUTPUT_RESERVE, assemble_director_context, latest_run_context_payload,
+    pinned_chapter_plan_version, target_obligations_from_artifacts,
 };
 use crate::dto::{GenerationEvent, event_from_stored};
 use crate::error::AppError;
@@ -582,7 +582,11 @@ impl Worker {
             .latest_candidate(&claimed.run_id)
             .await?
             .ok_or_else(|| AppError::integrity("修复缺少候选正文。"))?;
-        let context = latest_payload(&artifacts, "context", &scope)?;
+        let context = latest_run_context_payload(
+            &artifacts,
+            &claimed.contract.target_chapter_id,
+            &claimed.run_id,
+        )?;
         let context_text = context
             .get("promptText")
             .and_then(serde_json::Value::as_str)
@@ -1607,7 +1611,12 @@ async fn execute_structured(
             .novels
             .get_chapter(&claimed.novel_id, &claimed.contract.target_chapter_id)
             .await?;
-        let obligations = target_obligations_from_artifacts(&artifacts, target.sort_order)?;
+        let pinned = pinned_chapter_plan_version(
+            &artifacts,
+            &claimed.contract.target_chapter_id,
+            &claimed.run_id,
+        );
+        let obligations = target_obligations_from_artifacts(&artifacts, target.sort_order, pinned)?;
         let allowed: std::collections::BTreeSet<String> =
             obligations.iter().map(|item| item.id.clone()).collect();
         match crate::obligations::validate_review_obligation_ids(&payload, &allowed) {
@@ -1872,6 +1881,7 @@ async fn execute_context(
     let chapter_key = chapter_scope(&claimed.contract.target_chapter_id);
     let payload = serde_json::json!({
         "assemblyVersion": assembly.trace.assembly_version,
+        "runId": claimed.run_id,
         "targetChapterId": claimed.contract.target_chapter_id,
         "scope": chapter_key,
         "chapterPlanVersion": assembly.chapter_plan_version,
@@ -1936,26 +1946,21 @@ async fn structured_prompt(
                 .latest_candidate(&claimed.run_id)
                 .await?
                 .ok_or_else(|| AppError::integrity("一致性审校缺少候选正文。"))?;
-            let target = worker
-                .novels
-                .get_chapter(&claimed.novel_id, &claimed.contract.target_chapter_id)
-                .await?;
-            let target_plan = target_plan_from_artifacts(&artifacts, target.sort_order)?;
-            let obligations = crate::obligations::parse_obligations(&target_plan);
-            let mut context =
-                context_payload(&artifacts, &["character_cast", "story_macro"], 16_000)?;
-            context.push_str("\n## chapter_plan\n");
+            // 使用本 Run 冻结的 Writer 上下文，而不是重新读取可能已经变化的
+            // story_macro / character_cast；这样审校和正文看到的是同一份计划与义务。
+            let context_artifact = latest_run_context_payload(
+                &artifacts,
+                &claimed.contract.target_chapter_id,
+                &claimed.run_id,
+            )?;
+            let prompt_text = context_artifact
+                .get("promptText")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
+            let mut context = prompt_text.to_string();
             context.push_str(
-                &serde_json::to_string(&target_plan)
-                    .map_err(|_| AppError::integrity("目标章节计划无法序列化"))?,
+                "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；evidence 必须逐字引用候选正文；不得引用历史正文。\n",
             );
-            if !obligations.is_empty() {
-                context.push_str("\n## 本章结构化义务（hard 必须遵守，advisory 可调整）\n");
-                context.push_str(&crate::obligations::render_obligations(&obligations));
-                context.push_str(
-                    "\n审校要求：违反 hard 义务时必须填写 obligationId，且只能使用上述 ID；evidence 必须逐字引用候选正文。\n",
-                );
-            }
             context.push_str("\n候选正文：");
             context.push_str(&truncate_chars(&candidate.content, 20_000));
             let mut vars = BTreeMap::new();
@@ -2065,10 +2070,10 @@ async fn draft_prompt(
     let mut obligations_text = String::new();
     if version == "chapter-draft-v2" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-        let context = latest_payload(
+        let context = latest_run_context_payload(
             &artifacts,
-            "context",
-            &chapter_scope(&claimed.contract.target_chapter_id),
+            &claimed.contract.target_chapter_id,
+            &claimed.run_id,
         )?;
         let prompt_text = context
             .get("promptText")

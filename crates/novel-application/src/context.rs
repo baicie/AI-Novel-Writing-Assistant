@@ -5,7 +5,7 @@
 //! database read failure is converted into an empty source.
 
 use novel_domain::ArtifactStatus;
-use novel_workflow::{ArtifactView, book_scope};
+use novel_workflow::{ArtifactView, book_scope, chapter_scope};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::ChapterSnapshot;
@@ -42,6 +42,10 @@ pub struct ContextSourceTrace {
 pub struct ContextTrace {
     pub assembly_version: String,
     pub target_chapter_id: String,
+    /// 本次组装使用的 chapter_list 产物版本。
+    pub chapter_plan_version: Option<i64>,
+    /// 目标章节的义务 ID；旧计划为空。
+    pub obligation_ids: Vec<String>,
     pub input_budget: u64,
     pub output_reserve: u64,
     pub estimated_tokens: u64,
@@ -156,14 +160,34 @@ fn chapter_plan_for_target(
 pub(crate) fn target_plan_from_artifacts(
     artifacts: &[ArtifactView],
     target_order: i32,
+    pinned_version: Option<i64>,
 ) -> Result<serde_json::Value, AppError> {
-    let (artifact, missing) = artifact_source(artifacts, "chapter_list", book_scope());
-    let artifact = artifact.ok_or_else(|| {
-        AppError::integrity(format!(
-            "缺少可用的章节计划（{}），不能生成或审校没有计划约束的正文。",
-            missing.unwrap_or("missing")
-        ))
-    })?;
+    let mut candidates: Vec<&ArtifactView> = artifacts
+        .iter()
+        .filter(|artifact| {
+            artifact.artifact_type == "chapter_list"
+                && artifact.scope == book_scope()
+                && artifact.status != ArtifactStatus::Stale
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Err(AppError::integrity(
+            "缺少可用的章节计划，不能生成或审校没有计划约束的正文。",
+        ));
+    }
+    candidates.sort_by_key(|artifact| artifact.version);
+    let artifact = match pinned_version {
+        Some(version) => candidates
+            .iter()
+            .find(|artifact| artifact.version == version)
+            .copied()
+            .ok_or_else(|| {
+                AppError::integrity(format!(
+                    "本次 Run 冻结的章节计划版本 {version} 不可用，不能改用其他版本审校。"
+                ))
+            })?,
+        None => *candidates.last().expect("non-empty"),
+    };
     let plan = payload(&artifact.payload_json, "chapter_list")?;
     plan.get("chapters")
         .and_then(serde_json::Value::as_array)
@@ -186,9 +210,106 @@ pub(crate) fn target_plan_from_artifacts(
 pub(crate) fn target_obligations_from_artifacts(
     artifacts: &[ArtifactView],
     target_order: i32,
+    pinned_version: Option<i64>,
 ) -> Result<Vec<crate::obligations::ChapterObligation>, AppError> {
-    let plan = target_plan_from_artifacts(artifacts, target_order)?;
+    let plan = target_plan_from_artifacts(artifacts, target_order, pinned_version)?;
     Ok(crate::obligations::parse_obligations(&plan))
+}
+
+/// The context artifact records the chapter_list version used to write the
+/// chapter. Review must use that same version, not a newer plan published while
+/// the run is in flight. Prefer the artifact belonging to this run; old context
+/// artifacts without a runId remain readable as a compatibility fallback.
+pub(crate) fn pinned_chapter_plan_version(
+    artifacts: &[ArtifactView],
+    target_chapter_id: &str,
+    run_id: &str,
+) -> Option<i64> {
+    let scope = chapter_scope(target_chapter_id);
+    let contexts: Vec<&ArtifactView> = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "context" && artifact.scope == scope)
+        .collect();
+    let parsed = |artifact: &ArtifactView| {
+        serde_json::from_str::<serde_json::Value>(&artifact.payload_json).ok()
+    };
+    let matching = contexts
+        .iter()
+        .filter(|artifact| {
+            parsed(artifact)
+                .and_then(|payload| {
+                    payload
+                        .get("runId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .as_deref()
+                == Some(run_id)
+        })
+        .max_by_key(|artifact| artifact.version)
+        .copied();
+    let legacy = contexts
+        .iter()
+        .filter(|artifact| {
+            parsed(artifact)
+                .and_then(|payload| payload.get("runId").cloned())
+                .is_none()
+        })
+        .max_by_key(|artifact| artifact.version)
+        .copied();
+    matching.or(legacy).and_then(|artifact| {
+        parsed(artifact).and_then(|payload| {
+            payload
+                .get("chapterPlanVersion")
+                .and_then(serde_json::Value::as_i64)
+        })
+    })
+}
+
+/// Select the context artifact for this run (chapter-scoped) so a newer run for
+/// the same chapter cannot silently replace the writer/repair context. Legacy
+/// artifacts without runId are accepted as a fallback.
+pub(crate) fn latest_run_context_payload(
+    artifacts: &[ArtifactView],
+    target_chapter_id: &str,
+    run_id: &str,
+) -> Result<serde_json::Value, AppError> {
+    let scope = chapter_scope(target_chapter_id);
+    let contexts: Vec<&ArtifactView> = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "context" && artifact.scope == scope)
+        .collect();
+    let parsed = |artifact: &ArtifactView| {
+        serde_json::from_str::<serde_json::Value>(&artifact.payload_json).ok()
+    };
+    let matching = contexts
+        .iter()
+        .filter(|artifact| {
+            parsed(artifact)
+                .and_then(|payload| {
+                    payload
+                        .get("runId")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .as_deref()
+                == Some(run_id)
+        })
+        .max_by_key(|artifact| artifact.version)
+        .copied();
+    let legacy = contexts
+        .iter()
+        .filter(|artifact| {
+            parsed(artifact)
+                .and_then(|payload| payload.get("runId").cloned())
+                .is_none()
+        })
+        .max_by_key(|artifact| artifact.version)
+        .copied();
+    let artifact = matching.or(legacy).ok_or_else(|| {
+        AppError::integrity("本次 Run 缺少章节上下文产物，不能继续写正文或修复。")
+    })?;
+    parsed(artifact).ok_or_else(|| AppError::integrity("章节上下文产物格式损坏。"))
 }
 
 /// Assemble chapter context from the frozen run artifacts and the confirmed
@@ -603,11 +724,13 @@ async fn assemble_context(
         assembly: ContextAssembly {
             prompt_text,
             chapter_plan_version,
-            obligation_ids,
+            obligation_ids: obligation_ids.clone(),
             obligations_text,
             trace: ContextTrace {
                 assembly_version: CONTEXT_ASSEMBLY_VERSION.to_string(),
                 target_chapter_id: target.id,
+                chapter_plan_version,
+                obligation_ids,
                 input_budget,
                 output_reserve,
                 estimated_tokens: used_tokens,
@@ -654,4 +777,95 @@ fn chapter_arc_summaries(payload_json: &str, before_order: i32) -> Vec<String> {
     rows.into_iter()
         .map(|(order, title, summary)| format!("第{order}章 {title}：{summary}"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan_artifact(version: i64, description: &str) -> ArtifactView {
+        ArtifactView {
+            artifact_type: "chapter_list".into(),
+            scope: book_scope().into(),
+            version,
+            status: ArtifactStatus::Confirmed,
+            protected_user_content: false,
+            payload_json: serde_json::json!({
+                "chapters": [{
+                    "chapterOrder": 1,
+                    "title": "第一章",
+                    "volumeTitle": "卷一",
+                    "summary": description,
+                    "characterNames": ["林动"],
+                    "obligations": [{
+                        "id": format!("ch1-req-{version}"),
+                        "chapterOrder": 1,
+                        "type": "required_event",
+                        "description": description,
+                        "enforcement": "hard",
+                        "participants": ["林动"],
+                        "source": "chapter_plan"
+                    }]
+                }]
+            })
+            .to_string(),
+        }
+    }
+
+    #[test]
+    fn review_plan_can_be_pinned_to_the_context_version() {
+        let artifacts = vec![plan_artifact(1, "旧计划"), plan_artifact(2, "新计划")];
+        let pinned = target_plan_from_artifacts(&artifacts, 1, Some(1)).unwrap();
+        assert_eq!(pinned["summary"], "旧计划");
+        let latest = target_plan_from_artifacts(&artifacts, 1, None).unwrap();
+        assert_eq!(latest["summary"], "新计划");
+    }
+
+    #[test]
+    fn missing_pinned_version_does_not_fall_back_to_a_newer_plan() {
+        let artifacts = vec![plan_artifact(2, "新计划")];
+        let error = target_plan_from_artifacts(&artifacts, 1, Some(1)).unwrap_err();
+        assert!(error.to_string().contains("冻结的章节计划版本 1"));
+    }
+
+    fn context_artifact(run_id: Option<&str>, plan_version: i64, version: i64) -> ArtifactView {
+        let mut payload = serde_json::json!({
+            "assemblyVersion": CONTEXT_ASSEMBLY_VERSION,
+            "targetChapterId": "ch1",
+            "scope": chapter_scope("ch1"),
+            "chapterPlanVersion": plan_version,
+            "obligationIds": [format!("ch1-req-{plan_version}")],
+            "obligationsText": format!("义务 {plan_version}"),
+            "promptText": format!("上下文 {plan_version}"),
+        });
+        if let Some(run_id) = run_id {
+            payload["runId"] = serde_json::Value::String(run_id.into());
+        }
+        ArtifactView {
+            artifact_type: "context".into(),
+            scope: chapter_scope("ch1"),
+            version,
+            status: ArtifactStatus::Confirmed,
+            protected_user_content: false,
+            payload_json: payload.to_string(),
+        }
+    }
+
+    #[test]
+    fn review_pins_the_context_plan_version_per_run() {
+        let artifacts = vec![
+            context_artifact(Some("run-a"), 1, 1),
+            context_artifact(Some("run-b"), 2, 2),
+        ];
+        assert_eq!(
+            pinned_chapter_plan_version(&artifacts, "ch1", "run-a"),
+            Some(1)
+        );
+        assert_eq!(
+            pinned_chapter_plan_version(&artifacts, "ch1", "run-b"),
+            Some(2)
+        );
+        let context = latest_run_context_payload(&artifacts, "ch1", "run-a").unwrap();
+        assert_eq!(context["promptText"], "上下文 1");
+    }
 }
