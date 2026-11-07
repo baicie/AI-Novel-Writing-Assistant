@@ -193,6 +193,8 @@ export async function handleLocalAiRevision(
       model: aiRequest.model || "gpt-4",
       promptVersions: {
         chapter_draft: "chapter-draft-v3",
+        story_macro: "story-macro-v2",
+        chapter_list: "chapter-list-v3",
         source: aiRequest.source || "freeform",
         scope: aiRequest.scope || "selection",
         instruction: aiRequest.instruction || "",
@@ -265,6 +267,8 @@ export async function handleLocalCursorContinuation(
       model: contRequest.model || "gpt-4",
       promptVersions: {
         chapter_draft: "chapter-draft-v3",
+        story_macro: "story-macro-v2",
+        chapter_list: "chapter-list-v3",
         source: "continuation",
         operation: contRequest.operation || "continue",
         cursorOffset: String(contRequest.cursorOffset ?? 0),
