@@ -156,6 +156,43 @@ M1 的完成条件（复测时逐项记录）：
 4. 保留 Planner 结构化输出、义务、Writer 正文、Reviewer 结果、Repair 前后对比、ContextTrace。
 5. 按 `docs/design/P17.4.10-M1-RETEST-PACKAGE.md` 的 4.1/4.2/4.3 判定。
 
+### 5.1 执行器与准备状态（2026-11-07）
+
+已准备一个本地 M1 执行器 `src-tauri/src/bin/m1_run.rs`，它使用真实 `Runtime` 与
+`ProtocolRouterProvider`，密钥只从应用本地加密凭据存储读取，**不接受命令行或环境变量里的
+Key，也不打印 Key**。执行器要求 `M1_AUTHORIZED=1`、`M1_MAX_CALLS`、`M1_MAX_COST_CNY` 才会
+启动；固定使用 24k 上下文、8192 输出、`maxAutomaticRetries=0`、`repairBudget=1`。
+
+本地 dry-run（本地 OpenAI 兼容 mock，无网络、无付费、假 Key）结果：
+
+```text
+M1_RESULT status=waiting_approval approvals=2 calls=8
+artifacts: context chapterPlanVersion=1 obligationIds=[ch1-req-1,ch1-order-1,ch1-forbid-1,ch1-adv-1]
+           review hard obligationEnforcement=hard; repair_notes present; final review clean
+key leak: false
+```
+
+dry-run 只验证执行器、Run 链路与导出，不是 M1 证据。
+
+准备步骤：
+
+1. 用独立数据目录启动 release 桌面应用：
+   `BIZ_NOVEL_DATA_DIR=/tmp/beta-a1-m1/real "/tmp/p17410/target/aarch64-apple-darwin/release/bundle/macos/Biz Novel Studio.app/Contents/MacOS/novel-desktop"`
+2. 在应用设置中保存新 Key、endpoint 与模型；**不要把 Key 发到聊天、日志或代码里**。
+3. 关闭应用后，执行器读取同一数据目录的加密凭据与 `provider_credential` 配置。
+4. 授权后运行：
+
+```bash
+cd /tmp/beta-a1
+BIZ_NOVEL_DATA_DIR=/tmp/beta-a1-m1/real \
+M1_AUTHORIZED=1 M1_MAX_CALLS=10 M1_MAX_COST_CNY=<用户确认的上限> \
+M1_MODEL=<应用配置的模型> \
+cargo run -q -p novel-desktop --bin m1_run
+```
+
+产物写入 `/tmp/beta-a1-m1/real/m1-<runId>.json`，含 Run 状态、context、chapter_list、
+正文候选、审校、修复、ContextTrace 与 usage。执行器停在最终确认门，不自动提交正文。
+
 ## 6. B1 桌面 GUI 自动化 smoke
 
 ### 6.1 构建与运行
