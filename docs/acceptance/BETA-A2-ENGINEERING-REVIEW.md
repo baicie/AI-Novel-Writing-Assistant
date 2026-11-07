@@ -200,4 +200,4 @@ Native E2E：从 Beta-A2 工作树重新构建 E2E 应用，使用独立数据�
 
 ## 12. PR
 
-Draft PR：本分支的 Draft PR（链接在提交后回填；不自动合并）。
+Draft PR：https://github.com/baicie/AI-Novel-Writing-Assistant/pull/27（不自动合并）。
