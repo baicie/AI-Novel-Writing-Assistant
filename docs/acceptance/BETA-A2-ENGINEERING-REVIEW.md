@@ -161,6 +161,20 @@ server typecheck                                   PASS
 Native E2E                                        见下
 ```
 
+GitHub Actions（PR #27，代码 head `e2e8f434`）：
+
+| 检查 | 结果 |
+| --- | --- |
+| Rust 格式 / Clippy / 单测 | PASS（3m35s） |
+| 前端类型检查与单测 | PASS（1m3s） |
+| 发布脚本单测 | PASS（12s） |
+| Bundle 构建检查（Linux x64） | PASS（5m41s） |
+| Bundle 构建检查（macOS arm64） | PASS（10m10s） |
+| Tauri Kernel Check（rust-and-desktop-contract） | PASS（9m7s） |
+| 原生端到端（可选） | SKIPPED（CI 配置） |
+
+报告提交是仅文档提交；上面的结果对应同一代码 head，最终 PR HEAD 的检查见 PR 页面。
+
 Native E2E：在模块拆分后重新构建 Beta-A2 E2E 应用，使用独立数据目录重跑 3 个 spec：
 
 | Spec | 结果 |
@@ -177,6 +191,22 @@ E2E 不是人工验收。
 `restore_protects_local_drafts_and_records_provenance` 因 SQLite busy 冲突失败；停止
 E2E 应用后单独重跑为 **621 passed，0 failed**。该失败是测试环境并发冲突，不是代码回归；
 最终计数以干净重跑为准。
+
+### M1 Mock 矩阵（工程链路，不等于 M1 PASS）
+
+| 场景 | 确定性测试/状态 |
+| --- | --- |
+| keyEvents 缺失 | `strict_story_macro_requires_key_events`、集成 `strict_new_story_macro_without_key_events_pauses` → 暂停 |
+| keyEvents 正确 | `chapter_plan_must_cover_hard_story_key_events`、`covered_story_key_events_reach_the_writer_with_source_id` |
+| 义务内容反向 | `source_event_content_cannot_be_rewritten` → BLOCK |
+| 参与者替换 | 同上 → BLOCK |
+| hard 降级 | 同上 → BLOCK |
+| 因果/顺序反转 | 规范 description/type/chapter 校验可拦截被改写的事件；语义判断仍由 Reviewer/M1 |
+| 正文违反义务 | 既有 Reviewer/Repair 套件与 M1 失败路径探针 |
+| Reviewer 遗漏 high / Repair 仍残留 | 依赖真实模型；Mock 不能证明语义质量 |
+
+Mock 通过只代表工程链路与 fail-closed 行为，不把 M1 改为 PASS；Beta-A2 HEAD 的 M1 仍是
+`RETEST_PENDING`。
 
 ## 8. 未完成任务及原因
 
