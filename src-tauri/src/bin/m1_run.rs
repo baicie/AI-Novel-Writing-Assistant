@@ -12,6 +12,7 @@
 //! `m1-<runId>.json`，供人工按 M1 复测包评分。
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -70,10 +71,54 @@ fn require_env(name: &str) -> Result<String, String> {
 
 #[tokio::main]
 async fn main() {
-    if let Err(error) = run().await {
+    let result = if env("M1_SETUP").as_deref() == Some("1") {
+        setup_key().await
+    } else {
+        run().await
+    };
+    if let Err(error) = result {
         eprintln!("M1_REFUSED: {error}");
         std::process::exit(2);
     }
+}
+
+/// 从 stdin 读取 Key（由终端 `read -s` 管道输入），写入应用同一套加密凭据存储。
+/// Key 不出现在参数、环境变量或日志里。
+async fn setup_key() -> Result<(), String> {
+    let data_dir = PathBuf::from(require_env("BIZ_NOVEL_DATA_DIR")?);
+    let endpoint = require_env("M1_ENDPOINT")?;
+    let model = require_env("M1_MODEL")?;
+    let mut key = String::new();
+    std::io::stdin()
+        .read_to_string(&mut key)
+        .map_err(|_| "读取 stdin 的 Key 失败".to_string())?;
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err("stdin 没有提供 Key".into());
+    }
+    novel_platform::configure_secret_fallback(data_dir.join("secrets"));
+    let kernel = Arc::new(
+        SqliteKernel::open(&data_dir.join("novel.sqlite"))
+            .await
+            .map_err(|error| format!("打开验收数据库失败：{error}"))?,
+    );
+    let store = Arc::new(OsSecretStore);
+    store
+        .put(MODEL_SECRET_REF, &key)
+        .await
+        .map_err(|_| "写入本地加密凭据失败".to_string())?;
+    drop(key);
+    let allow_localhost = endpoint.starts_with("http://127.0.0.1")
+        || endpoint.starts_with("http://localhost")
+        || endpoint.starts_with("http://[::1]");
+    kernel
+        .save_model_setup(&endpoint, &model, allow_localhost, novel_platform::now_ms())
+        .await
+        .map_err(|error| format!("保存模型配置失败：{error}"))?;
+    println!(
+        "M1_SETUP_SAVED model={model} endpoint={endpoint} localhost={allow_localhost} key_written=true"
+    );
+    Ok(())
 }
 
 async fn run() -> Result<(), String> {
@@ -128,6 +173,14 @@ async fn run() -> Result<(), String> {
         }
         // 不打印 key，也不把它写入任何文件。
         drop(key);
+    }
+
+    if env("M1_PREFLIGHT").as_deref() == Some("1") {
+        println!(
+            "M1_PREFLIGHT_OK model={} endpoint={} key_present=true",
+            setup.model, setup.endpoint
+        );
+        return Ok(());
     }
 
     let model = env("M1_MODEL").unwrap_or_else(|| setup.model.clone());
