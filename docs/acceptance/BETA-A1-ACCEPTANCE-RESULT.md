@@ -5,10 +5,10 @@
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
 | `ENGINEERING_READY` | **YES** | beta 基线 CI 全部通过；章节义务契约、恢复与取消测试通过；本轮仅新增验收探针测试 |
-| `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | 未获得新凭据、模型选择、费用上限与明确授权；未调用任何真实模型 |
+| `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | 真实主样本已执行（6 次调用）：Writer 遵守核心 hard 义务、Reviewer 返回 clean；但 violation/Repair 失败路径未触发，作者阅读评分未执行 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
-| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1 未通过、人工 GUI 未执行，不能用 Mock/E2E 代替 |
+| `PUBLIC_BETA_READINESS` | **NOT_READY** | M1 失败路径与作者评分未完成、人工 GUI 未执行，不能用 Mock/E2E 代替 |
 
 ## 1. 基线
 
@@ -20,19 +20,20 @@
 | 验收分支 | `acceptance/beta-a1`（从 `origin/beta` 创建） |
 | 桌面构建树 | 与 `6ddf96cc` 完全一致（`git diff 6ddf96cc 90925ddd` 为空），E2E 应用由此树重新构建 |
 | 数据目录 | 每个 E2E spec 独立 `mktemp -d`，不接触正式作品 |
-| 真实模型 | 未调用 |
+| 真实模型 | 已执行 1 次 M1 主样本（`deepseek-v4.1-flash`，6 次调用） |
 
 ## 2. M1 调用授权状态
 
 | 门禁 | 状态 |
 | --- | --- |
-| 已暴露 Key 已撤销 | 本轮未使用任何旧 Key；撤销状态由凭据持有人确认，验收程序无法自行证明 |
-| 新 Key 通过安全存储配置 | 验收环境未配置新 Key |
-| 模型名称已明确 | 未提供 |
-| 用户明确授权本次调用 | 未提供 |
-| 最大费用 / 调用次数 / 失败重试策略 | 未提供 |
+| 已暴露 Key 已撤销 | 用户确认已轮换；本轮未使用任何旧 Key |
+| 新 Key 通过安全存储配置 | 是：`/tmp/beta-a1-m1/real/secrets/openai-compatible.secret`，权限 0600 |
+| 模型名称已明确 | `deepseek-v4.1-flash` |
+| 用户明确授权本次调用 | 是 |
+| 最大费用 / 调用次数 / 失败重试策略 | 供应商侧额度上限；本地 10 次调用硬停止；0 自动重试 |
 
-结论：授权门禁未满足，只执行离线验证；M1 保持 `RETEST_PENDING`。未在聊天、日志、代码或截图中写入任何 Key。
+结论：门禁满足，M1 主样本已执行。Key 只写入应用本地加密凭据存储，未出现在聊天、日志、
+代码或截图中。
 
 ## 3. A1 实际运行链路离线验证
 
@@ -124,17 +125,19 @@ hard 义务写作、Reviewer 是否能正确判断参与者/因果变化，仍�
 | 输出预算 | ≥8192 |
 | max automatic retries | 0 |
 | repair budget | 1 |
-| 模型 | 待用户确认，未预设 |
+| 模型 | `deepseek-v4.1-flash`（实际执行） |
 
-必须生成的 hard 义务（允许等价措辞）：
+本轮 Planner 实际生成的 hard 义务（允许等价措辞）：
 
 | ID | 类型 | 内容 |
 | --- | --- | --- |
-| `ch1-req-1` | required_event | 林动亲眼撞见老铁匠被杀 |
-| `ch1-req-2` | required_event | 林动在事件发生时在场 |
-| `ch1-causal-1` | causal_constraint | 目击灭口是林动被卷入旧案的直接原因 |
-| `ch1-order-1` | ordering_constraint | 先发现雪夜异响，再撞见灭口 |
-| `ch1-forbid-1` | forbidden_event | 不得写成“到达时老铁匠已经死亡”或等价的事后到场 |
+| `ch1-req-1` | required_event | 林动先拾得发光玉佩，随后在铁匠铺外亲眼撞见老铁匠被灰斗篷人灭口；不得改为事后到达 |
+| `ch1-req-2` | required_event | 灰斗篷人察觉林动动静，林动携玉佩逃亡 |
+| `ch1-par-1` | participant | 本章出场剧情参与者只能是林动、老铁匠、灰斗篷人；沈砚不得登场 |
+| `ch1-cau-1` | causal_constraint | 拾玉 + 目击灭口 → 同时成为持玉人与活口，直接卷入旧案 |
+| `ch1-ord-1` | ordering_constraint | 拾玉 → 回铺外 → 目睹灭口 → 被发现 → 逃亡 |
+| `ch1-for-1` | forbidden_event | 不得提前揭示旧案全貌、玉佩真正来历或灰斗篷人受谁指使 |
+| `ch1-con-1` | continuity_constraint | 林动保持边陲少年、铁匠铺帮工、受老铁匠收留的身份起点 |
 
 `advisory` 只能用于氛围、文风与场景细节，不能把关键事件降级。
 
@@ -144,17 +147,14 @@ Planner/Writer 上下文。M1 评审按 `docs/design/P17.4.10-M1-RETEST-PACKAGE.
 
 ## 5. A3 / A4 M1 执行情况
 
-**未执行真实模型调用。** 授权门禁未满足（见第 2 节），因此没有 Planner/Writer/Reviewer/Repair
-的模型原始输出、真实正文、token/费用或作者修改成本。任何 Mock 或确定性测试都不能据此判
-`M1_PASS`。
+**已执行一次真实 M1 主样本**（run `8ee2c031-1cfa-4001-8dcd-272a543950d8`，2026-11-07）。
+执行门禁：
 
-M1 的完成条件（复测时逐项记录）：
-
-1. 已暴露 Key 撤销，新 Key 只通过应用安全存储配置。
-2. 明确模型名称、费用上限、调用次数与失败重试策略。
-3. 用户明确授权。
-4. 保留 Planner 结构化输出、义务、Writer 正文、Reviewer 结果、Repair 前后对比、ContextTrace。
-5. 按 `docs/design/P17.4.10-M1-RETEST-PACKAGE.md` 的 4.1/4.2/4.3 判定。
+1. 已暴露 Key 未使用；用户确认已轮换。
+2. 新 Key 通过隔离数据目录的应用加密凭据存储配置。
+3. 模型 `deepseek-v4.1-flash`；供应商额度上限；本地 10 次调用硬停止；0 自动重试。
+4. 用户明确授权本次调用。
+5. 产物保留在 `/tmp/beta-a1-m1/real/m1-8ee2c031-....json`，未写入仓库。
 
 ### 5.1 执行器与准备状态（2026-11-07）
 
@@ -192,6 +192,54 @@ cargo run -q -p novel-desktop --bin m1_run
 
 产物写入 `/tmp/beta-a1-m1/real/m1-<runId>.json`，含 Run 状态、context、chapter_list、
 正文候选、审校、修复、ContextTrace 与 usage。执行器停在最终确认门，不自动提交正文。
+
+### 5.2 真实 M1 主样本结果
+
+| 项 | 值 |
+| --- | --- |
+| 模型 | `deepseek-v4.1-flash` |
+| Run 状态 | `waiting_approval`（最终确认门，未自动提交正文） |
+| 调用次数 | 6（`story_macro`、`character_cast`、`volume_strategy`、`chapter_list`、`draft`、`consistency_review`） |
+| token | prompt 18,707 / completion 50,768 |
+| 规划门 | 2 次自动确认（人物阵容、卷策略），属于验收执行器动作 |
+| 正文候选 | 2,537 字，仅 `draft` 候选；未触发 Repair |
+| Reviewer | 1 次，`issues=0`、`advisoryIssueCount=0`、quality debt 0 |
+| ContextTrace | `chapterPlanVersion=1`，7 条 hard 义务 ID，`chapter_obligations` 来源含 content hash |
+| 费用 | 按供应商账单计；本地记录了 token，未把费用写入仓库 |
+
+#### 逐条义务核验（基于真实正文）
+
+| 义务 | 结果 | 证据摘要 |
+| --- | --- | --- |
+| `ch1-req-1` 拾玉后亲眼撞见灭口 | PASS | 先写雪地拾得发光玉佩，随后隔院墙豁口看见灰斗篷人动手；老铁匠倒地，林动“连呼吸都忘了” |
+| `ch1-req-2` 凶手察觉动静、林动携玉逃亡 | PASS | 林动踩碎冻雪发出轻响，凶手转头指向豁口；林动转身逃入巷子，玉佩在怀中发光 |
+| `ch1-par-1` 仅三名剧情参与者 | PASS（有观察项） | 沈砚未登场；正文提及“李屠户”为背景交代，结尾无名住户应门，均未参与剧情。Reviewer 未标记 |
+| `ch1-cau-1` 拾玉 + 目击导致卷入旧案 | PASS | 持玉人与灭口活口双重身份成立，凶手追杀直接由目击触发 |
+| `ch1-ord-1` 顺序 | PASS | 拾玉 → 回铺外 → 目睹灭口 → 被发现 → 逃亡 |
+| `ch1-for-1` 不提前揭示真相 | PASS | 未揭示主谋、玉佩真正来历；只埋“凶手从遗体翻走一物”的线索 |
+| `ch1-con-1` 身份起点 | PASS | 边陲少年、铁匠铺帮工、被老铁匠收留均保留 |
+
+#### Reviewer / Repair 与质量判断
+
+- 本次正文没有违反核心 hard 义务，Reviewer 返回 clean 是合理的；但 **Reviewer 识别违反的
+  失败路径没有被触发**，原 M1 的“事后到达”改写在本次真实输出中没有复现。
+- **Repair 没有被触发**，因此“Repair 是否真正修复冲突、是否引入新矛盾”本轮没有证据。
+- 阅读质量（授权代理评估）：场景完整、视角稳定、有雪夜氛围与追逐钩子，基本可读；
+  这是代理评估，不是作者人工评分。作者修改成本未记录。
+- 观察项：正文出现“李屠户”与结尾无名住户，严格按 `ch1-par-1` 的“只能是三名参与者”
+  存在边界模糊；Reviewer 未报告。它不构成 high 级事件/因果矛盾，但说明参与者约束的
+  语义判定仍依赖 Reviewer。
+
+#### M1 判定
+
+**`M1_RETEST_PENDING`**。主样本证明 Writer 在本次计划下遵守了核心 hard 义务，原失败模式
+没有复现；但正式 M1 还缺两块证据：
+
+1. 失败路径探针：用同一上下文与一份“事后到达”的违规候选，验证 Reviewer 是否引用
+   `ch1-req-1` 与正文证据，以及 Repair 是否能修复且不引入新矛盾（预计 3 次调用）。
+2. 作者阅读与修改成本评分（人工）。
+
+在上述证据完成前，不把 M1 标为 `M1_PASS`。
 
 ## 6. B1 桌面 GUI 自动化 smoke
 
@@ -278,18 +326,23 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ### P1
 
-未发现可复现的核心流程阻断。11/11 GUI spec 与 2/2 重启验收通过；M1 未执行属于验收门禁
-未满足，不是产品缺陷。
+未发现可复现的核心流程阻断。11/11 GUI spec 与 2/2 重启验收通过；M1 主样本完成 6 次调用，
+Writer 遵守核心 hard 义务；Reviewer/Repair 失败路径未触发，属于验收证据缺口，不是产品缺陷。
 
 ### P2
 
 1. Planner 上下文仍有字符级截断，超长 `story_macro` 可能被截断。
 2. 义务在 Writer 上下文来源、Writer Prompt、Repair Prompt 中重复，增加 token 消耗。
-3. Reviewer 的语义判断仍依赖模型；代码只保证 ID 与证据可定位。
+3. Reviewer 的语义判断仍依赖模型；代码只保证 ID 与证据可定位。本次正文出现“李屠户”与
+   结尾无名住户，严格按 `ch1-par-1` 存在参与者边界模糊，Reviewer 未标记；不是 high 级
+   矛盾，但说明该约束的语义判定仍不稳定。
 4. `worker.rs` 仍超过项目 1,300 行硬阈值。
 5. 服务端 `chapterAcceptance` 义务模型与 Rust 领域模型尚未建立字段映射。
-6. 严格“每章至少一条 hard 义务”可能对过渡章节偏严，需要用真实 M1 数据验证误报率。
-7. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
+6. 严格“每章至少一条 hard 义务”可能对过渡章节偏严；本次真实样本生成 7 条 hard 义务并
+   通过，未出现误报，但仍需更多样本。
+7. M1 主样本中 Reviewer 与 Repair 的失败路径没有被触发；原“事后到达”违规没有复现，
+   因此“Reviewer 能否识别、Repair 能否修复”仍缺真实模型证据。
+8. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
    不影响产品判断。
 
 ### P3
@@ -310,15 +363,19 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 先完成 M1 前置条件（新 Key、安全存储、模型、预算、授权），按固定样本执行一次 M1。
-2. 由真实作者按第 7 节流程做一次人工验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
-3. 根据 M1 与人工结果再决定是否进入 M2–M10；不自动开始 P17.5。
-4. 若 GUI smoke 暴露 P0/P1，先修可复现问题；P2/P3 进入 Backlog。
+1. 对同一冻结上下文做一次“事后到达”违规候选的 Reviewer/Repair 失败路径探针（预计 3 次
+   调用，仍在 10 次上限内），验证 Reviewer 是否引用 `ch1-req-1` 与证据、Repair 是否修复
+   且不引入新矛盾。
+2. 由真实作者阅读本次 2,537 字主样本并记录 1–5 分与修改成本；完成后才能把 M1 从
+   `M1_RETEST_PENDING` 推进到 PASS/FAIL。
+3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+4. 根据 M1 失败路径探针与人工结果再决定是否进入 M2–M10；不自动开始 P17.5。
+5. 若 GUI smoke 暴露 P0/P1，先修可复现问题；P2/P3 进入 Backlog。
 
 ## 10. 最终裁决
 
 - `ENGINEERING_READY`：**YES**
-- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**
+- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（主样本通过核心一致性；Reviewer/Repair 失败路径与作者评分未完成）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
-- `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 与人工 GUI 未完成）
+- `PUBLIC_BETA_READINESS`：**NOT_READY**（M1 失败路径/作者评分与人工 GUI 未完成）
