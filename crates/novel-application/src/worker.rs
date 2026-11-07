@@ -1616,41 +1616,41 @@ async fn execute_structured(
             &claimed.contract.target_chapter_id,
             &claimed.run_id,
         );
-        let obligations = target_obligations_from_artifacts(&artifacts, target.sort_order, pinned)?;
+        let obligations =
+            match target_obligations_from_artifacts(&artifacts, target.sort_order, pinned) {
+                Ok(obligations) => obligations,
+                Err(error) => {
+                    return pause_review_validation_error(
+                        worker,
+                        claimed,
+                        &attempt_id,
+                        step_id,
+                        &request_id,
+                        &summary,
+                        started,
+                        &usage,
+                        &error.to_string(),
+                    )
+                    .await;
+                }
+            };
         let allowed: std::collections::BTreeSet<String> =
             obligations.iter().map(|item| item.id.clone()).collect();
         match crate::obligations::validate_review_obligation_ids(&payload, &allowed) {
             Ok(payload) => payload,
             Err(error) => {
-                record_usage_before_stop(
+                return pause_review_validation_error(
                     worker,
                     claimed,
+                    &attempt_id,
                     step_id,
                     &request_id,
                     &summary,
                     started,
                     &usage,
+                    &error,
                 )
-                .await?;
-                worker
-                    .runs
-                    .mark_attempt_fenced(
-                        &claimed.fence,
-                        &claimed.run_id,
-                        &attempt_id,
-                        AttemptPhase::Interrupted.as_str(),
-                        None,
-                        worker.clock.now_ms(),
-                    )
-                    .await?;
-                return worker
-                    .pause(
-                        claimed,
-                        StopSignalKind::DataIntegrity,
-                        &error,
-                        Some(step_id.into()),
-                    )
-                    .await;
+                .await;
             }
         }
     } else {
@@ -2049,6 +2049,43 @@ async fn record_usage_before_stop(
         ))
         .await?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn pause_review_validation_error(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    attempt_id: &str,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    usage: &TokenUsage,
+    error: &str,
+) -> Result<TickOutcome, AppError> {
+    record_usage_before_stop(
+        worker, claimed, step_id, request_id, summary, started, usage,
+    )
+    .await?;
+    worker
+        .runs
+        .mark_attempt_fenced(
+            &claimed.fence,
+            &claimed.run_id,
+            attempt_id,
+            AttemptPhase::Interrupted.as_str(),
+            None,
+            worker.clock.now_ms(),
+        )
+        .await?;
+    worker
+        .pause(
+            claimed,
+            StopSignalKind::DataIntegrity,
+            error,
+            Some(step_id.into()),
+        )
+        .await
 }
 
 async fn draft_prompt(
