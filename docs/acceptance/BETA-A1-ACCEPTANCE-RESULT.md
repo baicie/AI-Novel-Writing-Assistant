@@ -4,7 +4,7 @@
 
 | 裁决项 | 结果 | 证据 |
 | --- | --- | --- |
-| `ENGINEERING_READY` | **NO（P1 已修复待合并）** | PR #24 CI 全部通过、16k 复测收敛；Draft 尚未合并到 beta |
+| `ENGINEERING_READY` | **YES** | PR #24 已合并到 beta（`1d21ba6b`）；CI 全部通过；16k 修复复测收敛 |
 | `M1_ACCEPTANCE` | **M1_RETEST_PENDING** | 主样本通过；8192 修复截断导致 M1_FAIL；16k 复测 Reviewer/Repair 均通过，待 #24 合并后的最终 M1 与作者评分 |
 | `GUI_AUTOMATED_ACCEPTANCE` | **PASS** | 11/11 桌面 E2E spec 通过；创建自然导航 + 重启 2/2 通过 |
 | `MANUAL_GUI_ACCEPTANCE` | **MANUAL_GUI_NOT_RUN** | 没有真实作者执行第 7 节流程 |
@@ -14,9 +14,11 @@
 
 | 项 | 值 |
 | --- | --- |
-| `beta` HEAD | `90925ddd93ca041dae44778feceebf49eafad278` |
+| `beta` 验收基线 | `90925ddd93ca041dae44778feceebf49eafad278` |
+| `beta` 当前 HEAD | `1d21ba6be10a64983889e23acb8a663ba971c64b`（PR #24 合并后） |
 | `main` | `eff69f2`，未修改 |
 | PR #23 | 已合并；合并提交 `90925ddd` |
+| PR #24 | 已合并；合并提交 `1d21ba6b`（修复截断 P1） |
 | 验收分支 | `acceptance/beta-a1`（从 `origin/beta` 创建） |
 | 桌面构建树 | 与 `6ddf96cc` 完全一致（`git diff 6ddf96cc 90925ddd` 为空），E2E 应用由此树重新构建 |
 | 数据目录 | 每个 E2E spec 独立 `mktemp -d`，不接触正式作品 |
@@ -262,10 +264,9 @@ review2 5,688 / 1,124。主样本 6 次 + 两次探针各 3 次，合计 12 次�
 **`M1_RETEST_PENDING`**。
 
 - beta `90925ddd` 上的 M1 为 **FAIL**：8192 修复截断导致失败路径不收敛。
-- 16k 修复复测已经收敛；Draft PR #24（`fix/beta-a1-repair-truncation`）CI 全部通过，
-  待合并到 beta。
-- 最终 M1 需在 #24 合并后跑一次完整 M1（或等价 worker 级失败路径）并由作者阅读评分；
-  在完成前不标 `M1_PASS`。
+- 16k 修复复测已经收敛；PR #24 已合并到 beta（`1d21ba6b`），CI 全部通过。
+- 最终 M1 需在 beta `1d21ba6b` 上跑一次完整 M1（或等价 worker 级失败路径）并由作者阅读
+  评分；在完成前不标 `M1_PASS`。
 
 PR #24 变更：修复输出预算至少 16,384 token；completion 达到预算时不再保存候选，
 记录 usage 并进入 DataIntegrity 暂停；新增 repair budget / 截断判定单元测试。
@@ -357,9 +358,9 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 1. **修复输出截断被保存为候选**：M1 失败路径探针中 Repair 的 completion tokens 正好为 8192，
    返回 641 字且在“他喊了声”处中断；旧实现仍保存该候选，复验残留 `ch1-req-1`，修复路径
-   无法收敛。Draft PR #24 已修复：提高修复输出预算到至少 16,384 token，并在达到上限时
-   fail-closed（记录 usage、标记 attempt 中断、DataIntegrity 暂停）。16k 复测已收敛，
-   PR #24 CI 全部通过；beta 在合并前仍保留该 P1。
+   无法收敛。PR #24 已修复并合并到 beta（`1d21ba6b`）：提高修复输出预算到至少 16,384 token，
+   并在达到上限时 fail-closed（记录 usage、标记 attempt 中断、DataIntegrity 暂停）。
+   16k 复测已收敛，PR #24 CI 全部通过。
 2. 其余核心流程未发现可复现阻断；11/11 GUI spec 与 2/2 重启验收通过，主样本 Writer 遵守
    核心 hard 义务。
 
@@ -392,6 +393,7 @@ bash scripts/run-p172-e2e-isolated.sh \
   全部通过。
 - 失败路径复测：8192 预算 FAIL（截断）；16,384 预算 PASS（Reviewer 6 issues 含 `ch1-req-1`，
   Repair 1,512 字完整，复验 `issues=0`）。
+- PR #24 合并到 beta：`1d21ba6b`；beta 树与修复分支 `8eae5d40` 一致。
 - GUI smoke：11/11 spec 通过；创建导航 + 重启 2/2 通过。
 - 完整 workspace、client 与 CI 结果沿用同一树的最近一次通过记录（`6ddf96cc`，与 beta 树一致）：
   workspace 602 passed、test-harness 114 passed、client 290 passed、GitHub Actions 全部通过；
@@ -400,16 +402,15 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 评审并合并 Draft PR #24（`fix/beta-a1-repair-truncation`）；CI 已全部通过。
-2. 合并后在 beta 上执行最终 M1（主样本 + 失败路径；复用 16k 预算）并由作者阅读评分；
+1. 在 beta `1d21ba6b` 上执行最终 M1（主样本 + 失败路径；16k 预算）并由作者阅读评分；
    完成后才能把 M1 从 `M1_RETEST_PENDING` 推进到 PASS/FAIL。
-3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
-4. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
+2. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
+3. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 
 ## 10. 最终裁决
 
-- `ENGINEERING_READY`：**NO**（P1 已修复并通过 CI/16k 复测，但 #24 尚未合并到 beta）
-- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（beta 8192 截断 FAIL；16k 复测收敛；待 #24 合并后的最终 M1 与作者评分）
+- `ENGINEERING_READY`：**YES**（P1 修复已合并到 beta `1d21ba6b`，CI 与 16k 复测通过）
+- `M1_ACCEPTANCE`：**M1_RETEST_PENDING**（16k 复测收敛；待 beta 上的最终 M1 与作者评分）
 - `GUI_AUTOMATED_ACCEPTANCE`：**PASS**（11/11 spec + 2/2 重启验收）
 - `MANUAL_GUI_ACCEPTANCE`：**MANUAL_GUI_NOT_RUN**
 - `PUBLIC_BETA_READINESS`：**NOT_READY**（最终 M1 与人工 GUI 未完成）
