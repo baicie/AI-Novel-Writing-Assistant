@@ -341,6 +341,13 @@ fn runtime_prompts() -> BTreeMap<String, String> {
     prompts
 }
 
+fn runtime_prompts_v2() -> BTreeMap<String, String> {
+    let mut prompts = runtime_prompts();
+    prompts.insert("story_macro".into(), "story-macro-v2".into());
+    prompts.insert("chapter_list".into(), "chapter-list-v3".into());
+    prompts
+}
+
 async fn runtime_for(
     llm: Arc<dyn novel_llm::LlmProvider>,
     owner: &str,
@@ -370,6 +377,16 @@ async fn runtime_for(
 }
 
 async fn open_run(runtime: &Runtime, novel_id: &str, chapter_id: &str, command_id: &str) -> String {
+    open_run_with_prompts(runtime, novel_id, chapter_id, command_id, runtime_prompts()).await
+}
+
+async fn open_run_with_prompts(
+    runtime: &Runtime,
+    novel_id: &str,
+    chapter_id: &str,
+    command_id: &str,
+    prompt_versions: BTreeMap<String, String>,
+) -> String {
     runtime
         .director
         .open_run(OpenRunInput {
@@ -379,7 +396,7 @@ async fn open_run(runtime: &Runtime, novel_id: &str, chapter_id: &str, command_i
             provider: "mock".into(),
             credential_ref: Some("mock".into()),
             model: "mock-model".into(),
-            prompt_versions: runtime_prompts(),
+            prompt_versions,
             token_budget: Some(512),
             context_token_budget: None,
             max_automatic_retries: 0,
@@ -1067,7 +1084,14 @@ async fn missing_story_key_event_coverage_pauses_before_writing() {
         .create_chapter(&novel.id, "第一章", 1)
         .await
         .unwrap();
-    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-coverage-open").await;
+    let run_id = open_run_with_prompts(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p17410-coverage-open",
+        runtime_prompts_v2(),
+    )
+    .await;
     let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
     assert_eq!(status, "paused");
     assert_eq!(signal.as_deref(), Some("data_integrity"));
@@ -1113,7 +1137,14 @@ async fn covered_story_key_events_reach_the_writer_with_source_id() {
         .create_chapter(&novel.id, "第一章", 1)
         .await
         .unwrap();
-    let run_id = open_run(&runtime, &novel.id, &chapter.id, "p17410-coverage-ok-open").await;
+    let run_id = open_run_with_prompts(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p17410-coverage-ok-open",
+        runtime_prompts_v2(),
+    )
+    .await;
     let (status, _signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
     assert_eq!(status, "succeeded");
     let writer = llm
@@ -1124,5 +1155,42 @@ async fn covered_story_key_events_reach_the_writer_with_source_id() {
     assert!(
         writer.contains("来源事件：ch1-event-1"),
         "writer must receive the frozen key event reference"
+    );
+}
+
+#[tokio::test]
+async fn strict_new_story_macro_without_key_events_pauses() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:story_macro", story_macro()),
+        ("STEP:chapter_draft", "不应到达的正文".into()),
+    ]));
+    let (_dir, _kernel, runtime) = runtime_for(llm.clone(), "p17410-strict-key-events").await;
+    let novel = runtime
+        .director
+        .create_novel("严格关键事件", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run_with_prompts(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p17410-strict-key-events-open",
+        runtime_prompts_v2(),
+    )
+    .await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 20).await;
+    assert_eq!(status, "paused");
+    assert_eq!(signal.as_deref(), Some("data_integrity"));
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_draft")),
+        "strict v2 must not reach the writer without keyEvents"
     );
 }
