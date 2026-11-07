@@ -980,3 +980,136 @@ async fn review_evidence_must_be_locatable_in_the_current_candidate() {
         "fabricated evidence must fail closed instead of driving a repair"
     );
 }
+
+/// Beta-A1 运行时探针：直接检查 worker 本轮实际发送的 Prompt 文本与产物，
+/// 用版本独有的模板措辞证明运行时确实使用了 chapter-list-v2 / chapter-draft-v3 /
+/// consistency-review-v2 / chapter-repair-v2，而不是只检查源码默认值。
+#[tokio::test]
+async fn beta_a1_runtime_prompt_versions_are_observable() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list()),
+        ("STEP:chapter_draft", "林动赶到时，老铁匠已经死亡。".into()),
+        ("STEP:consistency_review", known_issue_review()),
+        ("STEP:chapter_repair", "林动亲眼撞见老铁匠被杀。".into()),
+        ("STEP:consistency_review", clean_review()),
+    ]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "beta-a1-runtime").await;
+    let novel = runtime
+        .director
+        .create_novel("Beta-A1 运行时探针", "")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(&runtime, &novel.id, &chapter.id, "beta-a1-runtime-open").await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 60).await;
+
+    let prompts = llm.prompts();
+    let planner = prompts
+        .iter()
+        .find(|prompt| prompt.contains("STEP:chapter_list"))
+        .expect("chapter_list prompt");
+    assert!(
+        planner.contains("obligations 是本章必须遵守的结构化义务数组"),
+        "runtime planner prompt must be chapter-list-v2"
+    );
+    assert!(planner.contains("每章至少一条 hard 义务"));
+    assert!(
+        planner.contains("山门之下封着什么？"),
+        "planner prompt must include story_macro"
+    );
+
+    let writer = prompts
+        .iter()
+        .find(|prompt| prompt.contains("STEP:chapter_draft"))
+        .expect("chapter_draft prompt");
+    assert!(
+        writer.contains("章节义务：\n【硬约束｜必须遵守"),
+        "runtime writer prompt must use the chapter-draft-v3 template slot"
+    );
+    assert!(writer.contains("硬约束必须遵守，不得改写关键事件"));
+    assert!(
+        !writer.contains("如果正文与硬约束冲突，必须调整正文"),
+        "v3 must not go through the v2 render-then-append path"
+    );
+
+    let reviewer = prompts
+        .iter()
+        .find(|prompt| prompt.contains("STEP:consistency_review"))
+        .expect("review prompt");
+    assert!(
+        reviewer.contains("没有采用 advisory 建议不构成问题"),
+        "runtime reviewer prompt must be consistency-review-v2"
+    );
+    assert!(reviewer.contains("obligationId"));
+    assert!(reviewer.contains("林动赶到时，老铁匠已经死亡。"));
+
+    let repair = prompts
+        .iter()
+        .find(|prompt| prompt.contains("STEP:chapter_repair"))
+        .expect("repair prompt");
+    assert!(
+        repair.contains("本章章节义务") && repair.contains("硬约束必须保留"),
+        "runtime repair prompt must be chapter-repair-v2"
+    );
+    assert!(repair.contains("创作建议可以合理取舍"));
+    assert!(repair.contains("ch1-req-1"));
+
+    println!(
+        "BETA_A1_PROMPT_PROBE chapter_list=chapter-list-v2 chapter_draft=chapter-draft-v3 consistency_review=consistency-review-v2 chapter_repair=chapter-repair-v2"
+    );
+    println!("BETA_A1_RUN status={status} signal={signal:?}");
+
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    let context = artifacts
+        .iter()
+        .find(|artifact| artifact.artifact_type == "context")
+        .expect("context artifact");
+    let context: serde_json::Value = serde_json::from_str(&context.payload_json).unwrap();
+    assert_eq!(context["runId"].as_str(), Some(run_id.as_str()));
+    assert_eq!(context["chapterPlanVersion"], 1);
+    let ids = context["obligationIds"].as_array().expect("obligation ids");
+    assert!(ids.iter().any(|id| id == "ch1-req-1"));
+    assert!(ids.iter().any(|id| id == "ch1-order-1"));
+    assert!(ids.iter().any(|id| id == "ch1-adv-1"));
+    let text = context["obligationsText"]
+        .as_str()
+        .expect("obligations text");
+    assert!(text.contains("【硬约束｜必须遵守"));
+    assert!(text.contains("【创作建议｜可合理取舍"));
+    let trace = &context["trace"];
+    assert_eq!(trace["chapterPlanVersion"], 1);
+    assert!(trace["sources"].as_array().is_some_and(|sources| {
+        sources.iter().any(|source| {
+            source["sourceType"] == "chapter_obligations"
+                && source["selected"] == true
+                && source["contentHash"].is_string()
+        })
+    }));
+
+    let review = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "consistency_review")
+        .find(|artifact| {
+            serde_json::from_str::<serde_json::Value>(&artifact.payload_json)
+                .ok()
+                .and_then(|payload| {
+                    payload["issueDetails"][0]["obligationId"]
+                        .as_str()
+                        .map(|id| id == "ch1-req-1")
+                })
+                .unwrap_or(false)
+        })
+        .expect("hard review artifact");
+    let review: serde_json::Value = serde_json::from_str(&review.payload_json).unwrap();
+    assert_eq!(review["issueDetails"][0]["obligationEnforcement"], "hard");
+    assert_eq!(review["issues"], 1);
+}
