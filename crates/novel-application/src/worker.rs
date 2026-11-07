@@ -31,7 +31,7 @@ mod worker_validation;
 
 pub(super) use worker_validation::{
     context_payload, latest_payload, truncate_chars, validate_chapter_plan_references,
-    validate_structured_output,
+    validate_structured_output_with,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1362,6 +1362,18 @@ async fn execute_structured(
     spec: &StepSpec,
     step_id: &str,
 ) -> Result<TickOutcome, AppError> {
+    let story_macro_v2 = claimed
+        .contract
+        .prompt_versions
+        .get("story_macro")
+        .map(String::as_str)
+        == Some("story-macro-v2");
+    let chapter_list_v3 = claimed
+        .contract
+        .prompt_versions
+        .get("chapter_list")
+        .map(String::as_str)
+        == Some("chapter-list-v3");
     let prompt = match structured_prompt(worker, claimed, step_id).await {
         Ok(prompt) => prompt,
         Err(error) => {
@@ -1512,7 +1524,11 @@ async fn execute_structured(
         raw
     };
     let mut usage = response.usage.clone();
-    let payload = match validate_structured_output(step_id, &raw) {
+    let payload = match validate_structured_output_with(
+        step_id,
+        &raw,
+        step_id == "story_macro" && story_macro_v2,
+    ) {
         Ok(payload) => payload,
         Err(first_error) => {
             // 审校本身是质量门禁。无效的审校 JSON 不能被“修复”为空 issues，
@@ -1603,7 +1619,11 @@ async fn execute_structured(
                     } else {
                         repair_raw
                     };
-                    match validate_structured_output(step_id, &repair_text) {
+                    match validate_structured_output_with(
+                        step_id,
+                        &repair_text,
+                        step_id == "story_macro" && story_macro_v2,
+                    ) {
                         Ok(payload) => payload,
                         Err(repair_error) => {
                             record_usage_before_stop(
@@ -1863,7 +1883,13 @@ async fn execute_structured(
         let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
         let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
         let macro_payload = latest_payload(&artifacts, "story_macro", book_scope())?;
-        match validate_chapter_plan_references(&payload, &cast, &volume, &macro_payload) {
+        match validate_chapter_plan_references(
+            &payload,
+            &cast,
+            &volume,
+            &macro_payload,
+            chapter_list_v3,
+        ) {
             Ok(payload) => payload,
             Err(error) => {
                 worker
@@ -2097,7 +2123,17 @@ async fn structured_prompt(
                 "story_input".into(),
                 format!("{}\n{}", novel.title, novel.description),
             );
-            ("story_macro", "story-macro-v2", vars)
+            let version = match claimed
+                .contract
+                .prompt_versions
+                .get("story_macro")
+                .map(String::as_str)
+            {
+                Some("story-macro-v2") => "story-macro-v2",
+                Some("story-macro-v1") | None => "story-macro-v1",
+                Some(_) => return Err(AppError::validation("不支持的 story_macro Prompt 版本")),
+            };
+            ("story_macro", version, vars)
         }
         "character_cast" => {
             let mut vars = BTreeMap::new();
@@ -2125,7 +2161,17 @@ async fn structured_prompt(
                     24_000,
                 )?,
             );
-            ("chapter_list", "chapter-list-v3", vars)
+            let version = match claimed
+                .contract
+                .prompt_versions
+                .get("chapter_list")
+                .map(String::as_str)
+            {
+                Some("chapter-list-v3") => "chapter-list-v3",
+                Some("chapter-list-v2") | None => "chapter-list-v2",
+                Some(_) => return Err(AppError::validation("不支持的 chapter_list Prompt 版本")),
+            };
+            ("chapter_list", version, vars)
         }
         "consistency_review" => {
             let candidate = worker
@@ -2165,7 +2211,7 @@ async fn structured_prompt(
 fn structured_step_requirement(step_id: &str) -> &'static str {
     match step_id {
         "story_macro" => {
-            "expansion.mystery_box 必须是单个非空字符串，不能是数组，也不能省略；conflict_layers 必须是对象或数组；setpiece_seeds 必须是字符串数组；expansion 与 decomposition 的所有文本字段尽量精简，字段名使用 snake_case。"
+            "expansion.mystery_box 必须是单个非空字符串，不能是数组，也不能省略；conflict_layers 必须是对象或数组；setpiece_seeds 必须是字符串数组；expansion 与 decomposition 的所有文本字段尽量精简，字段名使用 snake_case。keyEvents 必须是数组且不能为空，至少一条 hard；每项 id 唯一、chapterOrder 从 1 开始、type 合法、description 非空、participants 为字符串数组。"
         }
         "character_cast" => {
             "members 至少 3 人、relations 至少 2 条；字段名使用 name、role、castRole、storyFunction、sourceName、targetName、surfaceRelation。"
@@ -2174,7 +2220,7 @@ fn structured_step_requirement(step_id: &str) -> &'static str {
             "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
         }
         "chapter_list" => {
-            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。若 story_macro 有 keyEvents，本章每一条 hard keyEvent 必须有同类型 hard 义务，sourceEventId 与事件 id 一致；不得把其他章节的事件写进本章。"
+            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。若 story_macro 有 keyEvents，本章每一条 hard keyEvent 必须有同类型 hard 义务，sourceEventId 与事件 id 一致；义务的 description、participants、type 必须与 keyEvent 完全一致；不得把其他章节的事件写进本章。"
         }
         "consistency_review" => {
             "只输出 issues 数组；每项包含 type、severity、evidence、suggestion；违反章节义务时 obligationId 必须来自上下文中的义务 ID。"
@@ -2522,7 +2568,7 @@ fn task_type_for_step(step_id: &str) -> &'static str {
 
 #[cfg(test)]
 mod structured_validation_tests {
-    use super::validate_structured_output;
+    use super::worker_validation::validate_structured_output;
 
     #[test]
     fn story_macro_requires_real_structure() {
