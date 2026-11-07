@@ -20,6 +20,7 @@
 | PR #23 | 已合并；合并提交 `90925ddd` |
 | PR #24 | 已合并；合并提交 `1d21ba6b`（修复截断 P1） |
 | PR #25 | 已合并；合并提交 `1d2adaf1`（结构化失败诊断） |
+| PR #26 | Draft（Planner 关键事件覆盖；未合并） |
 | 验收分支 | `acceptance/beta-a1`（从 `origin/beta` 创建） |
 | 桌面构建树 | 与 `6ddf96cc` 完全一致（`git diff 6ddf96cc 90925ddd` 为空），E2E 应用由此树重新构建 |
 | 数据目录 | 每个 E2E spec 独立 `mktemp -d`，不接触正式作品 |
@@ -434,8 +435,8 @@ bash scripts/run-p172-e2e-isolated.sh \
    撞见老铁匠被灭口”，但 `chapter_list` 没有生成对应的 required_event，反而生成
    `ch1-req-2`“靠近铁匠铺，尚未目击命案，只为询问玉佩来历”。Writer 按 macro 写目击，
    Reviewer 正确报 `ch1-req-2` 冲突与 `ch1-con-1` 视角越界；一次 Repair 后仍残留 2 条 high，
-   按设计停在 Safety。需要 Planner 的计划覆盖/冲突自检或更强的结构化规划模型，不能在
-   Prompt 里无证据地反复试。
+   按设计停在 Safety。Draft PR #26 已加入 `story-macro-v2` 的 `keyEvents`、
+   `chapter-list-v3` 的覆盖规则与确定性覆盖校验；待评审/合并后再授权复测。
 9. **结构化修复的 usage 可能少计一次调用**：第一次 beta 最终 M1 的暂停原因显示执行了
    结构化修复，但 run usage 只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
 10. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
@@ -472,10 +473,9 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 先处理 **Planner 义务覆盖/一致性**：让每一条 `story_macro` 关键事件必须落成 hard
-   `required_event`，并禁止与 macro 冲突的义务（例如“尚未目击” vs “必须目击”）。这属于
-   Planner schema/提示词契约，不是 Repair 或 Reviewer 的缺陷；需要设计后再改，不能靠
-   反复重跑碰运气。
+1. 评审 Draft PR #26（`fix/beta-a1-planner-coverage`）：它把 `story_macro` 的关键事件
+   结构化到 `keyEvents`，要求 `chapter_list` 逐条覆盖并带 `sourceEventId`；未覆盖时在
+   Writer 前暂停。CI 通过并合并后，再决定是否重试 M1。
 2. 评估是否换用结构化规划与计划一致性更稳定的模型；任何重试都需新的明确授权、模型与
    费用上限，并保留 `structured_failure`/Run 产物作为证据。
 3. 由真实作者阅读候选并记录 1–5 分与修改成本；本次候选停在最终确认门前，未提交正文。
