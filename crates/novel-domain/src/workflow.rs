@@ -45,6 +45,8 @@ pub struct ArtifactView {
     pub artifact_type: String,
     pub scope: String,
     pub version: i64,
+    /// 写入该产物的 Run。历史迁移或手工产物可能没有归属 Run。
+    pub run_id: Option<String>,
     pub status: ArtifactStatus,
     pub protected_user_content: bool,
     pub payload_json: String,

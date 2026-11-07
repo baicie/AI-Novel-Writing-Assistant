@@ -185,7 +185,7 @@ impl WorkflowRepository for SqliteKernel {
         novel_id: &str,
     ) -> Result<Vec<novel_domain::ArtifactView>, PortError> {
         let rows = sqlx::query(
-            "SELECT type, scope, version, status, protected_user_content, payload_json
+            "SELECT type, scope, version, run_id, status, protected_user_content, payload_json
              FROM workflow_artifact WHERE novel_id = ? ORDER BY version",
         )
         .bind(novel_id)
@@ -199,6 +199,7 @@ impl WorkflowRepository for SqliteKernel {
                 artifact_type: row.try_get("type").map_err(map_sql)?,
                 scope: row.try_get("scope").map_err(map_sql)?,
                 version: row.try_get("version").map_err(map_sql)?,
+                run_id: row.try_get("run_id").map_err(map_sql)?,
                 status: novel_domain::ArtifactStatus::parse(&status)
                     .map_err(|_| PortError::Integrity("产物状态无法识别。".into()))?,
                 protected_user_content: row

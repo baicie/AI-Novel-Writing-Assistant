@@ -139,8 +139,8 @@ async fn structured_director_loop_reaches_committed_chapter_and_survives_reopen(
     }).to_string();
     let chapter_list = serde_json::json!({
         "chapters": [
-            {"chapterOrder":1,"title":"第一章 山门","volumeTitle":"山门卷","summary":"林动入山","characterNames":["林动","苏晚"]},
-            {"chapterOrder":2,"title":"第二章 夜战","volumeTitle":"山门卷","summary":"夜战","characterNames":["林动","陆沉"]}
+            {"chapterOrder":1,"title":"第一章 山门","volumeTitle":"山门卷","summary":"林动入山","characterNames":["林动","苏晚"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"林动按计划入山","enforcement":"hard","participants":["林动","苏晚"]}]},
+            {"chapterOrder":2,"title":"第二章 夜战","volumeTitle":"山门卷","summary":"夜战","characterNames":["林动","陆沉"],"obligations":[{"id":"ch2-req-1","type":"required_event","description":"林动按计划夜战","enforcement":"hard","participants":["林动","陆沉"]}]}
         ]
     }).to_string();
     let consistency = serde_json::json!({"issues":[]}).to_string();
@@ -901,7 +901,7 @@ async fn consistency_issues_fail_closed_without_fake_repair_or_commit() {
         {"name":"陆沉","role":"对立","castRole":"antagonist","storyFunction":"作用"}],
         "relations":[{"sourceName":"林动","targetName":"苏晚","surfaceRelation":"同门"},{"sourceName":"林动","targetName":"陆沉","surfaceRelation":"敌对"}]}).to_string();
     let volume = serde_json::json!({"volumes":[{"volumeOrder":1,"title":"卷一","roleLabel":"开局","coreReward":"进入","planningMode":"hard"}]}).to_string();
-    let chapters = serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"卷一","summary":"梗概","characterNames":["林动"]}]}).to_string();
+    let chapters = serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"卷一","summary":"梗概","characterNames":["林动"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"按计划推进本章关键事件","enforcement":"hard","participants":["林动"]}]}]}).to_string();
     let issues = serde_json::json!({"issues":[
         {"type":"timeline","severity":"high","evidence":"时间线冲突","suggestion":"修正时间"},
         {"type":"character","severity":"medium","evidence":"人物状态冲突","suggestion":"修正状态"},

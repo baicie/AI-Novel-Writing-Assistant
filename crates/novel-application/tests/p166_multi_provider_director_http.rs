@@ -207,7 +207,10 @@ fn volume() -> String {
 }
 
 fn chapters() -> String {
-    serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"]}]}).to_string()
+    serde_json::json!({"chapters":[
+        {"chapterOrder":1,"title":"第一章","volumeTitle":"山门卷","summary":"入山","characterNames":["林动"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"林动按计划入山","enforcement":"hard","participants":["林动"]}]},
+        {"chapterOrder":2,"title":"第二章","volumeTitle":"山门卷","summary":"夜战","characterNames":["林动"],"obligations":[{"id":"ch2-req-1","type":"required_event","description":"林动按计划夜战","enforcement":"hard","participants":["林动"]}]}
+    ]}).to_string()
 }
 
 fn issues() -> String {

@@ -12,6 +12,7 @@ fn artifact(ty: &str, version: i64, scope: &str, payload: serde_json::Value) -> 
         artifact_type: ty.into(),
         scope: scope.into(),
         version,
+        run_id: None,
         status: ArtifactStatus::Confirmed,
         protected_user_content: false,
         payload_json: payload.to_string(),
@@ -199,7 +200,7 @@ async fn context_is_real_traceable_deterministic_and_scoped() {
     .unwrap();
     assert_eq!(first.prompt_text, second.prompt_text);
     assert_eq!(first.trace.content_hash, second.trace.content_hash);
-    assert_eq!(first.trace.assembly_version, "director-context-v1");
+    assert_eq!(first.trace.assembly_version, "director-context-v2");
     assert!(first.prompt_text.contains("宗门以剑为尊"));
     assert!(first.prompt_text.contains("林动"));
     assert!(first.prompt_text.contains("第一章正式正文"));

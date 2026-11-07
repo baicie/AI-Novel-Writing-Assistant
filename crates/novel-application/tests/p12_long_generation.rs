@@ -29,7 +29,7 @@ fn chapter_plan() -> String {
         .map(|order| {
             serde_json::json!({
                 "chapterOrder": order, "title": format!("第{order}章"), "volumeTitle": "山门卷",
-                "summary": format!("章节摘要 {order}：林动推进主线。"), "characterNames": ["林动"]
+                "summary": format!("章节摘要 {order}：林动推进主线。"), "characterNames": ["林动"], "obligations": [{"id": format!("ch{order}-req-1"), "type": "required_event", "description": format!("林动按计划推进第 {order} 章关键事件"), "enforcement": "hard", "participants": ["林动"]}]
             })
         })
         .collect();

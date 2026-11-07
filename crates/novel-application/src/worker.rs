@@ -13,7 +13,10 @@ use novel_workflow::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::context::{DEFAULT_OUTPUT_RESERVE, assemble_director_context};
+use crate::context::{
+    DEFAULT_OUTPUT_RESERVE, assemble_director_context, latest_run_context_payload,
+    pinned_chapter_plan_version, target_obligations_from_artifacts,
+};
 use crate::dto::{GenerationEvent, event_from_stored};
 use crate::error::AppError;
 use crate::hash::sha256_hex;
@@ -559,6 +562,29 @@ impl Worker {
                 )
                 .await;
         }
+        // advisory 只是建议：未采用不触发修复，也不阻塞章节完成。
+        let issues: Vec<serde_json::Value> = issues
+            .into_iter()
+            .filter(|issue| {
+                issue
+                    .get("obligationEnforcement")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("advisory")
+            })
+            .collect();
+        if issues.is_empty() {
+            return self
+                .finish_step(
+                    claimed,
+                    spec,
+                    "confirmed",
+                    false,
+                    &serde_json::json!({ "status": "advisory_only" }).to_string(),
+                    None,
+                    None,
+                )
+                .await;
+        }
         let repair_budget = match claimed.contract.plan_version.as_str() {
             novel_workflow::PRODUCTION_PLAN_VERSION => claimed.contract.repair_budget,
             novel_workflow::PRODUCTION_PLAN_VERSION_V2 => claimed.contract.max_automatic_retries,
@@ -579,15 +605,37 @@ impl Worker {
             .latest_candidate(&claimed.run_id)
             .await?
             .ok_or_else(|| AppError::integrity("修复缺少候选正文。"))?;
-        let context = latest_payload(&artifacts, "context", &scope)?;
+        let context = latest_run_context_payload(
+            &artifacts,
+            &claimed.contract.target_chapter_id,
+            &claimed.run_id,
+        )?;
         let context_text = context
             .get("promptText")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| AppError::integrity("修复缺少上下文。"))?;
-        let repair_asset = novel_prompt::resolve("chapter_repair", "chapter-repair-v1")
+        let obligations_text = context
+            .get("obligationsText")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let repair_version = claimed
+            .contract
+            .prompt_versions
+            .get("chapter_repair")
+            .map(String::as_str)
+            .unwrap_or("chapter-repair-v2");
+        let repair_asset = novel_prompt::resolve("chapter_repair", repair_version)
             .map_err(|_| AppError::validation("修订提示词版本不存在"))?;
         let mut vars = BTreeMap::new();
         vars.insert("context".into(), context_text.to_string());
+        vars.insert(
+            "obligations".into(),
+            if obligations_text.trim().is_empty() {
+                "（没有结构化义务；沿用已确认上下文，不得改写已确认事件）".to_string()
+            } else {
+                obligations_text.to_string()
+            },
+        );
         vars.insert(
             "issues".into(),
             serde_json::to_string(&issues)
@@ -1267,7 +1315,19 @@ async fn execute_structured(
     spec: &StepSpec,
     step_id: &str,
 ) -> Result<TickOutcome, AppError> {
-    let prompt = structured_prompt(worker, claimed, step_id).await?;
+    let prompt = match structured_prompt(worker, claimed, step_id).await {
+        Ok(prompt) => prompt,
+        Err(error) => {
+            return worker
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    &error.to_string(),
+                    Some(step_id.into()),
+                )
+                .await;
+        }
+    };
     let summary = summarize(&prompt);
     let attempt_id = worker.ids.new_id();
     worker
@@ -1408,7 +1468,40 @@ async fn execute_structured(
     let payload = match validate_structured_output(step_id, &raw) {
         Ok(payload) => payload,
         Err(first_error) => {
-            // 结构化输出可能是被截断的 JSON，或字段类型/必填字段不符合契约。
+            // 审校本身是质量门禁。无效的审校 JSON 不能被“修复”为空 issues，
+            // 否则一次模型格式失败会伪装成零问题通过；这里直接 fail-closed。
+            if step_id == "consistency_review" {
+                record_usage_before_stop(
+                    worker,
+                    claimed,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                )
+                .await?;
+                worker
+                    .runs
+                    .mark_attempt_fenced(
+                        &claimed.fence,
+                        &claimed.run_id,
+                        &attempt_id,
+                        AttemptPhase::Interrupted.as_str(),
+                        None,
+                        worker.clock.now_ms(),
+                    )
+                    .await?;
+                return worker
+                    .pause(
+                        claimed,
+                        StopSignalKind::DataIntegrity,
+                        &format!("一致性审校输出无效，已停止，不能当作零问题通过：{first_error}"),
+                        Some(step_id.into()),
+                    )
+                    .await;
+            }
+            // 规划产物可能是被截断的 JSON，或字段类型/必填字段不符合契约。
             // 只做一次有界修复调用：把原始输出与校验错误交给模型，要求只返回完整 JSON。
             let repair_prompt =
                 structured_repair_prompt(step_id, &original_prompt, &first_error, &raw)?;
@@ -1535,6 +1628,130 @@ async fn execute_structured(
             }
         }
     };
+    let payload = if step_id == "consistency_review" {
+        let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
+        let target = worker
+            .novels
+            .get_chapter(&claimed.novel_id, &claimed.contract.target_chapter_id)
+            .await?;
+        let pinned = match pinned_chapter_plan_version(
+            &artifacts,
+            &claimed.contract.target_chapter_id,
+            target.sort_order,
+            &claimed.run_id,
+        ) {
+            Ok(version) => version,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error.to_string(),
+                )
+                .await;
+            }
+        };
+        let obligations =
+            match target_obligations_from_artifacts(&artifacts, target.sort_order, Some(pinned)) {
+                Ok(obligations) => obligations,
+                Err(error) => {
+                    return pause_review_validation_error(
+                        worker,
+                        claimed,
+                        &attempt_id,
+                        step_id,
+                        &request_id,
+                        &summary,
+                        started,
+                        &usage,
+                        &error.to_string(),
+                    )
+                    .await;
+                }
+            };
+        let allowed: std::collections::BTreeSet<String> =
+            obligations.iter().map(|item| item.id.clone()).collect();
+        let payload = match crate::obligations::validate_review_obligation_ids(&payload, &allowed) {
+            Ok(payload) => payload,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error,
+                )
+                .await;
+            }
+        };
+        let payload = match crate::obligations::annotate_review_obligations(&payload, &obligations)
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error,
+                )
+                .await;
+            }
+        };
+        let candidate = match worker.runs.latest_candidate(&claimed.run_id).await? {
+            Some(candidate) => candidate,
+            None => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    "一致性审校缺少候选正文，无法核验审校证据。",
+                )
+                .await;
+            }
+        };
+        match crate::obligations::validate_review_evidence(
+            &payload,
+            &candidate.content,
+            &obligations,
+        ) {
+            Ok(()) => payload,
+            Err(error) => {
+                return pause_review_validation_error(
+                    worker,
+                    claimed,
+                    &attempt_id,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &usage,
+                    &error,
+                )
+                .await;
+            }
+        }
+    } else {
+        payload
+    };
     worker
         .runs
         .record_invocation_fenced(
@@ -1555,7 +1772,30 @@ async fn execute_structured(
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
         let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
         let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-        validate_chapter_plan_references(&payload, &cast, &volume)?
+        match validate_chapter_plan_references(&payload, &cast, &volume) {
+            Ok(payload) => payload,
+            Err(error) => {
+                worker
+                    .runs
+                    .mark_attempt_fenced(
+                        &claimed.fence,
+                        &claimed.run_id,
+                        &attempt_id,
+                        AttemptPhase::Interrupted.as_str(),
+                        None,
+                        worker.clock.now_ms(),
+                    )
+                    .await?;
+                return worker
+                    .pause(
+                        claimed,
+                        StopSignalKind::DataIntegrity,
+                        &error.to_string(),
+                        Some(step_id.into()),
+                    )
+                    .await;
+            }
+        }
     } else {
         payload
     };
@@ -1709,7 +1949,7 @@ async fn execute_context(
     spec: &StepSpec,
 ) -> Result<TickOutcome, AppError> {
     let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-    let assembly = assemble_director_context(
+    let assembly = match assemble_director_context(
         worker.novels.as_ref(),
         &artifacts,
         &claimed.novel_id,
@@ -1720,12 +1960,29 @@ async fn execute_context(
             .token_budget
             .unwrap_or(DEFAULT_OUTPUT_RESERVE),
     )
-    .await?;
+    .await
+    {
+        Ok(assembly) => assembly,
+        Err(error) => {
+            return worker
+                .pause(
+                    claimed,
+                    StopSignalKind::DataIntegrity,
+                    &error.to_string(),
+                    Some("context".into()),
+                )
+                .await;
+        }
+    };
     let chapter_key = chapter_scope(&claimed.contract.target_chapter_id);
     let payload = serde_json::json!({
         "assemblyVersion": assembly.trace.assembly_version,
+        "runId": claimed.run_id,
         "targetChapterId": claimed.contract.target_chapter_id,
         "scope": chapter_key,
+        "chapterPlanVersion": assembly.chapter_plan_version,
+        "obligationIds": assembly.obligation_ids,
+        "obligationsText": assembly.obligations_text,
         "promptText": assembly.prompt_text,
         "trace": assembly.trace,
     })
@@ -1771,9 +2028,13 @@ async fn structured_prompt(
             let mut vars = BTreeMap::new();
             vars.insert(
                 "context".into(),
-                context_payload(&artifacts, &["volume_strategy", "character_cast"], 20_000)?,
+                context_payload(
+                    &artifacts,
+                    &["story_macro", "volume_strategy", "character_cast"],
+                    24_000,
+                )?,
             );
-            ("chapter_list", "chapter-list-v1", vars)
+            ("chapter_list", "chapter-list-v2", vars)
         }
         "consistency_review" => {
             let candidate = worker
@@ -1781,16 +2042,26 @@ async fn structured_prompt(
                 .latest_candidate(&claimed.run_id)
                 .await?
                 .ok_or_else(|| AppError::integrity("一致性审校缺少候选正文。"))?;
-            let mut context = context_payload(
+            // 使用本 Run 冻结的 Writer 上下文，而不是重新读取可能已经变化的
+            // story_macro / character_cast；这样审校和正文看到的是同一份计划与义务。
+            let context_artifact = latest_run_context_payload(
                 &artifacts,
-                &["chapter_list", "character_cast", "story_macro"],
-                16_000,
+                &claimed.contract.target_chapter_id,
+                &claimed.run_id,
             )?;
+            let prompt_text = context_artifact
+                .get("promptText")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
+            let mut context = prompt_text.to_string();
+            context.push_str(
+                "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；没有采用 advisory 建议不构成问题；evidence 必须逐字引用候选正文并能在候选正文中定位；不得引用历史正文。\n",
+            );
             context.push_str("\n候选正文：");
             context.push_str(&truncate_chars(&candidate.content, 20_000));
             let mut vars = BTreeMap::new();
             vars.insert("context".into(), context);
-            ("consistency_review", "consistency-review-v1", vars)
+            ("consistency_review", "consistency-review-v2", vars)
         }
         _ => return Err(AppError::validation("未知的结构化步骤")),
     };
@@ -1812,10 +2083,10 @@ fn structured_step_requirement(step_id: &str) -> &'static str {
             "volumes 至少 1 卷，volumeOrder 唯一；字段名使用 title、roleLabel、coreReward、planningMode。"
         }
         "chapter_list" => {
-            "chapters 非空，chapterOrder 唯一；字段名使用 title、volumeTitle、summary、characterNames。"
+            "chapters 非空，chapterOrder 唯一；每章 obligations 必须是数组且不能省略，至少包含一条 hard 义务（只写 advisory 或空数组都不合格）；每项 id 唯一、type 在允许集合、description 非空、enforcement 为 hard/advisory、participants 为字符串数组。"
         }
         "consistency_review" => {
-            "只输出 issues 数组；每项包含 type、severity、evidence、suggestion。"
+            "只输出 issues 数组；每项包含 type、severity、evidence、suggestion；违反章节义务时 obligationId 必须来自上下文中的义务 ID。"
         }
         _ => "只输出完整 JSON。",
     }
@@ -1876,6 +2147,43 @@ async fn record_usage_before_stop(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn pause_review_validation_error(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    attempt_id: &str,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    usage: &TokenUsage,
+    error: &str,
+) -> Result<TickOutcome, AppError> {
+    record_usage_before_stop(
+        worker, claimed, step_id, request_id, summary, started, usage,
+    )
+    .await?;
+    worker
+        .runs
+        .mark_attempt_fenced(
+            &claimed.fence,
+            &claimed.run_id,
+            attempt_id,
+            AttemptPhase::Interrupted.as_str(),
+            None,
+            worker.clock.now_ms(),
+        )
+        .await?;
+    worker
+        .pause(
+            claimed,
+            StopSignalKind::DataIntegrity,
+            error,
+            Some(step_id.into()),
+        )
+        .await
+}
+
 async fn draft_prompt(
     worker: &Worker,
     claimed: &ClaimedRun,
@@ -1892,21 +2200,42 @@ async fn draft_prompt(
         .map_err(|_| AppError::validation("正文提示词版本不存在"))?;
     let mut vars = BTreeMap::new();
     vars.insert("brief".into(), title.to_string());
-    if version == "chapter-draft-v2" {
+    let mut obligations_text = String::new();
+    if version == "chapter-draft-v2" || version == "chapter-draft-v3" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-        let context = latest_payload(
+        let context = latest_run_context_payload(
             &artifacts,
-            "context",
-            &chapter_scope(&claimed.contract.target_chapter_id),
+            &claimed.contract.target_chapter_id,
+            &claimed.run_id,
         )?;
         let prompt_text = context
             .get("promptText")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
+        obligations_text = context
+            .get("obligationsText")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         vars.insert("context".into(), prompt_text.to_string());
     }
-    novel_prompt::render(asset.template, &vars)
-        .map_err(|_| AppError::validation("正文提示词缺少章节上下文"))
+    if version == "chapter-draft-v3" {
+        // v3 把义务块放进模板本身，Prompt 版本与实际内容一致，不再依赖渲染后追加。
+        let block = if obligations_text.trim().is_empty() {
+            "（本章没有结构化义务；沿用已确认上下文，不得改写已确认事件）".to_string()
+        } else {
+            obligations_text.clone()
+        };
+        vars.insert("obligations".into(), block);
+    }
+    let rendered = novel_prompt::render(asset.template, &vars)
+        .map_err(|_| AppError::validation("正文提示词缺少章节上下文"))?;
+    if version == "chapter-draft-v2" && !obligations_text.trim().is_empty() {
+        return Ok(format!(
+            "{rendered}\n\n章节义务（来自冻结章节计划；硬约束必须遵守，创作建议可以合理取舍）：\n{obligations_text}\n如果正文与硬约束冲突，必须调整正文，不能修改计划。"
+        ));
+    }
+    Ok(rendered)
 }
 
 fn summarize(prompt: &str) -> String {

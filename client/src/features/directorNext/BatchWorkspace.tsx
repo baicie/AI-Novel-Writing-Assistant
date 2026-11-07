@@ -89,7 +89,7 @@ export default function BatchWorkspace({ novelId, chapters, model, onOpenChapter
       chapterIds: ordered,
       provider: "openai-compatible",
       model: model.model,
-      promptVersions: { chapter_draft: "chapter-draft-v2" },
+      promptVersions: { chapter_draft: "chapter-draft-v3" },
       tokenBudget: null,
       maxAutomaticRetries: 0,
       repairBudget,
