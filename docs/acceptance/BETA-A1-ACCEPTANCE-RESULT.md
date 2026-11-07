@@ -15,11 +15,11 @@
 | 项 | 值 |
 | --- | --- |
 | `beta` 验收基线 | `90925ddd93ca041dae44778feceebf49eafad278` |
-| `beta` 当前 HEAD | `1d21ba6be10a64983889e23acb8a663ba971c64b`（PR #24 合并后） |
+| `beta` 当前 HEAD | `1d2adaf13d4b2996bff81b30e31dea09b90619a2`（PR #25 合并后） |
 | `main` | `eff69f2`，未修改 |
 | PR #23 | 已合并；合并提交 `90925ddd` |
 | PR #24 | 已合并；合并提交 `1d21ba6b`（修复截断 P1） |
-| PR #25 | Draft（结构化失败诊断；未合并） |
+| PR #25 | 已合并；合并提交 `1d2adaf1`（结构化失败诊断） |
 | 验收分支 | `acceptance/beta-a1`（从 `origin/beta` 创建） |
 | 桌面构建树 | 与 `6ddf96cc` 完全一致（`git diff 6ddf96cc 90925ddd` 为空），E2E 应用由此树重新构建 |
 | 数据目录 | 每个 E2E spec 独立 `mktemp -d`，不接触正式作品 |
@@ -395,8 +395,8 @@ bash scripts/run-p172-e2e-isolated.sh \
 7. **Planner 结构化输出稳定性**：最终 M1 中 `deepseek-v4.1-flash` 首次输出非法 JSON，
    结构化修复后仍缺 `protagonist_core`，应用 fail-closed。同一模型在 90925ddd 上曾通过，
    目前无法区分是模型随机性、网关截断还是输出预算不足；本次失败的原始输出已无法回溯。
-   Draft PR #25 已增加 `structured_failure` 诊断产物（脱敏、限长），下一次失败会保留首次
-   与修复原始输出、错误、token 与模型。
+   PR #25 已合并到 beta（`1d2adaf1`）：`structured_failure` 诊断产物（脱敏、限长）会在下一次
+   失败时保留首次与修复原始输出、错误、token 与模型；本次失败的原始输出仍无法回溯。
 8. **结构化修复的 usage 可能少计一次调用**：暂停原因显示执行了结构化修复，但 run usage
    只记录 1 次调用；供应商可能按 2 次计费。属于用量透明度 P2。
 9. `p17-4-6-gui-acceptance` 等 spec 每轮输出窗口标题警告；测试通过，但属于 E2E 工具噪声，
@@ -418,6 +418,8 @@ bash scripts/run-p172-e2e-isolated.sh \
 - 失败路径复测：8192 预算 FAIL（截断）；16,384 预算 PASS（Reviewer 6 issues 含 `ch1-req-1`，
   Repair 1,512 字完整，复验 `issues=0`）。
 - PR #24 合并到 beta：`1d21ba6b`；beta 树与修复分支 `8eae5d40` 一致。
+- PR #25 合并到 beta：`1d2adaf1`；`structured_failure` 诊断测试 15 + 3 + 6 + 9 通过，
+  CI（Rust/前端/Linux/macOS Bundle/Kernel/发布脚本）全部通过。
 - beta 最终 M1：`story_macro` 结构化输出失败（非法 JSON；修复后缺 `protagonist_core`），
   应用 DataIntegrity 暂停，无候选/正文；模型输出质量失败，不是应用崩溃。
 - GUI smoke：11/11 spec 通过；创建导航 + 重启 2/2 通过。
@@ -428,12 +430,11 @@ bash scripts/run-p172-e2e-isolated.sh \
 
 ## 9. 下一阶段建议
 
-1. 评审 Draft PR #25（`fix/beta-a1-planner-diagnostics`）；它把结构化失败的首次/修复原始
-   输出保留为 `structured_failure` 产物，不改变暂停语义。合并后下一次 M1 失败可直接诊断，
-   不需要靠再付费调用猜原因。
+1. PR #25 已合并到 beta（`1d2adaf1`），结构化失败的首次/修复原始输出会保留为
+   `structured_failure` 产物；下一次 M1 失败可直接诊断，不需要靠再付费调用猜原因。
 2. 在明确授权下重试一次最终 M1（同一模型或换更稳定的结构化输出模型）；重试前记录模型与
-   费用上限。若再次失败，直接读取 PR #25 的诊断产物判断截断/别名/随机性，再决定是否提高
-   结构化规划输出预算；不要在无证据时反复调 Prompt。
+   费用上限。若再次失败，直接读取 `structured_failure` 产物判断截断/别名/随机性，再决定
+   是否提高结构化规划输出预算；不要在无证据时反复调 Prompt。
 3. 由真实作者按第 7 节流程做一次人工 GUI 验收；未执行前保持 `MANUAL_GUI_NOT_RUN`。
 4. M1 通过前不进入 M2–M10，不自动开始 P17.5；P2/P3 进入 Backlog。
 
