@@ -76,7 +76,7 @@ fork 存在**两套 LLM 实现**，但桌面产品只跑 Rust 那套。
 | **章节规划和正文生成** | BOTH_DIFFERENT | 各自实现 |
 | **Reviewer 与 Quality Debt** | ALREADY_EQUIVALENT | fork 有 `quality_debt` 表与 fail-closed 审校 |
 | **人物、世界观、伏笔与记忆** | BOTH_DIFFERENT | fork 在 `novel-application/memory.rs` 重新实现 |
-| **章节编辑器** | BOTH_DIFFERENT | fork 有 navigation/rightPanel/剧情工作区；上游有 ghostText |
+| **章节编辑器** | BOTH_DIFFERENT | fork 工作台结构更丰富（导航器/右栏/版本抽屉）；上游编辑态保持更成熟（见 §9） |
 | **桌面 UI 与运行时** | FORK_ONLY | fork 是 Tauri，上游是 Electron + Express |
 | **数据持久化** | INCOMPATIBLE | fork 用 SQLite + sqlx 迁移；上游用 Prisma |
 | **安全与权限** | 见 §6 | fork 用 ChaCha20Poly1305 + keyring；**但仓库历史泄露了真实密钥** |
@@ -233,15 +233,62 @@ prompt_tokens, completion_tokens, estimated_cost_micros, status
 
 ## 9. 编辑器与产品功能
 
-| 上游改动 | fork 对照 | 判定 |
-|---|---|---|
-| `5ca31f93` 编辑器 P0/P1/P2 | fork `pages/novels/components/chapterEditor/` 有更完整的 `navigation/`、`rightPanel/`、`ChapterVersionDrawer`、`AIDiffPanel` | FORK_ONLY（更丰富） |
-| `ghostText.ts`（56 行纯函数） | fork 有续写能力（`continuationMutation`）但无内联灰字展示 | **SYNC 候选** |
-| `editorSync.test.mjs` | fork 无对应 | 可吸收测试思路 |
-| `2c980d4d` 卷拆章进度 | fork 无对应 UI | S2 |
-| 章节质量问题定位 | fork `diagnostics/` 已有 | ALREADY_EQUIVALENT |
+这一领域不能用一个标签概括：**fork 在工作台结构上更丰富，上游在编辑态保持上更成熟。**
 
-`ghostText.ts` 无 DOM 依赖（纯函数 + 单测），是仅有的可直接借鉴的上游 UX 代码。
+### 9.1 fork 明显更强（不要用上游覆盖）
+
+| 能力 | fork 位置 | 上游 |
+|---|---|---|
+| 章节导航器（卷/章分组、搜索、上一/下一、Alt+←/→） | `chapterEditor/navigation/ChapterNavigator.tsx`（182 行） | 无 |
+| 章节切换守卫（3 种原因 × 3 种去向分别措辞） | `navigation/chapterNavigatorModel.ts:286` `shouldBlockChapterSwitch` | 只有 `window.confirm` |
+| 编辑位置恢复（按书隔离、版本/长度校验） | `document/editPosition.ts` | 无 |
+| 右栏工作区（剧情、连贯性、Run 恢复） | `rightPanel/`（7 个组件，约 1800 行） | 无 |
+| 版本抽屉、AI Diff 面板 | `ChapterVersionDrawer.tsx`、`AIDiffPanel.tsx` | 无 |
+
+其余 `client/src` 与上游差异共 232 个文件，多数是 fork 侧新增。
+
+### 9.2 fork 明显更弱（S1 候选）
+
+**A1 —— 外部写回时整篇重建编辑器。**
+
+`ChapterTextEditor.tsx:231-239`：只要 `value` 变化就 `setEditorSeed(n+1)`，`usePlateEditor` 因依赖变化重建整个实例。后果是 AI 候选采纳、载入历史版本、后台保存刷新之后，光标跳回开头、选区丢失、撤销历史清空。长篇创作里每次 AI 写回都付一次。
+
+上游 `5ca31f93` 的对策是段落级增量补丁：`computeParagraphSpan` + `getPointFromAbsoluteOffset`（`document/editorDocument.ts:214,249`），只替换变化的段，`withNewBatch` 内还原选区。
+
+**注意时序**：fork 有 `restorePosition` 机制（`ChapterTextEditor.tsx:252-283`），A1 落地必须保持「先文档、后光标」，否则光标恢复会失效。
+
+**C3 —— `hasExternalChange` 只比时间戳。**
+
+`document/useChapterDraft.ts:63`：
+
+```ts
+const hasExternalChange = incoming.updatedAt > draft.savedUpdatedAt
+```
+
+作者自己保存后刷新，也可能弹「本章已有新的保存版本」。上游 `66fc3894` 改为「时间更新 **且** 内容不同」。
+
+**A5 / A3 / A7 / A8 —— 纯前端能力缺失**：章内查找替换、字号行距与专注模式、布局三态（standard/wide/immersive）、左右栏可收起。这些不依赖任何新接口，只用到 localStorage。
+
+### 9.3 需要先补数据源（ADAPT）
+
+| 项 | 阻塞点 |
+|---|---|
+| Ghost Text 续写建议 | 算法（`ghostText.ts` 56 行纯函数）可直搬，但桌面 `previewChapterCursorContinuation` 无 IPC 映射，只有「本地创作模式」可用。直接搬会得到一个「默认关闭且打开后无反应」的开关 |
+| 诊断段落标记 | 桌面 `get_chapter_editor_workspace` 的 `diagnostic_cards` 恒为 `[]`（`src-tauri/src/commands/editor.rs`） |
+| 质量提醒收进左栏 | 桌面未映射 `chapter.riskFlags` |
+| 卷拆章进度 | fork 的 Rust 内核没有 `volume_chapter_list` 步骤产物 |
+| 导演阅读页进正文编辑 | 桌面 `TauriDirectorPage` 无 `DashboardView` 工作区数据 |
+
+### 9.4 落地顺序建议
+
+1. **A1**（编辑态保持）—— 其他 UX 改动的前提；上游 A3 专注模式、A5 查找替换都依赖「实例不重建」
+2. **C3**（`hasExternalChange` 一行修正）—— 成本最低、误报最烦人
+3. **A2 + A7 + A8**（布局与浮动条定位）
+4. Ghost Text 与诊断标记等数据源补齐后再做
+
+### 9.5 明确排除
+
+官网动画、飞书/钉钉/企业微信通知、远程导演确认、首页进度入口、ZIP/漫画导出，均与当前 beta 验收无关或桌面端无对应后端。
 
 ## 10. S0 / S1 / S2 / S3 分级
 
@@ -265,7 +312,10 @@ prompt_tokens, completion_tokens, estimated_cost_micros, status
 
 - 原生 `response_format` / `tool_calling` 传输（需先有 S1 的能力档案与预算）
 - `firstTokenMs`、`structuredMode` 落库
-- `ghostText` 内联续写
+- **A1 段落级补丁保持编辑态**（见 §9.2，实际优先级高于这里——列在 S2 是因为它属 UI 层，不阻塞后端同步）
+- **C3 `hasExternalChange` 内容比对**（同上）
+- 查找替换、字号行距与专注模式、布局三态、左右栏收起
+- Ghost Text（需先补桌面续写 IPC）
 - 卷拆章进度显示
 
 ### S3 暂不同步
@@ -341,3 +391,12 @@ cargo clippy -p novel-application --lib -- -D warnings   通过
 4. 最后才是原生结构化传输与请求预算
 
 顺序理由：没有可靠的失败分类，能力档案会把瞬时故障记成「不支持」；没有请求预算，多模式链会把单步请求数放大 3–4 倍。
+
+编辑器侧（可与后端同步并行，互不冲突）：
+
+1. **A1 段落级补丁**——当前每次 AI 写回都重建编辑器实例，光标、选区、撤销历史全丢。这是长篇创作里最高频的摩擦
+2. **C3 `hasExternalChange` 加内容比对**——一行修正，消除「自己保存后也提示有新版本」的误报
+3. A2/A7/A8 布局与浮动条定位
+4. Ghost Text、诊断段落标记等数据源补齐后再做
+
+A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑器实例不重建」，反过来做会在重建时丢状态，体验更差。
