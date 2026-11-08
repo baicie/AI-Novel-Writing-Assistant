@@ -236,8 +236,10 @@ Draft PR。Reviewer 与 Provider 两项 P1 已优先完成并通过回归，避�
 | `pnpm --filter @ai-novel/client typecheck` | PASS | 安装锁定依赖后 |
 | `pnpm --filter @ai-novel/client test` | PASS | 268 个 Node 测试 |
 | `pnpm --filter @ai-novel/desktop typecheck` | PASS | |
-| Tauri Bundle 构建 | NOT_RUN（本地） | 由 PR 上的 GitHub `Tauri CI` bundle 作业验证 |
-| 发布脚本单测 | NOT_RUN（本地） | 未修改脚本；由 GitHub CI 运行 |
+| Tauri Bundle 构建 | PASS（GitHub CI） | Linux x64 与 macOS arm64 |
+| 发布脚本单测 | PASS（GitHub CI） | `release-tools` job |
+| `rust-and-desktop-contract` | PASS（GitHub CI） | `Tauri Kernel Check` |
+| 桌面 GUI 交互 / 长流式创作 | NOT_RUN | 需真人验收 |
 
 说明：首次前端检查失败是仓库缺少 `node_modules`（`typescript`/`vite` 未安装），执行
 `pnpm install --frozen-lockfile` 后重跑通过；该环境问题不代表代码失败。
@@ -245,9 +247,24 @@ Draft PR。Reviewer 与 Provider 两项 P1 已优先完成并通过回归，避�
 ## 11. GitHub CI 证据
 
 - 起始基线：`Tauri CI` run `42486187950` PASS（`0a51abc0`）。
-- 本分支 CI：在本报告提交并推送后由 GitHub Actions 实际运行；结果与本报告第 16 节
-  （PR 描述）中的链接为准。
-- 在 CI 完成之前，本报告不声称本分支已通过 GitHub CI。
+- 分支 head `7d8e3a00`：
+  - `Tauri CI` run `42498582721`：**PASS**
+    - Rust 格式 / Clippy / 单测：PASS（4m57s）
+    - 前端类型检查与单测：PASS（1m10s）
+    - 发布脚本单测：PASS（13s）
+    - Bundle 构建检查（Linux x64）：PASS（7m4s）
+    - Bundle 构建检查（macOS arm64）：PASS（6m0s）
+    - 原生端到端（可选）：SKIPPED（该 job 为可选，不阻塞）
+    - `Bundle 构建检查（${{ matrix.label }}）`：SKIPPED（矩阵占位 job，不阻塞）
+  - `Tauri Kernel Check` run `42498582726`：**PASS**
+    - `rust-and-desktop-contract`：PASS（10m42s）
+- 更早提交上被 PR 并发策略取消的 `Tauri CI` 运行不计为通过或失败，最终结论以 `7d8e3a00`
+  的完整运行为准。
+
+## 11.1 Tauri Bundle 与桌面运行验证
+
+- Linux x64 bundle 与 macOS arm64 bundle 均由 GitHub CI 实际构建并通过产物断言。
+- 本地未执行桌面 GUI 交互验证；正式桌面长流式创作仍为 `NOT_RUN`。
 
 ## 12. M1 质量结论及边界
 
@@ -287,7 +304,7 @@ Draft PR。Reviewer 与 Provider 两项 P1 已优先完成并通过回归，避�
 
 ## 15. 最终裁决
 
-- ENGINEERING：READY_FOR_REVIEW（以本分支 GitHub CI 实际结果为准）
+- ENGINEERING：READY_FOR_REVIEW（head `7d8e3a00` 的 Tauri CI 与 Kernel Check 全绿）
 - REVIEWER_RELIABILITY：PARTIAL（确定性契约与离线回归通过；真实模型复测未执行）
 - DESKTOP_PROVIDER：PARTIAL（同一 Provider 实现与 Mock SSE 矩阵通过；真实桌面长响应未验证）
 - RUN_INPUT_FREEZE：PASS
