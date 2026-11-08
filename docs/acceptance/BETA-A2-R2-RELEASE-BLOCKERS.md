@@ -144,7 +144,12 @@ v2，而不是仅配置字符串。
 **工程侧已满足**（构建、Planner 版本固定、请求前调用预算、费用 fail-closed），但真实运行
 仍需本轮**单独授权**：确认模型、调用次数上限、供应商侧费用硬额度与安全凭据，并设置
 `M1_AUTHORIZED=1`、`M1_MAX_CALLS`、`M1_MAX_COST_CNY`、`M1_COST_GUARD=provider_side`。
-此前任何一次授权不延续。
+此前任何一次授权不延续。授权项、预检命令、失败路径探针与停止条件见
+[BETA-A2-M1-RETEST-RUNBOOK.md](./BETA-A2-M1-RETEST-RUNBOOK.md)。
+
+离线演练已在当前 `beta` HEAD 上复跑通过：离线 mock、无网络、无费用，8 次调用走到
+`waiting_approval`，义务携带 `sourceEventId`，Reviewer 识别 `ch1-req-1` 后一次修复收敛。
+该演练只证明执行器与契约接线正常，不构成 M1 证据。
 
 M1 仍是 `RETEST_PENDING`；M2–M10 `NOT_RUN`；人工 GUI `NOT_RUN`。
 
