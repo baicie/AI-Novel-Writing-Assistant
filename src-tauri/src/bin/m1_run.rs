@@ -425,6 +425,73 @@ fn normalized(text: &str) -> String {
     text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
+/// 从本 Run 的章节计划里取出探针要断言的义务 ID。
+///
+/// 义务 ID 由 Planner 生成（例如 `ch1-req-02`），换一次 Run 就会变，所以不能写死。
+/// 取第 1 章里第一个 `forbidden_event` 与第一个 `required_event` 的 hard 义务。
+#[derive(Debug, Default)]
+struct ExpectedViolationIds {
+    forbidden: Option<String>,
+    required: Option<String>,
+}
+
+fn expected_violation_ids(
+    artifacts: &[novel_application::RunArtifactView],
+) -> ExpectedViolationIds {
+    let mut expected = ExpectedViolationIds::default();
+    let Some(plan) = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "chapter_list")
+        .max_by_key(|artifact| artifact.version)
+    else {
+        return expected;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&plan.payload_json) else {
+        return expected;
+    };
+    let Some(chapters) = value.get("chapters").and_then(serde_json::Value::as_array) else {
+        return expected;
+    };
+    let Some(obligations) = chapters
+        .iter()
+        .find(|chapter| {
+            chapter
+                .get("chapterOrder")
+                .and_then(serde_json::Value::as_i64)
+                == Some(1)
+        })
+        .and_then(|chapter| chapter.get("obligations"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return expected;
+    };
+    for obligation in obligations {
+        if obligation
+            .get("enforcement")
+            .and_then(serde_json::Value::as_str)
+            != Some("hard")
+        {
+            continue;
+        }
+        let Some(kind) = obligation.get("type").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(id) = obligation.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        match kind {
+            "forbidden_event" if expected.forbidden.is_none() => {
+                expected.forbidden = Some(id.to_string())
+            }
+            "required_event" if expected.required.is_none() => {
+                expected.required = Some(id.to_string())
+            }
+            _ => {}
+        }
+    }
+    expected
+}
+
 fn issue_cites(issues: &[serde_json::Value], obligation_id: &str, candidate: &str) -> bool {
     issues.iter().any(|issue| {
         issue
@@ -436,6 +503,29 @@ fn issue_cites(issues: &[serde_json::Value], obligation_id: &str, candidate: &st
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|evidence| normalized(candidate).contains(&normalized(evidence)))
     })
+}
+
+fn issue_cites_any(
+    issues: &[serde_json::Value],
+    obligation_ids: &[Option<String>],
+    candidate: &str,
+) -> bool {
+    let ids: Vec<&String> = obligation_ids.iter().flatten().collect();
+    if ids.is_empty() {
+        // 计划里没有可断言的义务时，退化成「任意一条带合法 ID 且证据逐字来自候选的违反」，
+        // 仍然要求 Reviewer 引用本 Run 的义务 ID 并给出可定位证据。
+        return issues.iter().any(|issue| {
+            issue
+                .get("obligationId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|id| !id.trim().is_empty())
+                && issue
+                    .get("evidence")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|evidence| normalized(candidate).contains(&normalized(evidence)))
+        });
+    }
+    ids.into_iter().any(|id| issue_cites(issues, id, candidate))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -574,6 +664,14 @@ async fn probe_run() -> Result<(), String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("（没有结构化义务；沿用已确认上下文，不得改写已确认事件）")
         .to_string();
+    // 期望的义务 ID 必须来自本 Run 的章节计划，而不是写死的常量：义务 ID 由 Planner 生成，
+    // 换一次运行就会变。这里取「禁止事后到达」与「亲眼目击」两类 hard 义务作为探针断言，
+    // 全部缺失时退回要求任意一条 hard 违反被正确引用。
+    let expected = expected_violation_ids(&artifacts);
+    println!(
+        "M1_PROBE_EXPECTED forbidden={:?} required={:?}",
+        expected.forbidden, expected.required
+    );
 
     let review_prompt = build_review_prompt(&context_text, VIOLATING_CANDIDATE)?;
     let (review1_raw, usage1) = call_model(
@@ -589,9 +687,13 @@ async fn probe_run() -> Result<(), String> {
     .await?;
     let review1 = parse_review(&review1_raw)?;
     let issues1 = review_issues(&review1);
-    let reviewer_pass = issue_cites(&issues1, "ch1-req-1", VIOLATING_CANDIDATE);
+    let reviewer_pass = issue_cites_any(
+        &issues1,
+        &[expected.forbidden.clone(), expected.required.clone()],
+        VIOLATING_CANDIDATE,
+    );
     println!(
-        "M1_PROBE_REVIEW issues={} reviewer_cites_req1={reviewer_pass}",
+        "M1_PROBE_REVIEW issues={} reviewer_cites_expected={reviewer_pass}",
         issues1.len()
     );
 
@@ -602,7 +704,7 @@ async fn probe_run() -> Result<(), String> {
             "violatingCandidate": VIOLATING_CANDIDATE,
             "review1": review1_raw,
             "review1Parsed": review1,
-            "reviewerCitesReq1": false,
+            "reviewerCitesExpected": false,
             "repair": null,
             "review2": null,
             "usage": {"review1": usage_json(&usage1)},
@@ -640,10 +742,10 @@ async fn probe_run() -> Result<(), String> {
     .await?;
     let repaired = repair_raw.trim().to_string();
     let repair_nonempty = !repaired.is_empty();
-    let repaired_has_witness =
-        repaired.contains("亲眼") && (repaired.contains("灰斗篷") || repaired.contains("凶手"));
+    // 修复是否真的补上了“在场目击”由复验阶段的 AI 审校判断（review2 的结构化结果），
+    // 这里不做关键词匹配：修文可以换用同义词，硬编码词表只会产生假阴性。
     println!(
-        "M1_PROBE_REPAIR nonempty={repair_nonempty} witness_marker={repaired_has_witness} chars={} budget={PROBE_REPAIR_OUTPUT_TOKENS}",
+        "M1_PROBE_REPAIR nonempty={repair_nonempty} chars={} budget={PROBE_REPAIR_OUTPUT_TOKENS}",
         repaired.chars().count()
     );
 
@@ -661,14 +763,18 @@ async fn probe_run() -> Result<(), String> {
     .await?;
     let review2 = parse_review(&review2_raw)?;
     let issues2 = review_issues(&review2);
-    let residual_req1 = issue_cites(&issues2, "ch1-req-1", &repaired);
+    let residual_expected = issue_cites_any(
+        &issues2,
+        &[expected.forbidden.clone(), expected.required.clone()],
+        &repaired,
+    );
     println!(
-        "M1_PROBE_REREVIEW issues={} residual_req1={residual_req1}",
+        "M1_PROBE_REREVIEW issues={} residual_expected={residual_expected}",
         issues2.len()
     );
 
     let path = data_dir.join(format!("m1-probe-{run_id}.json"));
-    let verdict = if repair_nonempty && !residual_req1 {
+    let verdict = if repair_nonempty && !residual_expected {
         "M1_READY_FOR_AUTHOR_REVIEW"
     } else {
         "M1_FAIL_REPAIR"
@@ -678,12 +784,11 @@ async fn probe_run() -> Result<(), String> {
         "violatingCandidate": VIOLATING_CANDIDATE,
         "review1": review1_raw,
         "review1Parsed": review1,
-        "reviewerCitesReq1": reviewer_pass,
+        "reviewerCitesExpected": reviewer_pass,
         "repair": repaired,
-        "repairWitnessMarker": repaired_has_witness,
         "review2": review2_raw,
         "review2Parsed": review2,
-        "residualReq1": residual_req1,
+        "residualExpected": residual_expected,
         "usage": {
             "review1": usage_json(&usage1),
             "repair": usage_json(&usage2),
@@ -696,12 +801,8 @@ async fn probe_run() -> Result<(), String> {
     println!(
         "M1_PROBE_RESULT reviewer={} repair={} rereview={} verdict={verdict}",
         if reviewer_pass { "PASS" } else { "FAIL" },
-        if repair_nonempty && repaired_has_witness {
-            "PASS"
-        } else {
-            "CHECK"
-        },
-        if residual_req1 { "FAIL" } else { "PASS" }
+        if repair_nonempty { "PASS" } else { "FAIL" },
+        if residual_expected { "FAIL" } else { "PASS" }
     );
     println!("M1_PROBE_ARTIFACTS file={}", path.display());
     Ok(())

@@ -9,7 +9,7 @@
 - **M1_RUNNER_SAFETY：PASS**（请求前调用预算已强制；人民币费用上限无法本地执行，真实模式
   fail-closed 并要求供应商侧硬额度）
 - **ENGINEERING：READY_FOR_REVIEW**
-- **M1：RETEST_PENDING**
+- **M1：PASS_PENDING_AUTHOR_REVIEW**（详见 [BETA-A2-M1-RESULT.md](./BETA-A2-M1-RESULT.md)）
 - **MANUAL_GUI：NOT_RUN**
 - **PUBLIC_BETA：NOT_READY**
 
@@ -151,7 +151,8 @@ v2，而不是仅配置字符串。
 `waiting_approval`，义务携带 `sourceEventId`，Reviewer 识别 `ch1-req-1` 后一次修复收敛。
 该演练只证明执行器与契约接线正常，不构成 M1 证据。
 
-M1 仍是 `RETEST_PENDING`；M2–M10 `NOT_RUN`；人工 GUI `NOT_RUN`。
+M1 已在真实模型上通过确定性检查与失败路径探针，等待作者本人阅读评分；M2–M10 `NOT_RUN`；
+人工 GUI `NOT_RUN`。
 
 ## 7. 尚未完成的 P1/P2
 

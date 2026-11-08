@@ -6,7 +6,7 @@
 | --- | --- |
 | 复测对象 | `beta` HEAD（Beta-A2-R2 合并后） |
 | Planner 契约 | `story-macro-v2` + `chapter-list-v3`（成对固定，执行器内置） |
-| M1 状态 | `RETEST_PENDING`（Beta-A1 HEAD 上的 `M1_PASS` 不延续，A2 改了 Planner 契约与 Run 冻结） |
+| M1 状态 | **已执行**（主样本与失败路径探针均通过，结果见 [BETA-A2-M1-RESULT.md](./BETA-A2-M1-RESULT.md)）；待作者本人阅读评分 |
 | 执行器 | `src-tauri/src/bin/m1_run.rs`（`cargo run -p novel-desktop --bin m1_run`） |
 | 离线演练 | 已通过，见第 2 节（8 次 mock 调用，`waiting_approval`，无网络、无费用） |
 
@@ -128,16 +128,20 @@ BIZ_NOVEL_DATA_DIR=/tmp/beta-a2-m1/real M1_AUTHORIZED=1 M1_MAX_CALLS=10 M1_MAX_C
 BIZ_NOVEL_DATA_DIR=/tmp/beta-a2-m1/real M1_AUTHORIZED=1 M1_PROBE=1 M1_RUN_ID=<runId> M1_NOVEL_ID=<novelId> M1_MAX_CALLS=3 M1_MAX_COST_CNY=<上限> M1_COST_GUARD=provider_side ./target/debug/m1_run
 ```
 
-预期：`M1_PROBE_REVIEW reviewer_cites_req1=true` → `M1_PROBE_REPAIR nonempty=true` →
-`M1_PROBE_REREVIEW issues=0` → `M1_READY_FOR_AUTHOR_REVIEW`。
+预期：`M1_PROBE_REVIEW reviewer_cites_expected=true` → `M1_PROBE_REPAIR nonempty=true` →
+`M1_PROBE_REREVIEW issues=0 residual_expected=false` → `M1_READY_FOR_AUTHOR_REVIEW`。
+
+期望的义务 ID 从本 Run 的章节计划派生（`M1_PROBE_EXPECTED` 行会打印实际取到的
+`forbidden` / `required` ID），不写死计划 ID——义务 ID 由 Planner 生成，换一次运行就会变。
 
 ## 6.1 已有尝试记录
 
 | Run | 时间 | 结果 | 结论 |
 | --- | --- | --- | --- |
 | `7a7829ab-26b1-4066-916e-3d95585559bd` | 2026-11-08 17:26 | `paused` / `provider_unavailable`，`story_macro` 首次调用 | 与 `M1_STARTED` 相差正好 120 秒，是产品默认整包超时切断已开始的流；只有 `novel_seed` 产物，0 次完成调用，1 次请求可能已计费 |
+| `c730c1fd-a4d9-41f6-ac55-e4e73d520de8` | 2026-11-08 18:40–18:52 | `waiting_approval`，8 次调用，一次修复后复验 clean | 主样本通过，见 [BETA-A2-M1-RESULT.md](./BETA-A2-M1-RESULT.md) |
 
-该次不构成 M1 结果。重跑前已把执行器超时放宽到 300 秒（见「超时」）。
+`7a7829ab` 不构成 M1 结果。重跑前已把执行器超时放宽到 300 秒（见「超时」）。
 
 ## 7. 产物与记录
 
