@@ -2525,6 +2525,7 @@ dependencies = [
  "novel-platform",
  "novel-prompt",
  "novel-storage-sqlite",
+ "novel-testkit",
  "serde",
  "serde_json",
  "tauri",

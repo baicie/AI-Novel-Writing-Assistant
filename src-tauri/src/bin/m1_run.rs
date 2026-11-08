@@ -28,6 +28,31 @@ const M1_TITLE: &str = "P17.4.7 模型评测样本";
 const M1_DESCRIPTION: &str = "边陲小镇的少年在雪夜发现一枚会发光的旧玉佩，由此被卷入山门与一桩旧案。第1章：林动在雪夜发现玉佩，随后亲眼撞见老铁匠被灭口；目击行为成为他卷入旧案的因果起点。不得改写为事后到达，不得提前泄露后续旧案真相。";
 const M1_CHAPTER_TITLE: &str = "第一章 雪夜";
 
+/// M1 复测固定使用的 Prompt 版本。`story_macro` 与 `chapter_list` 是新 Planner 契约的
+/// 成对版本，缺一不可；`open_run` 也会拒绝只固定一半的请求。
+fn m1_prompt_versions() -> BTreeMap<String, String> {
+    let mut prompts = BTreeMap::new();
+    prompts.insert("story_macro".into(), "story-macro-v2".into());
+    prompts.insert("chapter_list".into(), "chapter-list-v3".into());
+    prompts.insert("chapter_draft".into(), "chapter-draft-v3".into());
+    prompts.insert("chapter_repair".into(), "chapter-repair-v2".into());
+    prompts
+}
+
+/// 脱敏版本清单：只有版本名，不含 endpoint、凭据或提示词正文。
+fn prompt_versions_line(prompts: &BTreeMap<String, String>) -> String {
+    prompts
+        .iter()
+        .map(|(step, version)| format!("{step}={version}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[path = "m1_run/budget.rs"]
+mod budget;
+
+use budget::{BudgetedLlm, CallBudget, resolve_cost_guard};
+
 struct SecureModelSecrets {
     store: Arc<OsSecretStore>,
 }
@@ -148,6 +173,8 @@ async fn run() -> Result<(), String> {
             .map_err(|error| format!("打开验收数据库失败：{error}"))?,
     );
     let dry_run = env("M1_DRY_RUN").as_deref() == Some("1");
+    let cost_guard = resolve_cost_guard(dry_run, env("M1_COST_GUARD").as_deref())?;
+    let budget = CallBudget::new(max_calls as u64);
     if dry_run {
         let endpoint = require_env("M1_ENDPOINT")?;
         kernel
@@ -200,7 +227,10 @@ async fn run() -> Result<(), String> {
         worlds: kernel.clone(),
         lookups: kernel.clone(),
         task_center: kernel.clone(),
-        llm: Arc::new(ProtocolRouterProvider::new()),
+        llm: Arc::new(BudgetedLlm::new(
+            Arc::new(ProtocolRouterProvider::new()),
+            budget.clone(),
+        )),
         clock: Arc::new(SystemClock),
         ids: Arc::new(UuidIds),
         faults: Arc::new(NoFault),
@@ -222,9 +252,11 @@ async fn run() -> Result<(), String> {
         .map_err(|error| format!("创建验收章节失败：{error}"))?;
 
     let nonce = env("M1_RUN_NONCE").unwrap_or_else(|| novel_platform::now_ms().to_string());
-    let mut prompts = BTreeMap::new();
-    prompts.insert("chapter_draft".into(), "chapter-draft-v3".into());
-    prompts.insert("chapter_repair".into(), "chapter-repair-v2".into());
+    let prompts = m1_prompt_versions();
+    println!("M1_PROMPTS {}", prompt_versions_line(&prompts));
+    println!(
+        "M1_BUDGET_GUARD max_calls={max_calls} max_cost_cny={max_cost} cost_guard={cost_guard:?} local_cost_enforcement=disabled"
+    );
     let opened = runtime
         .director
         .open_run(OpenRunInput {
@@ -314,8 +346,9 @@ async fn run() -> Result<(), String> {
     let json = serde_json::to_string_pretty(&detail)
         .map_err(|error| format!("序列化 M1 产物失败：{error}"))?;
     std::fs::write(&artifact_path, json).map_err(|error| format!("写入 M1 产物失败：{error}"))?;
+    let (requests_started, unknown_usage) = budget.snapshot();
     println!(
-        "M1_RESULT run_id={run_id} status={} pause={:?}/{:?} approvals={approvals} calls={} prompt_tokens={} completion_tokens={}",
+        "M1_RESULT run_id={run_id} status={} pause={:?}/{:?} approvals={approvals} calls={} requests_started={requests_started} unknown_usage={unknown_usage} prompt_tokens={} completion_tokens={}",
         detail.status,
         detail.pause_signal,
         detail.pause_reason,
@@ -447,6 +480,10 @@ async fn probe_run() -> Result<(), String> {
     let _max_cost: f64 = require_env("M1_MAX_COST_CNY")?
         .parse()
         .map_err(|_| "M1_MAX_COST_CNY 必须是数字".to_string())?;
+    let cost_guard = resolve_cost_guard(false, env("M1_COST_GUARD").as_deref())?;
+    println!(
+        "M1_BUDGET_GUARD max_calls={max_calls} cost_guard={cost_guard:?} local_cost_enforcement=disabled"
+    );
 
     novel_platform::configure_secret_fallback(data_dir.join("secrets"));
     let kernel = Arc::new(
@@ -466,13 +503,17 @@ async fn probe_run() -> Result<(), String> {
         .map_err(|_| "读取系统凭据失败".to_string())?
         .ok_or_else(|| "安全存储里没有 API Key".to_string())?;
     let secrets = Arc::new(SecureModelSecrets { store });
+    let budget = CallBudget::new(max_calls as u64);
     let runtime = Runtime::new(RuntimeDeps {
         novels: kernel.clone(),
         runs: kernel.clone(),
         worlds: kernel.clone(),
         lookups: kernel.clone(),
         task_center: kernel.clone(),
-        llm: Arc::new(ProtocolRouterProvider::new()),
+        llm: Arc::new(BudgetedLlm::new(
+            Arc::new(ProtocolRouterProvider::new()),
+            budget.clone(),
+        )),
         clock: Arc::new(SystemClock),
         ids: Arc::new(UuidIds),
         faults: Arc::new(NoFault),
@@ -488,7 +529,7 @@ async fn probe_run() -> Result<(), String> {
         .await
         .map_err(|error| format!("读取 Run 详情失败：{error}"))?;
     let artifacts = detail.artifacts;
-    let llm = ProtocolRouterProvider::new();
+    let llm = BudgetedLlm::new(Arc::new(ProtocolRouterProvider::new()), budget.clone());
     let context = artifacts
         .iter()
         .filter(|artifact| artifact.artifact_type == "context")
@@ -645,3 +686,7 @@ fn usage_json(usage: &novel_llm::TokenUsage) -> serde_json::Value {
         "completionTokens": usage.completion_tokens
     })
 }
+
+#[cfg(test)]
+#[path = "m1_run/tests.rs"]
+mod tests;
