@@ -1014,6 +1014,12 @@ async fn suspected_missing_element_is_manual_review_without_auto_repair() {
         .await
         .unwrap();
     assert_eq!(debts.len(), 1, "疑似缺席必须进入可追踪 quality debt");
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "repair_notes"),
+        "只有人工确认项时不应调度修复步骤，也不应伪造修复记录"
+    );
 }
 
 #[tokio::test]

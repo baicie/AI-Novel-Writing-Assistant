@@ -164,7 +164,8 @@ Gate 类型、CAS 与命令幂等校验，验收脚本属于旁路。
 Worker 集成用例：
 
 - `suspected_missing_element_is_manual_review_without_auto_repair`：Run 成功结束、没有
-  `chapter_repair` 调用、审校产物 `manualReviewCount=1`、quality debt 可追踪。
+  `chapter_repair` 调用、审校产物 `manualReviewCount=1`、quality debt 可追踪，并且因为
+  `issues=0` 不会调度 `bounded_repair`，所以不会伪造一条“已修复”记录。
 - `advisory_only_review_does_not_trigger_repair_or_block_completion`：advisory 不修复、不阻塞。
 - `review_evidence_must_be_locatable_in_the_current_candidate`：伪造证据暂停。
 - `unknown_review_obligation_id_pauses_without_repair`：未知义务 ID 暂停。
