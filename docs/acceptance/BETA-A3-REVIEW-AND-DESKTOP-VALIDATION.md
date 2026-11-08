@@ -128,7 +128,8 @@ Gate 类型、CAS 与命令幂等校验，验收脚本属于旁路。
 ### 4.4 验收写回脚本
 
 - 新增 Run 状态守卫：必须 `waiting_approval`，Gate 必须包含 `chapter_approval`；
-  否则拒绝写入。
+  否则拒绝写入。已用临时 SQLite 实测：`paused` 被拒绝并说明原因，
+  `waiting_approval` + `chapter_approval` 才允许追加候选。
 - 保留候选 ID + SHA CAS 守卫与“只追加候选/事件、不改动原始候选”的语义。
 - 文档明确：正式作者修改必须走 `confirm_candidate_after_edit`，脚本只用于已结束的验收 Run。
 - 已写入的 M1 历史候选不受影响；原始 M1 证据未重写。
