@@ -49,8 +49,8 @@ pub use batch::{
 };
 pub use context::{
     CONTEXT_ASSEMBLY_VERSION, ContextAssembly, ContextPreview, ContextSourceTrace, ContextTrace,
-    DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, MAX_CONTEXT_TOKEN_BUDGET,
-    assemble_director_context, preview_director_context,
+    DEFAULT_CONTEXT_TOKEN_BUDGET, DEFAULT_OUTPUT_RESERVE, MAX_CONTEXT_TOKEN_BUDGET, RunContextPins,
+    assemble_director_context, assemble_director_context_for_run, preview_director_context,
 };
 pub use continuity::{
     CONTINUITY_CANDIDATE_LIMIT, CONTINUITY_CONFLICT_LIMIT, ChapterContinuityProjection,

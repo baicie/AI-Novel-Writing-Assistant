@@ -976,6 +976,7 @@ fn contract_with_route() -> crate::dto::RunContract {
         novel_id: "novel-1".into(),
         plan_version: "v1".into(),
         chapter_plan_version: "v1".into(),
+        source_versions: Default::default(),
         target_chapter_id: "chapter-1".into(),
         provider: "main-gw".into(),
         model: "main-model".into(),

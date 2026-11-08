@@ -2,18 +2,20 @@
 
 ## 结论
 
-**ENGINEERING_STATUS：NEEDS_FIX（评审发现 Planner 输入未按 Run 冻结的 P1）。**
-**PLANNER_CONTRACT：PARTIAL。**
+**ENGINEERING_STATUS：READY_FOR_REVIEW（评审 P1 已修复，等待最终 CI 与复核）。**
+**PLANNER_CONTRACT：PARTIAL（Planner 输入已按 Run 冻结；作者章节目标字段仍是数据模型缺口）。**
 **M1_ACCEPTANCE：RETEST_PENDING（Beta-A2 HEAD 需要新的真实模型验收；Beta-A1 HEAD 已有一次授权 PASS）。**
 **GUI_AUTOMATED：PASS（见第 7 节）。**
 **MANUAL_GUI：MANUAL_GUI_NOT_RUN。**
 **PUBLIC_BETA：NOT_READY。**
 
-本轮修复了三个确定性契约缺陷：story-macro-v2 缺失 keyEvents 时静默通过、sourceEventId
-只校验形式不校验规范内容、Planner 上下文按字符截断可能损坏 JSON/丢失关键事件。
-评审又发现一个未修复的 P1：Planner 的 book 输入没有按 Run 冻结，context 之前的计划/
-story_macro 更新可能混入当前 Run。作者“当前章节目标”没有独立的持久化字段，只能写进
-小说简介；这是明确的数据模型缺口，本轮不凭空新增剧情要求，记录为 PARTIAL 原因。
+本轮修复了四个确定性契约缺陷：story-macro-v2 缺失 keyEvents 时静默通过、sourceEventId
+只校验形式不校验规范内容、Planner 上下文按字符截断可能损坏 JSON/丢失关键事件，以及评审
+发现的 Planner book 输入未按 Run 冻结。修复后 Run 在 `open_run` 时冻结
+story_macro / character_cast / volume_strategy / chapter_list 的版本，context、Planner
+Prompt、章节计划引用校验与修复审校都只读取本 Run 的冻结来源。作者“当前章节目标”没有
+独立的持久化字段，只能写进小说简介；这是明确的数据模型缺口，本轮不凭空新增剧情要求，
+记录为 PARTIAL 原因。
 
 ## 1. 基线与最终 HEAD
 
@@ -22,7 +24,7 @@ story_macro 更新可能混入当前 Run。作者“当前章节目标”没有�
 | `beta` 基线 | `d66d565c254c8a70f11c5b5c833f50fba5f50518` |
 | `main` | `eff69f229727ab90f4102c05cfc705116cb1ded5`，未修改 |
 | 工作分支 | `fix/beta-a2-planner-invariants` |
-| 代码 HEAD | `5634d0c4`（关键事件强制、规范内容、上下文预算、模块拆分） |
+| 代码 HEAD | 见 PR 最新提交（关键事件强制、规范内容、上下文预算、模块拆分、Planner 输入按 Run 冻结） |
 | 客户端/E2E HEAD | `ab22d638`（固定 v2/v3 与 mock 夹具） |
 | 报告提交 | 见 PR 最新提交（仅文档） |
 | PR | 见第 12 节 |
@@ -39,7 +41,8 @@ story_macro 更新可能混入当前 Run。作者“当前章节目标”没有�
 - `client/src/features/directorNext/*`、`client/src/api/localCreation.ts`：新合同版本固定。
 - `e2e/author-journey.e2e.js`、`e2e/p17-3-context.e2e.js`：Mock 计划补齐 keyEvents/
   sourceEventId。
-- `crates/novel-application/src/context.rs`、`p17_4_10_obligations.rs`：Run 冻结/版本测试。
+- `crates/novel-application/src/context.rs`、`worker/context_budget.rs`、
+  `tests/p17_4_10_obligations.rs`、`tests/p17_4_10_run_freeze.rs`：Run 冻结/版本测试。
 
 ## 3. 已确认的 P0 / P1 / P2
 
@@ -47,19 +50,7 @@ story_macro 更新可能混入当前 Run。作者“当前章节目标”没有�
 
 无。
 
-### P1（评审发现，未修复）——必须先处理
-
-**Planner 输入没有按 Run 冻结。** `structured_prompt` 的 character_cast / volume_strategy /
-chapter_list 上下文，以及 `assemble_context` 的 book 来源，仍使用 `latest_payload` /
-`artifact_source` 的最新版本；`RunContract` 没有记录 open 时的 story_macro / character_cast /
-volume_strategy / chapter_list 版本。场景：Run-A 在 context 之前暂停，作者更新 story_macro
-或 chapter_list，Run-A 恢复后会读取新版本，混入 Run-B/作者的更新。
-
-现有 R2 测试只覆盖 context 产物生成之后的 review/repair pinning；没有覆盖 context 生成前的
-plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（或按 run_id 选本 Run 产物），
-让 Planner/Context 使用冻结版本，并补交错 Run 测试。这是 PR #27 合并前的阻断项。
-
-### P1（已修复）
+### P1（已修复，需在合并前复核）
 
 1. **story-macro-v2 可缺少 keyEvents**：新 Prompt 要求 keyEvents，但校验在字段缺失时返回
    成功，新计划可以没有任何规范事件。修复：合同显式固定 `story-macro-v2` 时，缺失字段、
@@ -72,10 +63,27 @@ plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（
 3. **Planner 上下文字符截断**：`context_payload` 直接截断序列化 JSON，可能破坏 JSON 结构、
    丢失 keyEvents/constraints。修复：结构化预算，只裁剪解释性文本；优先保留
    keyEvents/constraints/人物身份/卷；必选内容放不下时明确失败，绝不返回被截断的 JSON。
+4. **Planner 输入没有按 Run 冻结（本轮评审发现）**：`structured_prompt` 的 character_cast /
+   volume_strategy / chapter_list 上下文，以及 `assemble_context` 的 book 来源，此前使用
+   `latest_payload` / `artifact_source` 的最新版本；`RunContract` 没有记录 open 时的
+   story_macro / character_cast / volume_strategy / chapter_list 版本。Run-A 在 context 之前
+   暂停、作者保存新计划后恢复，就会读到作者的更新。修复：
+
+   - `RunContract.source_versions` 在 `open_run` 时记录四个 book 来源的最新非 stale 版本；
+     旧合同没有该字段，反序列化为空表，行为不变。
+   - 统一选择顺序：本 Run 产出的产物 → 合同冻结版本 → 旧合同按最新非 stale；冻结版本缺失
+     时 fail-closed，不退回最新版本（`context::choose_run_artifact`）。
+   - `execute_context`、character_cast / volume_strategy / chapter_list 的 Planner Prompt、
+     chapter_list 的引用校验、有界修复读取的审校产物都改为 Run 作用域读取。
+   - `open_run` 要求 `story_macro` 与 `chapter_list` 的 Planner 契约版本成对固定
+     （`story-macro-v2` + `chapter-list-v3`），避免一半新一半旧的 Prompt 契约。
+
+   已知边界：打开 Run 时书里还没有任何计划产物时，冻结表为空，之后新增的计划仍按旧合同
+   读取；这条路径在打开时没有可冻结的输入，本轮不改变（见第 6 节）。
 
 ### P1（未修复，明确缺口）
 
-4. **作者当前章节目标没有持久化字段**：详见第 5 节。产品数据模型只有小说标题/简介与章节
+5. **作者当前章节目标没有持久化字段**：详见第 5 节。产品数据模型只有小说标题/简介与章节
    标题/正文，没有 `chapterBrief`/`chapterGoal`；作者无法把“第1章必须目击灭口”作为独立、
    可版本化的章节目标输入。M1 样本曾把目标写进小说简介（测试工具注入），这不是产品契约。
 
@@ -121,8 +129,33 @@ plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（
   合法 JSON，keyEvents 完整保留。
 - `planner_context_fails_when_mandatory_events_exceed_budget`：必选事件超预算 → 明确失败，
   不返回截断 JSON。
-- 模块拆分：`worker/context_budget.rs`（299 行）承接上下文预算；`worker_validation.rs`
-  1,046 行；拆分仅移动代码，行为由同一组测试覆盖。
+- 模块拆分：`worker/context_budget.rs` 承接上下文预算与 Run 作用域产物读取；
+  `worker_validation.rs` 1,046 行；拆分仅移动代码，行为由同一组测试覆盖。
+
+### 4.4 Phase E：Planner 输入按 Run 冻结
+
+单元测试（`context::tests`、`worker::context_budget::tests`）：
+
+- `run_artifact_wins_over_pinned_and_latest`：本 Run 产物优先于冻结版本与最新版本。
+- `pinned_book_version_ignores_newer_author_update`：冻结版本 1 不被版本 2 替换。
+- `legacy_contract_without_pins_keeps_latest_non_stale`：旧合同（空冻结表）保持最新非 stale。
+- `pinned_contract_missing_source_does_not_fall_back`：冻结来源缺失时不回退最新。
+- `frozen_planner_payload_ignores_a_newer_author_version`：Planner Prompt 上下文使用冻结版本。
+- `missing_frozen_planner_source_fails_instead_of_reading_latest`：缺冻结来源时明确失败。
+- `repair_reads_its_own_run_review_not_another_runs_newer_one`：修复读取本 Run 的审校产物。
+- `legacy_run_without_own_review_keeps_latest`：旧 Run 仍保持既有行为。
+
+集成测试（新文件 `tests/p17_4_10_run_freeze.rs`）：
+
+- `planner_book_inputs_stay_frozen_after_author_updates`：先保存 v1 计划并打开 Run，再保存
+  v2 story_macro/chapter_list；Run 成功后 context 的 `chapterPlanVersion` 仍是 1，context
+  与 Writer 的 Prompt 只包含 V1，不含 V2。测试同时断言 v2 产物确实已写入（版本 2），
+  因此旧实现“取最新”必然读到 V2。
+- `run_contract_rejects_a_half_pinned_planner_pair`：只固定 `story-macro-v2` 而不固定
+  `chapter-list-v3` 时 `open_run` 拒绝。
+
+负向对照：临时把冻结表替换为空表（等价旧实现）后，`planner_book_inputs_stay_frozen_after_author_updates`
+失败于 `chapterPlanVersion = 2`；恢复实现后通过。说明该测试确实覆盖评审指出的窗口。
 
 ## 5. Phase C：作者输入来源（缺口）
 
@@ -148,9 +181,8 @@ plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（
 
 ## 6. Run 与版本一致性（Phase E）
 
-**评审结论：不完整。** 已有测试覆盖 **context 产物生成之后**的 review/repair 版本固定，
-但没有覆盖 **context 之前的 Planner book 输入更新**；见第 3 节 P1。以下测试仍然有效，
-但不能证明 Phase E 全部通过：
+**完整。** context 之后的 review/repair 版本固定由 R2 测试覆盖，context 之前的 Planner
+book 输入窗口在本轮补齐（第 4.4 节）：
 
 - `review_pins_the_context_plan_version_per_run`：Run-A/Run-B 各自读取自己的 context 计划版本。
 - `a_reviewing_run_keeps_its_own_frozen_plan`：Run-A 审校固定版本 1，不被版本 2 替换。
@@ -158,26 +190,30 @@ plan/story_macro 更新窗口。需要在 `open_run` 冻结来源产物版本（
 - `legacy_context_is_attributed_by_artifact_run_id`：旧 context 通过产物 run_id 归属。
 - `missing_plan_version_is_recovered_from_trace_hash`：旧 context 用来源 hash 定位冻结计划。
 - `unrecoverable_plan_version_fails_closed`：无法定位时暂停。
+- 新增：`planner_book_inputs_stay_frozen_after_author_updates` 及其单元测试覆盖 context 之前
+  的 story_macro / chapter_list 更新窗口，并用负向对照证明测试有效。
 
-本轮全量测试通过，但没有构造“context 前更新 story_macro/chapter_list”的交错测试。
-该窗口存在真实混用风险，PR #27 不应在修复前合并。
+选择规则（`choose_run_artifact`）：本 Run 产物 → 合同冻结版本 → 旧合同最新非 stale。
+冻结版本缺失时失败并暂停，不读取更新后的版本。`RunContract.source_versions` 为空有两种
+来源：旧合同（无该字段）与打开时书里没有任何计划产物；两者都按旧行为读取最新非 stale。
+后一种是已知边界：打开时没有可冻结的输入，运行期新增计划仍会被读取。
 
 ## 7. 工程测试与 CI
 
 ```text
 cargo fmt --all -- --check                         PASS
 cargo clippy --workspace --exclude novel-http --lib -- -D warnings   PASS
-cargo test -p novel-application                    233 lib + 全部集成套件 PASS
+cargo test -p novel-application                    241 lib + 全部集成套件 PASS
 cargo test -p novel-prompt                         6 PASS
-cargo test --workspace --exclude novel-http        621 passed，0 failed
+cargo test --workspace --exclude novel-http        631 passed，0 failed
 cargo test -p novel-storage-sqlite --features test-harness  114 passed，0 failed
-client typecheck                                   PASS
-client test                                        290 passed
-server typecheck                                   PASS
+client typecheck                                   PASS（本轮未改客户端，沿用分支既有结果）
+client test                                        290 passed（同上）
+server typecheck                                   PASS（同上）
 Native E2E                                        见下
 ```
 
-GitHub Actions（PR #27，代码 head `e2e8f434`）：
+GitHub Actions（PR #27，模块拆分阶段 head `e2e8f434`；P1 修复提交的检查见 PR 页面）：
 
 | 检查 | 结果 |
 | --- | --- |
@@ -191,7 +227,8 @@ GitHub Actions（PR #27，代码 head `e2e8f434`）：
 
 报告提交是仅文档提交；上面的结果对应同一代码 head，最终 PR HEAD 的检查见 PR 页面。
 
-Native E2E：在模块拆分后重新构建 Beta-A2 E2E 应用，使用独立数据目录重跑 3 个 spec：
+Native E2E：在 P1 修复后重新构建 Beta-A2 E2E 应用（`pnpm build:tauri:e2e`），使用
+`scripts/run-p172-e2e-isolated.sh` 的独立数据目录重跑 3 个 spec：
 
 | Spec | 结果 |
 | --- | --- |
@@ -199,14 +236,14 @@ Native E2E：在模块拆分后重新构建 Beta-A2 E2E 应用，使用独立数
 | `author-journey` | PASS（1/1；mock 已补 keyEvents/sourceEventId） |
 | `p17-3-context` | PASS（4/4；上下文来源与冻结 Run） |
 
-3/3 spec 全部通过（模块拆分后重新构建并重跑）。完整 11-spec 套件没有全部重跑；原因：
-本轮变更范围是 Planner 契约、上下文预算与客户端 Prompt 版本，其他 spec 未触及对应路径。
-E2E 不是人工验收。
+3/3 spec 全部通过（P1 修复后重新构建并重跑）。完整套件没有全部重跑；原因：本轮变更
+范围是 Planner 契约、Run 冻结、上下文预算与客户端 Prompt 版本，其他 spec 未触及对应
+路径。E2E 不是人工验收。
 
-并发说明：一次全量 workspace 运行与 E2E 应用并行时，`chapter_history` 的
+并发说明：模块拆分阶段，一次全量 workspace 运行与 E2E 应用并行时，`chapter_history` 的
 `restore_protects_local_drafts_and_records_provenance` 因 SQLite busy 冲突失败；停止
-E2E 应用后单独重跑为 **621 passed，0 failed**。该失败是测试环境并发冲突，不是代码回归；
-最终计数以干净重跑为准。
+E2E 应用后单独重跑为 621 passed，0 failed。该失败是测试环境并发冲突，不是代码回归。
+P1 修复后的最终干净重跑为 **631 passed，0 failed**。
 
 ### M1 Mock 矩阵（工程链路，不等于 M1 PASS）
 
@@ -226,11 +263,12 @@ Mock 通过只代表工程链路与 fail-closed 行为，不把 M1 改为 PASS�
 
 ## 8. 未完成任务及原因
 
-1. **Phase E P1**：Planner 输入未按 Run 冻结；评审发现，未修复。
-2. Phase C 章节目标字段：数据模型缺口，需要迁移 + UI + contract，未在时间盒内实现。
-3. Phase F usage 逐次调用：时间不足，保留 P2 与复现证据，未改代码。
-4. Native E2E 的完整套件没有全部重跑；本轮只跑与 Planner 契约/章节创建相关的冒烟。
-5. 真实 M1 复测未执行；Beta-A2 新合同需要新的明确授权、模型与预算。
+1. Phase C 章节目标字段：数据模型缺口，需要迁移 + UI + contract，未在时间盒内实现。
+2. Phase F usage 逐次调用：时间不足，保留 P2 与复现证据，未改代码。
+3. Native E2E 的完整套件没有全部重跑；本轮只跑与 Planner 契约/章节创建相关的冒烟。
+4. 真实 M1 复测未执行；Beta-A2 新合同需要新的明确授权、模型与预算。
+5. `worker.rs` 仍超过 1,300 行硬阈值（已知 P2）；本轮 P1 修复只在既有函数内改接线，
+   没有新增职责；按职责拆分留待后续阶段。
 
 ## 9. M1 最新真实验收状态
 
@@ -248,9 +286,7 @@ Mock 通过只代表工程链路与 fail-closed 行为，不把 M1 改为 PASS�
 
 ## 11. 下一阶段建议
 
-1. **先修 Phase E P1**：在 `open_run` 冻结 story_macro/character_cast/volume_strategy/
-   chapter_list 版本，或让 Planner/Context 按 run_id 选本 Run 产物；补交错 Run 测试。
-   修复前不合并本 Draft PR。
+1. 复核本 PR 的 Run 冻结实现与测试，确认合并策略；本报告不代替人工评审，也不自动合并。
 2. 为 M1 执行器固定 `story_macro: story-macro-v2` / `chapter_list: chapter-list-v3`，
    在新的明确授权、模型与预算下重跑 M1；Mock 通过不能标 M1 PASS。
 3. 设计并实现持久化章节目标字段（Phase C），补齐作者输入到 Planner 的可审计链路。

@@ -1,8 +1,12 @@
+use std::collections::BTreeMap;
+
 use novel_workflow::{ArtifactView, book_scope};
 
 use super::worker_validation::latest_payload;
+use crate::context::choose_run_artifact;
 use crate::error::AppError;
 
+#[allow(dead_code)] // kept for legacy/preview tests; new runs use context_payload_for_run
 pub(crate) fn context_payload(
     artifacts: &[ArtifactView],
     types: &[&str],
@@ -14,6 +18,66 @@ pub(crate) fn context_payload(
         context.insert((*artifact_type).to_string(), value);
     }
     let full = serde_json::Value::Object(context);
+    budgeted_context(full, limit)
+}
+
+/// Same budget policy, but every source is selected through the run's frozen
+/// versions instead of "latest".
+pub(crate) fn context_payload_for_run(
+    artifacts: &[ArtifactView],
+    types: &[&str],
+    limit: usize,
+    run_id: &str,
+    source_versions: &BTreeMap<String, i64>,
+) -> Result<String, AppError> {
+    let mut context = serde_json::Map::new();
+    for artifact_type in types {
+        let value = payload_for_run(
+            artifacts,
+            artifact_type,
+            book_scope(),
+            run_id,
+            source_versions,
+        )?;
+        context.insert((*artifact_type).to_string(), value);
+    }
+    let full = serde_json::Value::Object(context);
+    budgeted_context(full, limit)
+}
+
+pub(crate) fn payload_for_run(
+    artifacts: &[ArtifactView],
+    artifact_type: &str,
+    scope: &str,
+    run_id: &str,
+    source_versions: &BTreeMap<String, i64>,
+) -> Result<serde_json::Value, AppError> {
+    let artifact = choose_run_artifact(artifacts, artifact_type, scope, run_id, source_versions)
+        .ok_or_else(|| {
+            AppError::integrity(format!(
+                "缺少本 Run 冻结的上游产物 {artifact_type}；不能改用更新后的版本。"
+            ))
+        })?;
+    serde_json::from_str(&artifact.payload_json)
+        .map_err(|_| AppError::integrity(format!("上下文来源 {artifact_type} 的产物格式损坏。")))
+}
+
+/// Chapter-scope artifact for this run: the run's own output wins over another
+/// run's newer artifact; legacy runs without a run-owned copy keep the old
+/// latest behavior.
+pub(crate) fn run_scoped_payload(
+    artifacts: &[ArtifactView],
+    artifact_type: &str,
+    scope: &str,
+    run_id: &str,
+) -> Result<serde_json::Value, AppError> {
+    let artifact = choose_run_artifact(artifacts, artifact_type, scope, run_id, &BTreeMap::new())
+        .ok_or_else(|| AppError::integrity(format!("缺少上游产物 {artifact_type}")))?;
+    serde_json::from_str(&artifact.payload_json)
+        .map_err(|_| AppError::integrity(format!("上游产物 {artifact_type} 的格式损坏。")))
+}
+
+fn budgeted_context(full: serde_json::Value, limit: usize) -> Result<String, AppError> {
     let text = serialize_context(&full)?;
     if text.chars().count() <= limit {
         return Ok(text);
@@ -209,7 +273,6 @@ fn minimal_context(full: &serde_json::Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use novel_domain::ArtifactStatus;
 
     fn artifact(ty: &str, payload: serde_json::Value) -> ArtifactView {
         ArtifactView {
@@ -295,5 +358,64 @@ mod tests {
         )];
         let error = context_payload(&artifacts, &["story_macro"], 500).unwrap_err();
         assert!(error.to_string().contains("预算不足"), "{error}");
+    }
+
+    fn versioned(ty: &str, version: i64, payload: serde_json::Value) -> ArtifactView {
+        ArtifactView {
+            version,
+            ..artifact(ty, payload)
+        }
+    }
+
+    #[test]
+    fn frozen_planner_payload_ignores_a_newer_author_version() {
+        let artifacts = vec![
+            versioned("story_macro", 1, serde_json::json!({"marker": "V1"})),
+            versioned("story_macro", 2, serde_json::json!({"marker": "V2"})),
+        ];
+        let pins = BTreeMap::from([("story_macro".to_string(), 1)]);
+        let value = payload_for_run(&artifacts, "story_macro", "book", "run-a", &pins).unwrap();
+        assert_eq!(value["marker"], "V1");
+
+        let text =
+            context_payload_for_run(&artifacts, &["story_macro"], 4000, "run-a", &pins).unwrap();
+        assert!(text.contains("V1"));
+        assert!(!text.contains("V2"));
+    }
+
+    fn run_versioned(ty: &str, version: i64, run: Option<&str>, marker: &str) -> ArtifactView {
+        ArtifactView {
+            run_id: run.map(str::to_string),
+            ..versioned(ty, version, serde_json::json!({ "marker": marker }))
+        }
+    }
+
+    #[test]
+    fn repair_reads_its_own_run_review_not_another_runs_newer_one() {
+        let artifacts = vec![
+            run_versioned("consistency_review", 1, Some("run-a"), "Run-A 审校"),
+            run_versioned("consistency_review", 2, Some("run-b"), "Run-B 审校"),
+        ];
+        let review = run_scoped_payload(&artifacts, "consistency_review", "book", "run-a").unwrap();
+        assert_eq!(review["marker"], "Run-A 审校");
+    }
+
+    #[test]
+    fn legacy_run_without_own_review_keeps_latest() {
+        let artifacts = vec![run_versioned("consistency_review", 2, None, "旧审校")];
+        let review = run_scoped_payload(&artifacts, "consistency_review", "book", "run-a").unwrap();
+        assert_eq!(review["marker"], "旧审校");
+    }
+
+    #[test]
+    fn missing_frozen_planner_source_fails_instead_of_reading_latest() {
+        let artifacts = vec![versioned(
+            "story_macro",
+            2,
+            serde_json::json!({"marker": "V2"}),
+        )];
+        let pins = BTreeMap::from([("story_macro".to_string(), 1)]);
+        let error = payload_for_run(&artifacts, "story_macro", "book", "run-a", &pins).unwrap_err();
+        assert!(error.to_string().contains("story_macro"), "{error}");
     }
 }

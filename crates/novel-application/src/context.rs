@@ -4,6 +4,8 @@
 //! hash/token estimate or recorded as missing/stale/over-budget in the trace. No
 //! database read failure is converted into an empty source.
 
+use std::collections::BTreeMap;
+
 use novel_domain::ArtifactStatus;
 use novel_workflow::{ArtifactView, book_scope, chapter_scope};
 use serde::{Deserialize, Serialize};
@@ -111,11 +113,68 @@ fn source_trace(draft: &SourceDraft, selected: bool, reason: Option<&str>) -> Co
     }
 }
 
+/// Versions of the book-scope sources frozen when the run was opened. A run
+/// must never switch to a newer plan just because the author saved one while it
+/// was paused.
+#[derive(Debug, Clone, Copy)]
+pub struct RunContextPins<'a> {
+    pub run_id: &'a str,
+    pub source_versions: &'a BTreeMap<String, i64>,
+}
+
+/// Select a book source for a run:
+/// 1. an artifact produced by this run (run_id) wins;
+/// 2. otherwise the version frozen at open_run;
+/// 3. legacy contracts without frozen versions keep the old latest behavior.
+pub(crate) fn choose_run_artifact<'a>(
+    artifacts: &'a [ArtifactView],
+    artifact_type: &str,
+    scope: &str,
+    run_id: &str,
+    source_versions: &BTreeMap<String, i64>,
+) -> Option<&'a ArtifactView> {
+    let candidates = || {
+        artifacts
+            .iter()
+            .filter(|artifact| artifact.artifact_type == artifact_type && artifact.scope == scope)
+    };
+    if let Some(artifact) = candidates()
+        .filter(|artifact| artifact.run_id.as_deref() == Some(run_id))
+        .max_by_key(|artifact| artifact.version)
+    {
+        return Some(artifact);
+    }
+    if let Some(version) = source_versions.get(artifact_type) {
+        return candidates()
+            .filter(|artifact| artifact.version == *version)
+            .max_by_key(|artifact| artifact.version);
+    }
+    if source_versions.is_empty() {
+        return candidates()
+            .filter(|artifact| artifact.status != ArtifactStatus::Stale)
+            .max_by_key(|artifact| artifact.version);
+    }
+    None
+}
+
 fn artifact_source<'a>(
     artifacts: &'a [ArtifactView],
     artifact_type: &'static str,
     scope: &str,
+    pins: Option<&RunContextPins<'_>>,
 ) -> (Option<&'a ArtifactView>, Option<&'static str>) {
+    if let Some(pins) = pins {
+        return match choose_run_artifact(
+            artifacts,
+            artifact_type,
+            scope,
+            pins.run_id,
+            pins.source_versions,
+        ) {
+            Some(artifact) => (Some(artifact), None),
+            None => (None, Some("missing")),
+        };
+    }
     let mut candidates: Vec<&ArtifactView> = artifacts
         .iter()
         .filter(|artifact| artifact.artifact_type == artifact_type && artifact.scope == scope)
@@ -361,9 +420,38 @@ pub async fn assemble_director_context(
         artifacts,
         novel_id,
         target_chapter_id,
-        input_budget,
-        output_reserve,
-        true,
+        ContextOptions {
+            input_budget,
+            output_reserve,
+            strict: true,
+            pins: None,
+        },
+    )
+    .await?
+    .assembly)
+}
+
+/// Assemble context with the book-source versions frozen by the run contract.
+pub async fn assemble_director_context_for_run(
+    novels: &dyn NovelRepository,
+    artifacts: &[ArtifactView],
+    novel_id: &str,
+    target_chapter_id: &str,
+    pins: &RunContextPins<'_>,
+    input_budget: u64,
+    output_reserve: u64,
+) -> Result<ContextAssembly, AppError> {
+    Ok(assemble_context(
+        novels,
+        artifacts,
+        novel_id,
+        target_chapter_id,
+        ContextOptions {
+            input_budget,
+            output_reserve,
+            strict: true,
+            pins: Some(*pins),
+        },
     )
     .await?
     .assembly)
@@ -384,9 +472,12 @@ pub async fn preview_director_context(
         artifacts,
         novel_id,
         target_chapter_id,
-        budget,
-        output_reserve,
-        false,
+        ContextOptions {
+            input_budget: budget,
+            output_reserve,
+            strict: false,
+            pins: None,
+        },
     )
     .await?;
     Ok(ContextPreview {
@@ -400,15 +491,28 @@ struct AssemblyOutcome {
     blocked_reasons: Vec<String>,
 }
 
+/// Budget and source-pinning options for one context assembly.
+struct ContextOptions<'a> {
+    input_budget: u64,
+    output_reserve: u64,
+    strict: bool,
+    pins: Option<RunContextPins<'a>>,
+}
+
 async fn assemble_context(
     novels: &dyn NovelRepository,
     artifacts: &[ArtifactView],
     novel_id: &str,
     target_chapter_id: &str,
-    input_budget: u64,
-    output_reserve: u64,
-    strict: bool,
+    options: ContextOptions<'_>,
 ) -> Result<AssemblyOutcome, AppError> {
+    let ContextOptions {
+        input_budget,
+        output_reserve,
+        strict,
+        pins,
+    } = options;
+    let pins = pins.as_ref();
     if input_budget < 512 {
         return Err(AppError::validation("上下文预算过小，无法保证必要事实。"));
     }
@@ -447,7 +551,7 @@ async fn assemble_context(
         ("volume_strategy", true, 3),
         ("chapter_list", true, 4),
     ] {
-        let (artifact, missing) = artifact_source(artifacts, artifact_type, book_scope());
+        let (artifact, missing) = artifact_source(artifacts, artifact_type, book_scope(), pins);
         let Some(artifact) = artifact else {
             if mandatory {
                 let reason = missing.unwrap_or("missing");
@@ -918,6 +1022,56 @@ mod tests {
             })
             .to_string(),
         }
+    }
+
+    #[test]
+    fn run_artifact_wins_over_pinned_and_latest() {
+        let mut run_artifact = plan_artifact(4, "Run 自己的计划");
+        run_artifact.run_id = Some("run-a".into());
+        let artifacts = vec![
+            plan_artifact(1, "旧计划"),
+            plan_artifact(3, "作者更新计划"),
+            run_artifact,
+        ];
+        let pins = BTreeMap::from([("chapter_list".to_string(), 1)]);
+        let selected =
+            choose_run_artifact(&artifacts, "chapter_list", book_scope(), "run-a", &pins)
+                .expect("run artifact");
+        assert_eq!(selected.version, 4);
+    }
+
+    #[test]
+    fn pinned_book_version_ignores_newer_author_update() {
+        let artifacts = vec![plan_artifact(1, "旧计划"), plan_artifact(2, "新计划")];
+        let pins = BTreeMap::from([("chapter_list".to_string(), 1)]);
+        let selected =
+            choose_run_artifact(&artifacts, "chapter_list", book_scope(), "run-a", &pins)
+                .expect("pinned artifact");
+        assert_eq!(selected.version, 1);
+        assert_eq!(selected.payload_json.contains("旧计划"), true);
+    }
+
+    #[test]
+    fn legacy_contract_without_pins_keeps_latest_non_stale() {
+        let stale = ArtifactView {
+            status: ArtifactStatus::Stale,
+            ..plan_artifact(2, "新计划")
+        };
+        let artifacts = vec![plan_artifact(1, "旧计划"), stale];
+        let pins = BTreeMap::new();
+        let selected =
+            choose_run_artifact(&artifacts, "chapter_list", book_scope(), "run-a", &pins)
+                .expect("legacy latest");
+        assert_eq!(selected.version, 1);
+    }
+
+    #[test]
+    fn pinned_contract_missing_source_does_not_fall_back() {
+        let artifacts = vec![plan_artifact(2, "新计划")];
+        let pins = BTreeMap::from([("story_macro".to_string(), 1)]);
+        assert!(
+            choose_run_artifact(&artifacts, "chapter_list", book_scope(), "run-a", &pins).is_none()
+        );
     }
 
     #[test]

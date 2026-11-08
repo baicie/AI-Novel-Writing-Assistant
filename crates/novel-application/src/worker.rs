@@ -14,8 +14,8 @@ use novel_workflow::{
 use tokio_util::sync::CancellationToken;
 
 use crate::context::{
-    DEFAULT_OUTPUT_RESERVE, assemble_director_context, latest_run_context_payload,
-    pinned_chapter_plan_version, target_obligations_from_artifacts,
+    DEFAULT_OUTPUT_RESERVE, RunContextPins, assemble_director_context_for_run, choose_run_artifact,
+    latest_run_context_payload, pinned_chapter_plan_version, target_obligations_from_artifacts,
 };
 use crate::dto::{GenerationEvent, event_from_stored};
 use crate::error::AppError;
@@ -30,10 +30,9 @@ use crate::ports::{
 mod context_budget;
 mod worker_validation;
 
-pub(super) use context_budget::context_payload;
+pub(super) use context_budget::{context_payload_for_run, payload_for_run, run_scoped_payload};
 pub(super) use worker_validation::{
-    latest_payload, truncate_chars, validate_chapter_plan_references,
-    validate_structured_output_with,
+    truncate_chars, validate_chapter_plan_references, validate_structured_output_with,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -545,7 +544,7 @@ impl Worker {
     ) -> Result<TickOutcome, AppError> {
         let artifacts = self.runs.list_artifacts(&claimed.novel_id).await?;
         let scope = chapter_scope(&claimed.contract.target_chapter_id);
-        let review = latest_payload(&artifacts, "consistency_review", &scope)?;
+        let review = run_scoped_payload(&artifacts, "consistency_review", &scope, &claimed.run_id)?;
         let issues = review
             .get("issueDetails")
             .and_then(serde_json::Value::as_array)
@@ -902,12 +901,13 @@ impl Worker {
             return Ok(outcome);
         }
         let after = self.runs.list_artifacts(&claimed.novel_id).await?;
-        let latest_review = after
-            .iter()
-            .filter(|artifact| {
-                artifact.artifact_type == "consistency_review" && artifact.scope == scope
-            })
-            .max_by_key(|artifact| artifact.version);
+        let latest_review = choose_run_artifact(
+            &after,
+            "consistency_review",
+            &scope,
+            &claimed.run_id,
+            &BTreeMap::new(),
+        );
         let remaining = latest_review
             .and_then(|artifact| {
                 serde_json::from_str::<serde_json::Value>(&artifact.payload_json).ok()
@@ -1882,9 +1882,27 @@ async fn execute_structured(
         .await?;
     let payload = if step_id == "chapter_list" {
         let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-        let cast = latest_payload(&artifacts, "character_cast", book_scope())?;
-        let volume = latest_payload(&artifacts, "volume_strategy", book_scope())?;
-        let macro_payload = latest_payload(&artifacts, "story_macro", book_scope())?;
+        let cast = payload_for_run(
+            &artifacts,
+            "character_cast",
+            book_scope(),
+            &claimed.run_id,
+            &claimed.contract.source_versions,
+        )?;
+        let volume = payload_for_run(
+            &artifacts,
+            "volume_strategy",
+            book_scope(),
+            &claimed.run_id,
+            &claimed.contract.source_versions,
+        )?;
+        let macro_payload = payload_for_run(
+            &artifacts,
+            "story_macro",
+            book_scope(),
+            &claimed.run_id,
+            &claimed.contract.source_versions,
+        )?;
         match validate_chapter_plan_references(
             &payload,
             &cast,
@@ -2068,11 +2086,16 @@ async fn execute_context(
     spec: &StepSpec,
 ) -> Result<TickOutcome, AppError> {
     let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
-    let assembly = match assemble_director_context(
+    let pins = RunContextPins {
+        run_id: &claimed.run_id,
+        source_versions: &claimed.contract.source_versions,
+    };
+    let assembly = match assemble_director_context_for_run(
         worker.novels.as_ref(),
         &artifacts,
         &claimed.novel_id,
         &claimed.contract.target_chapter_id,
+        &pins,
         claimed.contract.context_token_budget,
         claimed
             .contract
@@ -2141,7 +2164,13 @@ async fn structured_prompt(
             let mut vars = BTreeMap::new();
             vars.insert(
                 "context".into(),
-                context_payload(&artifacts, &["story_macro"], 12_000)?,
+                context_payload_for_run(
+                    &artifacts,
+                    &["story_macro"],
+                    12_000,
+                    &claimed.run_id,
+                    &claimed.contract.source_versions,
+                )?,
             );
             ("character_cast", "character-cast-v1", vars)
         }
@@ -2149,7 +2178,13 @@ async fn structured_prompt(
             let mut vars = BTreeMap::new();
             vars.insert(
                 "context".into(),
-                context_payload(&artifacts, &["story_macro", "character_cast"], 16_000)?,
+                context_payload_for_run(
+                    &artifacts,
+                    &["story_macro", "character_cast"],
+                    16_000,
+                    &claimed.run_id,
+                    &claimed.contract.source_versions,
+                )?,
             );
             ("volume_strategy", "volume-strategy-v1", vars)
         }
@@ -2157,10 +2192,12 @@ async fn structured_prompt(
             let mut vars = BTreeMap::new();
             vars.insert(
                 "context".into(),
-                context_payload(
+                context_payload_for_run(
                     &artifacts,
                     &["story_macro", "volume_strategy", "character_cast"],
                     24_000,
+                    &claimed.run_id,
+                    &claimed.contract.source_versions,
                 )?,
             );
             let version = match claimed
