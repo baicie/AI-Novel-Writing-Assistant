@@ -43,18 +43,24 @@ Writer 可以把“主角亲眼撞见老铁匠被灭口”改写成“主角到�
   产物自带的 `run_id` 归属；如果旧 Context 没有 `chapterPlanVersion`，用 ContextTrace 中
   `chapter_list` 来源哈希定位版本。定位失败就暂停，不能改用最新计划。
 - **Planner book 输入按 Run 冻结**：`open_run` 把当时 story_macro / character_cast /
-  volume_strategy / chapter_list 的最新非 stale 版本写入 `RunContract.source_versions`。
-  Context 组装、character_cast / volume_strategy / chapter_list 的 Planner Prompt、章节
-  计划引用校验和修复审校读取审校产物都按“本 Run 产物 → 冻结版本 → 旧合同最新非 stale”
-  选择；冻结版本缺失时 fail-closed，不能退回作者在 Run 打开之后保存的新版本。
+  volume_strategy / chapter_list 的最新非 stale 版本写入 `RunContract.source_versions`，并保存
+  `input_snapshot`（标题、简介和小说 `updated_at`）。`story_macro` 首次执行只消费该快照；历史
+  合同没有快照时才按兼容策略读取当前小说详情。Context 组装、character_cast /
+  volume_strategy / chapter_list 的 Planner Prompt、章节计划引用校验和修复审校读取审校产物都按
+  “本 Run 产物 → 冻结版本 → 旧合同最新非 stale”选择；冻结版本缺失时 fail-closed，不能退回
+  作者在 Run 打开之后保存的新版本。
 - **规范关键事件**：`story_macro.keyEvents` 描述必须发生的事件；新计划至少一条 hard。
   `chapter_list` 的义务用 `sourceEventId` 引用事件，`description`、`participants`、`type`、
   `chapterOrder` 与 hard 级别必须与事件一致；改写含义、替换参与者或降级都拒绝。
 - **Planner 上下文是结构化预算**：超预算时只裁剪解释性文本，保留 keyEvents、constraints、
   人物身份与卷；必选内容放不下时明确失败，绝不返回被截断的 JSON。
-- **hard 违反的证据必须可定位**：evidence 去除空白后要能在当前候选正文中找到；
-  找不到就 fail-closed。该校验只证明“引用存在”，不判断语义是否正确。
-- **advisory 不阻塞**：仅引用 advisory 的 issue 不触发修复、不阻塞章节完成，只作为质量提示。
+- **审校证据必须可定位**：每个 issue 的 evidence 去除空白后都要能在当前候选正文中找到；找不到、
+  引用历史正文或缺失证据就 fail-closed。该校验只证明“引用存在”，不判断语义是否正确。
+- **缺席断言需要可信度**：Reviewer 必须在完整候选正文上判断 `missing_element`。没有明确
+  `confidence=confirmed_violation` 时，系统把它标记为 `needs_author_confirmation`，保留在
+  quality debt/审校产物中但不触发 hard repair；`issues` 只统计可自动修复的问题。
+- **advisory 不阻塞**：`enforcement=advisory` 的 issue 不触发修复、不阻塞章节完成，只作为
+  质量提示；一般质量建议必须显式使用该标记。
 - Reviewer 返回非法 JSON 时直接 DataIntegrity 停止，不把审校 JSON 修复成空 issues。
 - Repair 使用 `chapter-repair-v2`，收到义务文本与冲突，明确禁止通过修改计划来迁就正文；
   hard 必须保留，advisory 可以合理取舍。

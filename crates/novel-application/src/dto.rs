@@ -374,6 +374,15 @@ pub struct ChapterFullDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RunInputSnapshot {
+    pub title: String,
+    pub description: String,
+    /// 小说详情在 Run 创建时的更新时间，用于解释该快照来自哪个来源版本。
+    pub novel_updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunContract {
     pub run_id: String,
     pub novel_id: String,
@@ -382,6 +391,9 @@ pub struct RunContract {
     /// open_run 时冻结的 book 来源产物版本；旧合同为空，按旧行为读取最新。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub source_versions: BTreeMap<String, i64>,
+    /// Run 创建时冻结的小说输入；历史合同缺少该字段时按兼容策略读取当前详情。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_snapshot: Option<RunInputSnapshot>,
     pub target_chapter_id: String,
     pub provider: String,
     pub model: String,

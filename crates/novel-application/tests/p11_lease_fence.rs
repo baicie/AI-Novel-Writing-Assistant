@@ -25,7 +25,7 @@ fn chapters() -> String {
     serde_json::json!({"chapters":[{"chapterOrder":1,"title":"第一章","volumeTitle":"卷一","summary":"入山","characterNames":["林动"],"obligations":[{"id":"ch1-req-1","type":"required_event","description":"按计划推进本章关键事件","enforcement":"hard","participants":["林动"]}]}]}).to_string()
 }
 fn issues() -> String {
-    serde_json::json!({"issues":[{"type":"timeline","severity":"high","evidence":"时间线冲突","suggestion":"修正时间"}]}).to_string()
+    serde_json::json!({"issues":[{"type":"timeline","severity":"high","evidence":"原始候选正文","suggestion":"修正时间"}]}).to_string()
 }
 
 async fn blocked_repair_server() -> (

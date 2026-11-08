@@ -15,10 +15,6 @@ pub(crate) fn latest_payload(
         .ok_or_else(|| AppError::integrity(format!("缺少上游产物 {artifact_type}")))
 }
 
-pub(crate) fn truncate_chars(value: &str, limit: usize) -> String {
-    value.chars().take(limit).collect()
-}
-
 pub(crate) fn validate_chapter_plan_references(
     payload: &str,
     cast: &serde_json::Value,
@@ -503,6 +499,21 @@ pub(crate) fn validate_structured_output_with(
                 {
                     return Err("审校 needsAuthorConfirmation 必须是布尔值".into());
                 }
+                if let Some(enforcement) = issue.get("enforcement")
+                    && !enforcement.is_null()
+                    && !matches!(enforcement.as_str(), Some("hard" | "advisory"))
+                {
+                    return Err("审校 enforcement 必须是 hard 或 advisory".into());
+                }
+                if let Some(confidence) = issue.get("confidence")
+                    && !confidence.is_null()
+                    && !matches!(
+                        confidence.as_str(),
+                        Some("confirmed_violation" | "suspected_absence" | "insufficient_evidence")
+                    )
+                {
+                    return Err("审校 confidence 值无法识别".into());
+                }
                 let issue_id = issue
                     .get("issueId")
                     .or_else(|| issue.get("id"))
@@ -559,6 +570,8 @@ pub(crate) fn validate_structured_output_with(
                     "suggestion": issue["suggestion"],
                     "obligationId": issue.get("obligationId").cloned().unwrap_or(serde_json::Value::Null),
                     "violationType": issue.get("violationType").cloned().unwrap_or(serde_json::Value::Null),
+                    "enforcement": issue.get("enforcement").cloned().unwrap_or(serde_json::Value::Null),
+                    "confidence": issue.get("confidence").cloned().unwrap_or(serde_json::Value::Null),
                     "needsAuthorConfirmation": issue
                         .get("needsAuthorConfirmation")
                         .cloned()

@@ -28,5 +28,5 @@ pub use provider::{
 };
 pub use request_url::{generation_url, models_url};
 pub use router::ProtocolRouterProvider;
-pub use sse::{SsePiece, consume_sse, parse_sse_line};
+pub use sse::{SsePiece, consume_sse, consume_sse_with_idle_timeout, parse_sse_line};
 pub use structured::{may_repair, parse_structured_json};

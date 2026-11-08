@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use novel_application::{
     ModelSecrets, NewArtifact, OpenRunInput, PortError, Runtime, RuntimeDeps, TickOutcome,
-    WorkflowRepository,
+    UpdateNovelFields, WorkflowRepository,
 };
 use novel_storage_sqlite::SqliteKernel;
 use novel_testkit::{FakeClock, ScriptedLlm, SequentialIds};
@@ -287,4 +287,163 @@ async fn run_contract_rejects_a_half_pinned_planner_pair() {
         error.to_string().contains("成对"),
         "story-macro-v2 and chapter-list-v3 must be pinned together: {error}"
     );
+}
+
+fn runtime_story_macro(marker: &str) -> String {
+    serde_json::json!({
+        "expansion": {
+            "expanded_premise": marker,
+            "protagonist_core": "被逐出家族的少年",
+            "conflict_engine": "旧案追杀",
+            "conflict_layers": {"external": "山门追杀"},
+            "mystery_box": "山门之下封着什么？",
+            "emotional_line": "从自保到承担",
+            "setpiece_seeds": ["雪夜"],
+            "tone_reference": "冷峻"
+        },
+        "decomposition": {
+            "selling_point": "少年卷入旧案",
+            "core_conflict": "真相与秩序",
+            "main_hook": "玉佩",
+            "progression_loop": "发现秘密 -> 被追杀",
+            "growth_path": "承担",
+            "major_payoffs": ["旧案真相"],
+            "ending_flavor": "新生"
+        },
+        "keyEvents": [{
+            "id": "ch1-event-1",
+            "chapterOrder": 1,
+            "type": "required_event",
+            "description": "林动亲眼撞见老铁匠被杀",
+            "participants": ["林动", "老铁匠"],
+            "enforcement": "hard"
+        }],
+        "constraints": [],
+        "issues": []
+    })
+    .to_string()
+}
+
+fn runtime_cast() -> String {
+    serde_json::json!({
+        "members": [
+            {"name": "林动", "role": "主角", "castRole": "protagonist", "storyFunction": "承担真相"},
+            {"name": "苏晚", "role": "同伴", "castRole": "ally", "storyFunction": "协助"},
+            {"name": "陆沉", "role": "对手", "castRole": "antagonist", "storyFunction": "施压"},
+            {"name": "老铁匠", "role": "受害者", "castRole": "supporting", "storyFunction": "触发旧案"}
+        ],
+        "relations": [
+            {"sourceName": "林动", "targetName": "苏晚", "surfaceRelation": "同门"},
+            {"sourceName": "林动", "targetName": "陆沉", "surfaceRelation": "敌对"}
+        ]
+    })
+    .to_string()
+}
+
+fn runtime_volume() -> String {
+    serde_json::json!({
+        "volumes": [{
+            "volumeOrder": 1,
+            "title": "山门卷",
+            "roleLabel": "开局",
+            "coreReward": "入山",
+            "planningMode": "hard"
+        }]
+    })
+    .to_string()
+}
+
+fn runtime_chapter_list() -> String {
+    serde_json::json!({
+        "chapters": [{
+            "chapterOrder": 1,
+            "title": "第一章",
+            "volumeTitle": "山门卷",
+            "summary": "林动亲眼撞见老铁匠被杀",
+            "characterNames": ["林动", "老铁匠"],
+            "obligations": [{
+                "id": "ch1-req-1",
+                "type": "required_event",
+                "description": "林动亲眼撞见老铁匠被杀",
+                "enforcement": "hard",
+                "participants": ["林动", "老铁匠"],
+                "sourceEventId": "ch1-event-1"
+            }]
+        }]
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn story_macro_uses_the_run_snapshot_after_novel_description_changes() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", runtime_story_macro("描述 A")),
+        ("STEP:character_cast", runtime_cast()),
+        ("STEP:volume_strategy", runtime_volume()),
+        ("STEP:chapter_list", runtime_chapter_list()),
+        ("STEP:chapter_draft", "林动亲眼撞见老铁匠被杀。".into()),
+        ("STEP:consistency_review", r#"{"issues":[]}"#.into()),
+    ]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p17410-input-freeze").await;
+    let novel = runtime
+        .director
+        .create_novel("标题 A", "描述 A")
+        .await
+        .unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_a = runtime
+        .director
+        .open_run(open_input(&novel.id, &chapter.id, "p17410-input-freeze-a"))
+        .await
+        .unwrap()
+        .run_id;
+
+    runtime
+        .director
+        .update_novel(
+            &novel.id,
+            &UpdateNovelFields {
+                description: Some("描述 B".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let status = drive_until_paused_or_done(&runtime, 40).await;
+    assert_eq!(status, "succeeded");
+    let story_prompt = llm
+        .prompts()
+        .into_iter()
+        .find(|prompt| prompt.contains("STEP:story_macro"))
+        .expect("story_macro prompt");
+    assert!(story_prompt.contains("标题 A\n描述 A"), "{story_prompt}");
+    assert!(!story_prompt.contains("描述 B"), "{story_prompt}");
+
+    let contract_a: String =
+        sqlx::query_scalar("SELECT contract_json FROM workflow_run WHERE id = ?")
+            .bind(&run_a)
+            .fetch_one(kernel.as_ref().pool())
+            .await
+            .unwrap();
+    assert!(contract_a.contains("描述 A"));
+    assert!(!contract_a.contains("描述 B"));
+
+    let run_b = runtime
+        .director
+        .open_run(open_input(&novel.id, &chapter.id, "p17410-input-freeze-b"))
+        .await
+        .unwrap()
+        .run_id;
+    let contract_b: String =
+        sqlx::query_scalar("SELECT contract_json FROM workflow_run WHERE id = ?")
+            .bind(&run_b)
+            .fetch_one(kernel.as_ref().pool())
+            .await
+            .unwrap();
+    assert!(contract_b.contains("描述 B"));
 }

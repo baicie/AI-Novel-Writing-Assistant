@@ -14,6 +14,7 @@ fn contract() -> RunContract {
         plan_version: "plan-v1".into(),
         chapter_plan_version: "chapter-v1".into(),
         source_versions: Default::default(),
+        input_snapshot: None,
         target_chapter_id: "chapter-lease".into(),
         provider: "mock".into(),
         model: "mock".into(),

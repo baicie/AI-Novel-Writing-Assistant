@@ -25,7 +25,7 @@ impl Default for ProtocolRouterProvider {
 impl ProtocolRouterProvider {
     pub fn new() -> Self {
         Self {
-            openai: OpenAiCompatibleProvider::new(),
+            openai: OpenAiCompatibleProvider::with_policy(ProviderPolicy::desktop_default()),
             ollama: OllamaProvider::new(),
         }
     }

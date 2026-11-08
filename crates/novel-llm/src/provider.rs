@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::endpoint::{authorize_endpoint, authorize_resolved_endpoint};
 use crate::error::{LlmError, classify_http};
-use crate::sse::consume_sse;
+use crate::sse::consume_sse_with_idle_timeout;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,10 +106,20 @@ impl LlmProvider for UnconfiguredProvider {
     }
 }
 
-/// Bounded retry/timeout policy shared by every remote model request.
+/// Bounded retry and timeout policy shared by every remote model request.
 #[derive(Debug, Clone)]
 pub struct ProviderPolicy {
+    /// Backward-compatible total request cap used by older callers that do not
+    /// set `request_timeout`.
     pub timeout: Duration,
+    /// Maximum duration of one complete attempt, including streamed body data.
+    pub request_timeout: Option<Duration>,
+    /// TCP/TLS connection establishment cap.
+    pub connect_timeout: Duration,
+    /// Maximum wait for response headers (the first byte).
+    pub first_byte_timeout: Duration,
+    /// Maximum gap between SSE data reads after the response starts.
+    pub stream_idle_timeout: Duration,
     pub max_attempts: u8,
     pub retry_backoff: Duration,
     pub default_max_output_tokens: u64,
@@ -120,11 +130,33 @@ impl Default for ProviderPolicy {
     fn default() -> Self {
         Self {
             timeout: Duration::from_secs(120),
+            request_timeout: None,
+            connect_timeout: Duration::from_secs(15),
+            first_byte_timeout: Duration::from_secs(120),
+            stream_idle_timeout: Duration::from_secs(45),
             max_attempts: 2,
             retry_backoff: Duration::from_millis(300),
             default_max_output_tokens: 4_000,
             absolute_max_output_tokens: 32_000,
         }
+    }
+}
+
+impl ProviderPolicy {
+    /// The policy used by the formal desktop composition root. The total cap
+    /// is explicit, while progress is allowed as long as the stream stays
+    /// within the first-byte and idle budgets.
+    pub fn desktop_default() -> Self {
+        Self {
+            request_timeout: Some(Duration::from_secs(300)),
+            first_byte_timeout: Duration::from_secs(120),
+            stream_idle_timeout: Duration::from_secs(45),
+            ..Self::default()
+        }
+    }
+
+    fn total_request_timeout(&self) -> Duration {
+        self.request_timeout.unwrap_or(self.timeout)
     }
 }
 
@@ -141,7 +173,7 @@ impl OpenAiCompatibleProvider {
 
     pub fn with_policy(policy: ProviderPolicy) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(policy.timeout)
+            .connect_timeout(policy.connect_timeout)
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .build()
@@ -236,56 +268,89 @@ impl OpenAiCompatibleProvider {
             if cancel.is_cancelled() {
                 return Err(LlmError::Cancelled);
             }
-            let pending = self
-                .client
-                .post(&request_url)
-                .bearer_auth(&request.api_key)
-                .header("x-request-id", &request.request_id)
-                .json(&body)
-                .send();
-            let response = tokio::select! {
-                _ = cancel.cancelled() => return Err(LlmError::Cancelled),
-                result = tokio::time::timeout(self.policy.timeout, pending) => match result {
-                    Ok(Ok(response)) => response,
-                    Ok(Err(_)) => {
-                        // The request may have reached the provider even though no
-                        // response arrived; do not retry a non-idempotent generation.
-                        last_error = Some(LlmError::Unavailable {
-                            billed: true,
-                            reason: "模型服务连接中断，无法确认是否已计费".into(),
-                        });
-                        break;
-                    }
-                    Err(_) => {
-                        // Timeout is deliberately non-retryable for the same billing
-                        // uncertainty reason.
-                        last_error = Some(LlmError::Timeout);
-                        break;
-                    }
+            let result = tokio::select! {
+                _ = cancel.cancelled() => Err(LlmError::Cancelled),
+                result = tokio::time::timeout(
+                    self.policy.total_request_timeout(),
+                    self.request_once(&request_url, &body, &request, &tokens, &cancel),
+                ) => match result {
+                    Ok(result) => result,
+                    Err(_) => Err(LlmError::Unavailable {
+                        billed: true,
+                        reason: "模型请求超过最大持续时间，无法确认是否已计费".into(),
+                    }),
                 },
             };
-            if !response.status().is_success() {
-                let classified = classify_http(response.status().as_u16(), false);
-                let retry = classified.retryable_without_new_charge()
-                    && attempt + 1 < self.policy.max_attempts;
-                last_error = Some(classified);
-                if retry {
-                    sleep_or_cancel(self.policy.retry_backoff, &cancel).await?;
-                    continue;
-                }
-                break;
+            if cancel.is_cancelled() {
+                return Err(LlmError::Cancelled);
             }
-            let stream = response
-                .bytes_stream()
-                .map(|chunk| chunk.map_err(|err| std::io::Error::other(err.to_string())));
-            let reader = BufReader::new(tokio_util::io::StreamReader::new(stream));
-            let (text, usage) = consume_sse(reader, &tokens, &cancel).await?;
-            return Ok(LlmResponse { text, usage });
+            match result {
+                Ok(response) => return Ok(response),
+                Err(error) => {
+                    let retry = error.retryable_without_new_charge()
+                        && attempt + 1 < self.policy.max_attempts;
+                    last_error = Some(error);
+                    if retry {
+                        sleep_or_cancel(self.policy.retry_backoff, &cancel).await?;
+                        continue;
+                    }
+                    break;
+                }
+            }
         }
         Err(last_error.unwrap_or(LlmError::Unavailable {
             billed: false,
             reason: "模型请求没有发出".into(),
         }))
+    }
+
+    async fn request_once(
+        &self,
+        request_url: &str,
+        body: &serde_json::Value,
+        request: &LlmRequest,
+        tokens: &tokio::sync::mpsc::Sender<String>,
+        cancel: &CancellationToken,
+    ) -> Result<LlmResponse, LlmError> {
+        let pending = self
+            .client
+            .post(request_url)
+            .bearer_auth(&request.api_key)
+            .header("x-request-id", &request.request_id)
+            .json(body)
+            .send();
+        let response = tokio::select! {
+            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+            result = tokio::time::timeout(self.policy.first_byte_timeout, pending) => match result {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => {
+                    return Err(LlmError::Unavailable {
+                        billed: true,
+                        reason: "模型服务连接中断，无法确认是否已计费".into(),
+                    });
+                }
+                Err(_) => {
+                    return Err(LlmError::Unavailable {
+                        billed: true,
+                        reason: "模型服务等待首字节超时，无法确认是否已计费".into(),
+                    });
+                }
+            },
+        };
+        if cancel.is_cancelled() {
+            return Err(LlmError::Cancelled);
+        }
+        if !response.status().is_success() {
+            return Err(classify_http(response.status().as_u16(), false));
+        }
+        let stream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(|err| std::io::Error::other(err.to_string())));
+        let reader = BufReader::new(tokio_util::io::StreamReader::new(stream));
+        let (text, usage) =
+            consume_sse_with_idle_timeout(reader, tokens, cancel, self.policy.stream_idle_timeout)
+                .await?;
+        Ok(LlmResponse { text, usage })
     }
 }
 

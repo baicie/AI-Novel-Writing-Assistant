@@ -195,3 +195,188 @@ async fn reasoning_effort_is_forwarded_when_selected() {
     );
     assert!(raw.contains("high"), "请求体应带具体档位：{raw}");
 }
+
+async fn serve_delayed_chunks(chunks: Vec<(Duration, &'static str)>) -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_task = calls.clone();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        calls_for_task.fetch_add(1, Ordering::SeqCst);
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+        for (delay, chunk) in chunks {
+            tokio::time::sleep(delay).await;
+            if stream.write_all(chunk.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+    (format!("http://{address}/v1/chat/completions"), calls)
+}
+
+async fn serve_delayed_headers(delay: Duration) -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_task = calls.clone();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_request(&mut stream).await;
+        calls_for_task.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(delay).await;
+        let body = "data: [DONE]\\n\\n";
+        let response = format!(
+            "HTTP/1.1 200 OK\\r\\nContent-Type: text/event-stream\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+    });
+    (format!("http://{address}/v1/chat/completions"), calls)
+}
+
+fn streaming_policy() -> ProviderPolicy {
+    ProviderPolicy {
+        timeout: Duration::from_millis(50),
+        request_timeout: Some(Duration::from_millis(500)),
+        connect_timeout: Duration::from_millis(100),
+        first_byte_timeout: Duration::from_millis(100),
+        stream_idle_timeout: Duration::from_millis(100),
+        max_attempts: 1,
+        retry_backoff: Duration::ZERO,
+        ..ProviderPolicy::default()
+    }
+}
+
+#[tokio::test]
+async fn continuous_stream_can_exceed_legacy_timeout_without_being_cut_off() {
+    let (endpoint, calls) = serve_delayed_chunks(vec![
+        (
+            Duration::ZERO,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"甲\"}}]}\n\n",
+        ),
+        (
+            Duration::from_millis(70),
+            "data: {\"choices\":[{\"delta\":{\"content\":\"乙\"}}]}\n\n",
+        ),
+        (Duration::from_millis(70), "data: [DONE]\n\n"),
+    ])
+    .await;
+    let provider = OpenAiCompatibleProvider::with_policy(streaming_policy());
+    let (sender, _receiver) = tokio::sync::mpsc::channel(16);
+    let response = provider
+        .generate(request(&endpoint, 128), sender, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(response.text, "甲乙");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn first_byte_timeout_is_billed_unknown_and_is_not_retried() {
+    let mut policy = streaming_policy();
+    policy.first_byte_timeout = Duration::from_millis(20);
+    let (endpoint, calls) = serve_delayed_headers(Duration::from_millis(80)).await;
+    let provider = OpenAiCompatibleProvider::with_policy(policy);
+    let (sender, _receiver) = tokio::sync::mpsc::channel(16);
+    let error = provider
+        .generate(request(&endpoint, 128), sender, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        novel_llm::LlmError::Unavailable { billed: true, .. }
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn total_request_timeout_stops_a_continuously_progressing_stream() {
+    let mut policy = streaming_policy();
+    policy.request_timeout = Some(Duration::from_millis(120));
+    policy.stream_idle_timeout = Duration::from_millis(100);
+    let (endpoint, calls) = serve_delayed_chunks(vec![
+        (
+            Duration::ZERO,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"甲\"}}]}\n\n",
+        ),
+        (
+            Duration::from_millis(70),
+            "data: {\"choices\":[{\"delta\":{\"content\":\"乙\"}}]}\n\n",
+        ),
+        (
+            Duration::from_millis(70),
+            "data: {\"choices\":[{\"delta\":{\"content\":\"丙\"}}]}\n\n",
+        ),
+        (Duration::from_millis(70), "data: [DONE]\n\n"),
+    ])
+    .await;
+    let provider = OpenAiCompatibleProvider::with_policy(policy);
+    let (sender, _receiver) = tokio::sync::mpsc::channel(16);
+    let error = provider
+        .generate(request(&endpoint, 128), sender, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        novel_llm::LlmError::Unavailable { billed: true, .. }
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn idle_stream_timeout_is_billed_unknown_and_is_not_retried() {
+    let mut policy = streaming_policy();
+    policy.stream_idle_timeout = Duration::from_millis(20);
+    let (endpoint, calls) = serve_delayed_chunks(vec![
+        (
+            Duration::ZERO,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"甲\"}}]}\n\n",
+        ),
+        (Duration::from_millis(80), "data: [DONE]\n\n"),
+    ])
+    .await;
+    let provider = OpenAiCompatibleProvider::with_policy(policy);
+    let (sender, _receiver) = tokio::sync::mpsc::channel(16);
+    let error = provider
+        .generate(request(&endpoint, 128), sender, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        novel_llm::LlmError::Unavailable { billed: true, .. }
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn cancellation_wins_over_a_slow_stream() {
+    let (endpoint, _calls) = serve_delayed_chunks(vec![
+        (
+            Duration::ZERO,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"甲\"}}]}\n\n",
+        ),
+        (Duration::from_millis(300), "data: [DONE]\n\n"),
+    ])
+    .await;
+    let provider = OpenAiCompatibleProvider::with_policy(streaming_policy());
+    let (sender, _receiver) = tokio::sync::mpsc::channel(16);
+    let cancel = CancellationToken::new();
+    let cancel_for_task = cancel.clone();
+    let task = tokio::spawn(async move {
+        provider
+            .generate(request(&endpoint, 128), sender, cancel_for_task)
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    cancel.cancel();
+    let error = task.await.unwrap().unwrap_err();
+    assert_eq!(error, novel_llm::LlmError::Cancelled);
+}
