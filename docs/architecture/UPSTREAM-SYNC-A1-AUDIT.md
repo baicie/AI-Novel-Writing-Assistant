@@ -72,7 +72,7 @@ fork 存在**两套 LLM 实现**，但桌面产品只跑 Rust 那套。
 | **Prompt 管理** | BOTH_DIFFERENT | fork 用 `crates/novel-prompt` 版本化资产；上游用模板工作台 |
 | **Token 与费用** | BOTH_DIFFERENT | fork 用 `RunContract.token_budget` 冻结；上游用 8192 安全钳制 |
 | **Director/Agent 编排** | BOTH_DIFFERENT | fork 用版本化 `production_plan`；上游用 `productionKernel`（52 文件） |
-| **工作流暂停、恢复与幂等** | FORK_ONLY（更强） | fork 有 9 种 `StopSignalKind`、attempt 状态机、`OpenRunHash` 13 字段 |
+| **工作流暂停、恢复与幂等** | BOTH_DIFFERENT | 写入侧 fork 更强（合同不可变/fence/租约）；读取侧有两个 S1 缺陷（见 §8.2） |
 | **章节规划和正文生成** | BOTH_DIFFERENT | 各自实现 |
 | **Reviewer 与 Quality Debt** | ALREADY_EQUIVALENT | fork 有 `quality_debt` 表与 fail-closed 审校 |
 | **人物、世界观、伏笔与记忆** | BOTH_DIFFERENT | fork 在 `novel-application/memory.rs` 重新实现 |
@@ -191,45 +191,159 @@ input_summary, started_at, finished_at,
 prompt_tokens, completion_tokens, estimated_cost_micros, status
 ```
 
-- **每次物理请求一条记录**：`crates/novel-application/src/worker.rs:2498-2533` 的 `invocation()` 构造，`record_invocation` 落库
-- **修复请求独立记账**：`bounded_repair` 有独立 `step_id`，失败路径也经 `record_usage_before_stop`（`worker.rs:2385-2401`）写入
-- **未知 usage 保留**：`TokenUsage { prompt_tokens: Option<u64>, completion_tokens: Option<u64> }`（`provider.rs:23-28`），`None` 就是未知，不会被写成 0
-- **调用耗时可直接算出**：`finished_at - started_at` 已存在，无需新字段
+- **未知 usage 保留为 NULL**：`TokenUsage` 用 `Option<u64>`，`None` 就是未知，不会写成 0。有测试专门锁死这一点（`crates/novel-storage-sqlite/tests/p11_recovery_process.rs:443-453`「unknown usage must not be recorded as a fake zero」）
+- **调用耗时可直接算出**：`finished_at - started_at` 已存在
+- **未知计费可追溯**：`workflow_step_attempt.phase='remote_started'` 能定位「发出去了但结果未知」的调用
 
-### 7.2 fork 缺失
+### 7.2 fork 的实际缺陷（比 §7.1 的乐观印象严重）
 
-| 能力 | 状态 | 依据 |
-|---|---|---|
-| 首 token 延迟（TTFT） | 缺 | 无字段，`sse.rs` 不记录首片时间 |
-| 失败原因分类落库 | 缺 | `status` 是自由字符串 |
-| 结构化模式记录 | 缺 | 无 `structuredMode` 字段 |
-| 调用链（chainId / parentInvocationId） | 缺 | 无字段 |
-| Prompt/Response 全文历史 | 缺 | 有意不存（见下） |
+审计深入后发现四处，均有代码证据：
 
-上游 `0026d0cd` 的 migration 新增 `durationMs`、`firstTokenMs`、`attemptNumber`、`chainId`、`parentInvocationId`、`structuredMode`，另有 `LlmInvocationPayload` 压缩载荷表。
+**（1）粒度是「一次步骤尝试」，不是「一次物理请求」。**
 
-### 7.3 判断
+写入点只有 4 处（draft 成功 / bounded_repair 成功 / 结构化步骤成功 / 失败前补记），全部是步骤级。
 
-- `durationMs` 不需要照搬：fork 已有起止时间，展示层算即可
-- 值得补：`firstTokenMs`、`structuredMode`、失败原因分类
-- **不应照搬**：`LlmInvocationPayload` 全文持久化。它会带来无限增长与敏感信息留存风险，fork 的 `structured_failure` 产物只保存失败原始输出已是更克制的做法
+**（2）修复调用的 usage 被合并进首次请求那一行。**
+
+`crates/novel-application/src/worker.rs:1618`：
+
+```rust
+accumulate_usage(&mut usage, &repair_response.usage);
+```
+
+修复请求有独立的 `request_id`（`worker.rs:1587`），但**从未落库**——最终只写一行，用首次请求的 id。成功时无法区分首发与修复各花了多少 token。
+
+**（3）`status` 硬编码为 `"succeeded"`。**
+
+`worker.rs:2530`：
+
+```rust
+status: "succeeded".into(),
+```
+
+即使经 `record_usage_before_stop` 的失败路径，也标成功。前端 `UsageLogTable` 的 status 列对 Rust 数据永远显示「调用完成」。
+
+**（4）传输失败不写行。**
+
+draft（`worker.rs:454-490`）、bounded_repair（`737-772`）、结构化（`1485-1526`）三处，超时/断流/429/5xx 都只 `mark_attempt_fenced(Interrupted)` 然后 pause，不写 `llm_invocation` 行。
+
+后果：超时（`Unavailable { billed: true }`）这类**可能已经计费**的调用，在用量页上完全看不见。
+
+**（5）两列死结构。**
+
+`estimated_cost_micros` 与 `usage_ledger` 表在 `migrations/0001_init.sql:190,194-201` 定义后**零读写**，容易被误读为「有费用估算」。
+
+### 7.3 上游设计
+
+`0026d0cd` 的 migration 新增 `durationMs`、`firstTokenMs`、`attemptNumber`、`chainId`、`parentInvocationId`、`structuredMode`，另有 `LlmInvocationPayload` 压缩载荷表。
+
+关键在 `compatibility/invocation.ts` 与 `observation.ts`：每次物理请求 `beginAttempt` 生成独立 `invocationId`，修复再开一个独立 parse scope 并用 `parentInvocationId` 链起来。
+
+### 7.4 判断
+
+**值得做（S1）：**
+
+1. 失败路径补写 invocation 行（`usage_status='unknown'`、token 为 NULL、`error_kind` 取 `LlmError` 变体）——这是成本最高的一件事：现在超时完全不可见
+2. `status` 去硬编码
+3. 修复调用拆成独立行（`chain_id` + `attempt_number` + `parent_invocation_id`）
+4. `first_token_ms`：需要改 `sse.rs` 让 `consume_sse` 返回 metrics
+
+**不需要：**
+
+- `durationMs` 不必新加列，`finished_at - started_at` 够用（但注意当前 `finished_at` 在结构化路径上包含本地校验时间，不是纯请求耗时）
+- `estimated_cost_micros` / `usage_ledger` 应删除或显式标注未启用
+
+**不应照搬：**
+
+- Prisma 迁移与 `DirectorLlmUsageRecord` 双写
+- `AsyncLocalStorage` 装饰 SDK 的机制（Rust 没有可补丁对象）
+- **`LlmInvocationPayload` 全文持久化**（默认关闭，且与 fork 的数据保护规则冲突）
+
+### 7.5 一个相邻问题：SQLite 无限增长
+
+fork 没有任何数据库保留/清理机制。增长点：
+
+- `workflow_artifact.payload_json` 存全量 context prompt（`worker.rs:2128`），**无长度上限**
+- `chapter_candidate.content` 每次 draft 与 bounded_repair 各存一份全文
+- `structured_failure` 的 raw 有 200k 上限（`worker.rs:2314`），是唯一有约束的
+
+上游按 `retentionDays` + `maxMb` 清理。fork 若引入载荷表，必须先设计保留策略。
 
 ## 8. 工作流恢复
 
 上游相关提交：`93a1c914`、`71b4fd6b`、`d7fbd2c1`。
 
-| 审查点 | fork 现状 | 判定 |
-|---|---|---|
-| 请求身份包含完整有效输入 | `OpenRunHash` 含 13 字段（`director.rs:572-587`） | FORK_ONLY（更严格） |
-| 冻结参数可被静默改变 | `RunContract` + `FrozenStepRoute` 存 endpoint | 否 |
-| 重试时预算漂移导致误冲突 | 哈希含 `token_budget`/`context_token_budget` | 已覆盖 |
-| Provider 结果未知导致重复计费 | 失败即 pause，不自动重试；`LlmError::Timeout` 明确不可重试（`error.rs:26-40`） | FORK_ONLY（更严格） |
-| 显式人工确认解除安全停点 | 9 种 `StopSignalKind`（`novel-domain/src/run.rs:66-76`） | 已具备 |
-| 已确认候选被后续 Run 覆盖 | attempt 状态机 `Started→RemoteStarted→CandidateSaved→Committed/Interrupted` | 已覆盖 |
-| 多进程租约、取消、恢复 | `workflow_lease` 测试覆盖 | 已具备 |
-| 质量债务阻塞不相关章节 | `quality_debt` 按章节作用域 | 已具备 |
+### 8.1 fork 明确更强（这些不要回退）
 
-**结论：工作流恢复领域 ALREADY_EQUIVALENT 偏 FORK_ONLY。** 上游修复的多数问题，fork 因为采用「失败即停、不自动重试」的更强契约而不存在。无需移植，但上游的回归场景值得转成 fork 的测试 fixture（列入 Backlog）。
+| 能力 | fork 依据 |
+|---|---|
+| 底层错误分类与计费安全 | `LlmError::Timeout` 不可重试、`Unavailable{billed}` 仅未计费可重试（`error.rs:26-40`） |
+| 失败即停、不自动重发 | 未知结果停在 `remote_started`，`decide()` 返回 `HoldInterrupted`（`recover.rs:104-116`） |
+| 租约与多进程接管 | version CAS + fence 校验，有真实 SIGKILL 回归（`p166_i_double_takeover`） |
+| 质量债务不阻塞其他章节 | 唯一键 `(run_id, issue_id)`，阻塞判定全按 `run_id` 过滤 |
+| 合同不可变 | `contract_json` 只在 `open_run` 插入，全仓无 UPDATE |
+| 安全停点不可被普通恢复绕过 | `PauseKind::Safety` 普通 resume 一律拒绝；质量停点走专用命令 + 债务全接受 + CAS |
+
+上游 `93a1c914` 修的四类「恢复被卡死」bug（请求摘要别名、RAG 禁用配置比对、验收二次校验、预算估算漂移）在 fork 中**结构上不存在**——fork 没有请求级快照、没有 RAG 冻结配置、没有预算预留台账。这批属于 `INCOMPATIBLE`，不移植。
+
+### 8.2 fork 自己的两个 S1 缺陷（与上游不同源）
+
+审计深入后发现，fork 在**读取侧**有上游同类问题：写入侧严格按 run 隔离，推进侧没有。
+
+**S1-1 —— 同一 `command_id` 携带不同编辑内容时被静默丢弃。**
+
+`crates/novel-application/src/director.rs:701-706`：
+
+```rust
+let request_hash = json_hash(&RunCommandHash {
+    run_id,
+    kind: "confirm_after_edit",
+    intent: expected_version.map(|_| "expected"),
+})?;
+```
+
+`RunCommandHash` 只有 `run_id`、`kind`、`intent` 三个字段（`director.rs:1262-1266`）——**不含 payload_json**。
+
+后果：同一 `command_id` 第二次携带不同正文时，`lookup_command` 认为哈希相同，直接返回 `replayed=true` 的旧结果。作者新编辑的内容**没有写入**，接口却返回成功。
+
+同类但较轻：`approve`/`reject`/`regenerate` 只记录「有无 expected_version」，不记录具体值（`director.rs:626-630`、`673-678`）。
+
+**S1-2 —— 取消后对同一章新开 Run 会卡在章节确认门。**
+
+`crates/novel-workflow/src/plan.rs:301-310` 的 `latest()`：
+
+```rust
+artifacts
+    .iter()
+    .filter(|a| a.artifact_type == artifact_type && a.scope == scope)
+    .max_by_key(|a| a.version)
+```
+
+**不区分 `run_id`**。而 worker 取的是全书产物：`self.runs.list_artifacts(&claimed.novel_id)`（`worker.rs:265`）。
+
+可达路径：Run A 在章节确认门暂停 → 取消 A → 同章开 Run B → B 的 `next_action` 看到 A 的 draft → `OpenGate` → `approve` 只更新 `run_id=B` 的产物（0 行）→ 控制流仍 `ResolveGate` → 下一 tick 又 `OpenGate`。**无限门循环**，唯一破环办法是 `confirm_after_edit`（插入属于 B 的产物），但 UI 不会引导。
+
+### 8.3 S2 清单（登记，不在本轮修）
+
+| 编号 | 问题 | 依据 |
+|---|---|---|
+| S2-a | `finalize_accepted` 硬编码只处理 `draft` 步骤，质量债恢复会给已 committed 的 `consistency_review` 打 accept 并多写一条 `chapter_draft` | `worker.rs:1051-1091` |
+| S2-b | `execute_commit` 在 `MissingCandidate` 时仍写 `status="confirmed"` 的 `chapter_commit`，单章 Run 会因此 Succeed | `worker.rs:1093-1135` |
+| S2-c | HTTP cancel 不取消在途模型请求（Tauri 两条都调） | `novel-http/src/routes/runs.rs:83-95` |
+| S2-d | `claim_next` 取候选 `LIMIT 8`，前 8 个不可领取时后续 Run 饥饿 | `workflow.rs:124-136` |
+| S2-e | `open_run` 重放哈希不覆盖 `credential_ref`/`step_routes`/`protocol`/`reasoning_effort` | `director.rs:1246-1258` |
+| S2-f | `RateLimit` 映射为 `StopSignalKind::Budget`，语义误导（实际可普通恢复） | `worker.rs:481-484` |
+| S2-g | 未知计费与普通 provider 失败共用 `provider_unavailable`，无机器可读标记 | `director.rs:1268-1284` |
+
+### 8.4 结论修正
+
+原先按「失败即停 + 强租约」判定工作流恢复 `FORK_ONLY`，**过于乐观**。准确判定是：
+
+- **写入侧**：FORK_ONLY（合同不可变、fence、租约接管）
+- **读取/推进侧**：有两个 S1 缺陷，且都属「静默错误」——一个丢数据，一个死循环
+- 上游 `71b4fd6b` 补的正是跨任务归属隔离，方向相同但实现不同（上游用 `productionUnitRun` 归属键）
+
+**建议**：S1-1 与 S1-2 应优先于本文件列出的多数 S1 后端项修复——它们是正确性问题，不是可观测性问题，且修复面小（哈希加字段 / `latest()` 加 run 过滤）。
 
 ## 9. 编辑器与产品功能
 
@@ -298,7 +412,16 @@ const hasExternalChange = incoming.updatedAt > draft.savedUpdatedAt
 |---|---|---|
 | 仓库历史泄露 3 个真实 API 密钥 | fork 自身，上游 `9ddbac86` 已修 | **吊销密钥 + 清理历史**（需仓库所有者执行） |
 
-### S1 优先同步
+### S1-A 正确性缺陷（优先于所有功能同步）
+
+这两项不是「上游有而 fork 没有」，是 fork 自身的静默错误，被发现于审计过程中。修复面都很小。
+
+| 项 | 问题 | 修复方向 |
+|---|---|---|
+| S1-1 | 同一 `command_id` 携带不同正文被静默丢弃，接口返回成功 | `RunCommandHash` 加入 `payload_json` 摘要 |
+| S1-2 | 取消后同章新开 Run 卡在章节确认门，无限 OpenGate | `latest()` 加 `run_id` 归属过滤，或 `approve` 更新 0 行时报 Conflict |
+
+### S1-B 优先同步
 
 | 项 | 上游 | Fork 落点 | 理由 |
 |---|---|---|---|
@@ -385,18 +508,32 @@ cargo clippy -p novel-application --lib -- -D warnings   通过
 
 ## 14. 下一轮建议
 
-1. 先处理 S0 密钥泄露（需所有者操作）
-2. 再做 S1 的 `error.rs` 失败分类携带 httpStatus —— 它是能力档案正确性的前提
-3. 然后端点级能力档案（含 host 进身份键、改 baseURL 失效旧能力）
-4. 最后才是原生结构化传输与请求预算
+### 第一优先：正确性（不依赖上游）
+
+1. **S1-1** `RunCommandHash` 加入 payload 摘要 —— 现在会静默丢失作者编辑
+2. **S1-2** `latest()` 加 `run_id` 归属过滤 —— 现在取消后重开同章会死循环
+
+这两项修复面都小（一个哈希加字段、一个过滤加条件），但都是「静默错误」：一个丢数据、一个假成功。应排在所有后端同步之前。
+
+### 第二优先：S0
+
+3. 处理密钥泄露（需所有者操作）
+
+### 第三优先：后端同步
+
+4. `error.rs` 失败分类携带 httpStatus —— 能力档案正确性的前提
+5. 失败路径补写 `llm_invocation` 行（现在超时完全不可见）
+6. 端点级能力档案（host 进身份键、改 baseURL 失效旧能力）
+7. 生产级请求预算
+8. 原生结构化传输
 
 顺序理由：没有可靠的失败分类，能力档案会把瞬时故障记成「不支持」；没有请求预算，多模式链会把单步请求数放大 3–4 倍。
 
-编辑器侧（可与后端同步并行，互不冲突）：
+### 与后端并行：编辑器
 
-1. **A1 段落级补丁**——当前每次 AI 写回都重建编辑器实例，光标、选区、撤销历史全丢。这是长篇创作里最高频的摩擦
-2. **C3 `hasExternalChange` 加内容比对**——一行修正，消除「自己保存后也提示有新版本」的误报
+1. **A1 段落级补丁**——当前每次 AI 写回都重建编辑器实例，光标、选区、撤销历史全丢
+2. **C3 `hasExternalChange` 加内容比对**——一行修正，消除误报
 3. A2/A7/A8 布局与浮动条定位
 4. Ghost Text、诊断段落标记等数据源补齐后再做
 
-A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑器实例不重建」，反过来做会在重建时丢状态，体验更差。
+A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑器实例不重建」。
