@@ -260,7 +260,48 @@ Reviewer 断言一个**始终存在**的要素缺失。
 **未做**：没有把修订稿回写进产品数据库或候选表；它是一份独立文本，供你对照取舍。
 如果你认可，可以在章节编辑器里直接用，或让我把差异整理成逐段采纳清单。
 
-## 7. 未做的事
+> 续：已按作者要求写回候选，见第 7 节。
+
+## 7. 写回候选
+
+修订稿已写回 M1 验收 Run 的候选表，**没有覆盖原始候选**。
+
+| 项 | 值 |
+| --- | --- |
+| 数据目录 | `/tmp/beta-a1-m1/real`（验收隔离目录，不是正式作品库） |
+| 备份 | `/tmp/beta-a2-m1/backup/novel-before-candidate-writeback.sqlite`（`PRAGMA integrity_check` = ok，写回前已确认含 draft 与 bounded_repair 两条候选） |
+| 新候选 | `b6c41c1e-ac14-4544-866b-c5a6842c5c32`，`step_id='author_edit'`，2,901 字符 |
+| sha256 | `de5c8eb7088743444cccc243485d38a3619707ea690b6b58f9fddac57b2d7607`（写回后重算一致） |
+| 事件 | `seq=16`，`checkpoint_saved` / `author_edit` |
+| 回滚 | `bash /tmp/beta-a2-m1/restore-candidate.sh` |
+
+### 为什么用「新增」而不是「覆盖」
+
+产品的正式路径 `confirm_candidate_after_edit` 也是**插入一条 `step_id='author_edit'` 的新候选**
+（`crates/novel-storage-sqlite/src/workflow.rs` 1169–1294 行），而不是改写旧记录。写回沿用了
+同样的字段语义，因此：
+
+- `draft`（2,789 字）与 `bounded_repair`（2,810 字）两条原始候选保持原样，M1 的验收证据仍可
+  复核，`59183a5e` 的 sha 前后一致；
+- 因为 `latest_candidate` 按 `updated_at DESC, rowid DESC` 取，新候选自然成为最新候选；
+- 若之后在这个 Run 上执行「确认」，提升进章节正文的会是修订稿。
+
+### 明确没有做的事
+
+- **没有** resolve gate：`workflow_control` 仍是 `waiting_approval` / version 21，
+  `chapter_approval` 仍是 `draft`。写回候选不等于发布正文。
+- **没有** 写章节正文：`chapter.official_revision_id` 仍为空，`chapter_revision` 仍为 0 条。
+- **没有** 改动任何 artifact、审校结果或质量债务。
+- 写入脚本自己带基线守卫（最新候选 ID 与 sha 必须匹配），第一次调用时因为实际 ID 与我传入的
+  不一致而被拒绝，没有产生任何写入。
+
+### 一处偏差说明
+
+产品路径会在同一个事务里追加一条 `user_edited` 的 `chapter_approval` artifact 并 resolve gate；
+本次只做了「写入候选 + 记录事件」，没有做后两步，因为作者只要求写回候选。若之后要正式确认，
+建议直接在产品界面里点确认，让 gate、artifact 与章节正文由产品自己走完整流程。
+
+## 8. 未做的事
 
 - 未在真实产品界面中阅读（人工 GUI 验收仍为 `NOT_RUN`）。
 - 未做 M2–M10 评测。

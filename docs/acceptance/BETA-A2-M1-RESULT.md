@@ -8,6 +8,7 @@
 | M1 语义检查（授权代理阅读） | **PASS，待作者本人阅读评分** |
 | 失败路径探针 | **PASS**（Reviewer 识别 → 一次修复 → 复验收敛） |
 | 候选正文代理审阅 | **4/5，建议定向修改后定稿**；发现主样本的「一次修复收敛」是假收敛（见 2.3 与 [正文审阅](./BETA-A2-M1-CHAPTER-REVIEW.md)） |
+| 作者修订稿写回候选 | **已写回**（新增 `author_edit` 候选，原始候选保留，gate 未 resolve；见正文审阅第 7 节） |
 | M1 最终裁决 | **M1_PASS_PENDING_AUTHOR_REVIEW** |
 | MANUAL_GUI | **NOT_RUN** |
 | PUBLIC_BETA | **NOT_READY**（人工 GUI 未执行） |

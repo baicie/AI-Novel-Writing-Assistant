@@ -143,6 +143,18 @@ BIZ_NOVEL_DATA_DIR=/tmp/beta-a2-m1/real M1_AUTHORIZED=1 M1_PROBE=1 M1_RUN_ID=<ru
 
 `7a7829ab` 不构成 M1 结果。重跑前已把执行器超时放宽到 300 秒（见「超时」）。
 
+## 6.2 作者改稿后的写回
+
+对候选做作者修订后，可以把它写回候选表而不覆盖原始候选：
+
+```bash
+python3 -I scripts/acceptance/writeback-author-edit-candidate.py <db> <run_id> <修订稿.md> <新候选 id> <当前最新候选 id> <当前最新候选 sha256>
+```
+
+它按产品 `confirm_candidate_after_edit` 的字段语义插入一条 `step_id='author_edit'` 的候选，
+原始 draft / bounded_repair 保持不变，且不 resolve gate、不写章节正文。写入前必须先备份数据库，
+脚本会用「最新候选 id + sha256」守卫拒绝基线不符的写入。
+
 ## 7. 产物与记录
 
 - 产物：`<数据目录>/m1-<runId>.json`，保留 Run 状态、全部产物、ContextTrace、usage、
