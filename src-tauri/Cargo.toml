@@ -38,6 +38,7 @@ tauri-plugin-updater = "2"
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["full"] }
+novel-testkit.workspace = true
 
 [features]
 default = []

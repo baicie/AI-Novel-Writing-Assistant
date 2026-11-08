@@ -2,144 +2,162 @@
 
 ## 结论
 
-- **BUILD：FAIL**（根因已定位并修复；Linux Bundle 未实际构建成功，需新 HEAD CI 确认）
-- **PLANNER_CONTRACT：PARTIAL**（Beta-A2 已合并的契约未被改动；M1 执行器仍未固定 v2/v3）
-- **M1_RUNNER_SAFETY：BLOCKED**（无请求前调用预算，无强制费用上限）
-- **ENGINEERING：NEEDS_FIX**
+- **BUILD：PASS**（Linux x64 与 macOS arm64 Bundle 在修复提交 `bd240f34` 上实际构建通过；
+  本轮后续提交只改 M1 执行器与测试，最终 HEAD 的 CI 见 PR）
+- **PLANNER_CONTRACT：PARTIAL**（M1 执行器已固定并使用 story-macro-v2 + chapter-list-v3；
+  作者章节目标字段仍是数据模型缺口）
+- **M1_RUNNER_SAFETY：PASS**（请求前调用预算已强制；人民币费用上限无法本地执行，真实模式
+  fail-closed 并要求供应商侧硬额度）
+- **ENGINEERING：READY_FOR_REVIEW**
 - **M1：RETEST_PENDING**
 - **MANUAL_GUI：NOT_RUN**
 - **PUBLIC_BETA：NOT_READY**
 
-## 0. 时间与范围
-
-任务硬截止为 2026-11-08 12:00（UTC+8）。本轮开始执行时为 11:55，实际可开发时间不足
-5 分钟。按优先级只完成 Phase 1 的最小修复与回归门禁；Phase 2–5 未能开始，以下逐项说明
-现状，不把未执行的工作写成通过。
-
-## 1. Phase 1：Tauri Bundle 构建回归（已修复，待 CI 验证）
+## 1. 构建回归（Phase 1）
 
 ### 根因
 
-`src-tauri` 包在加入 `src/bin/m1_run.rs` 后包含两个 binary target：
-
-- `novel-desktop`（`src/main.rs`，正式桌面应用）
-- `m1_run`（`src/bin/m1_run.rs`，内部 M1 验收执行器）
-
-`src-tauri/Cargo.toml` 没有 `package.default-run`。Tauri CLI 无法判断打包入口，Linux
-Bundle 失败于 `failed to find main binary, make sure you have a package > default-run in
-the Cargo.toml file`（运行 42441799638、42441948166）。
+`src-tauri` 包在加入 `src/bin/m1_run.rs` 后包含两个 binary target：`novel-desktop`
+（`src/main.rs`）与 `m1_run`（验收执行器）。`Cargo.toml` 没有 `package.default-run`，
+Tauri CLI 无法确定打包入口，Linux Bundle 失败于 `failed to find main binary`（运行
+42441799638、42441948166）。
 
 ### 修复
 
-`src-tauri/Cargo.toml` 的 `[package]` 增加：
+- `src-tauri/Cargo.toml`：`[package] default-run = "novel-desktop"`。
+- `src-tauri/tests/main_binary_contract.rs`：双 binary 回归门禁。
+- 未改产品名、Bundle 标识、安装路径、应用数据目录与 Release 流程；`--bin m1_run`
+  显式调用方式不变。
 
-```toml
-default-run = "novel-desktop"
-```
-
-不改产品名、Bundle 标识、安装路径、应用数据目录与 Release 流程；不引入 Cargo feature，
-`cargo run --bin m1_run` / `cargo build --bin m1_run` 的显式调用方式保持不变。
-
-### 双 binary 回归门禁
-
-新增 `src-tauri/tests/main_binary_contract.rs`：
-
-- 断言 `package.default-run` 指向 `novel-desktop`；
-- 断言 `src/main.rs` 仍是桌面入口；
-- 断言 `src/bin/m1_run.rs` 仍以显式 target 存在。
-
-移除 `default-run` 或误把 M1 执行器设为默认入口时，该测试直接失败。
-
-### 本轮实际验证
+### 验证
 
 | 检查 | 结果 |
 | --- | --- |
 | `cargo check -p novel-desktop` | PASS |
 | `cargo check -p novel-desktop --bin m1_run` | PASS |
-| `cargo test -p novel-desktop --test main_binary_contract` | PASS（1/1） |
-| `cargo fmt --all --check` | PASS |
-| Tauri Linux Bundle | **NOT_RUN**（本机 macOS，无法执行 Linux 打包） |
-| Tauri macOS Bundle | **NOT_RUN**（时间不足） |
+| `cargo test -p novel-desktop` | PASS（40 lib + 13 m1_run + 门禁用例） |
+| CI：Bundle 构建检查（Linux x64） | **PASS**（9m56s，运行 42445055424） |
+| CI：Bundle 构建检查（macOS arm64） | **PASS**（6m22s） |
+| CI：Rust 格式 / Clippy / 单测 | PASS（7m27s） |
+| CI：rust-and-desktop-contract | PASS（5m46s） |
+| CI：前端类型检查与单测 | PASS（57s） |
 
-按任务要求“只有实际构建成功才能判定此问题修复”，BUILD 保持 **FAIL**，直到新 HEAD 的
-CI Linux Bundle 为 PASS。本轮不把源码修复等同于构建通过。
+`bd240f34` 是包含本修复的 head；本轮后续提交不触碰打包入口与 release 依赖图，最终 HEAD
+的 CI 结果以 PR #28 页面为准，不用历史 commit 替代。
 
-## 2. Phase 2：M1 执行器 Planner 版本未固定（未完成）
+## 2. M1 执行器 Planner 版本（Phase 2）
 
-`src-tauri/src/bin/m1_run.rs` 的 `prompt_versions` 仍只包含：
+`m1_run.rs` 现在通过 `m1_prompt_versions()` 固定（`src-tauri/src/bin/m1_run.rs`）：
 
-- `chapter_draft` → `chapter-draft-v3`
-- `chapter_repair` → `chapter-repair-v2`
+| 步骤 | 版本 |
+| --- | --- |
+| story_macro | `story-macro-v2` |
+| chapter_list | `chapter-list-v3` |
+| chapter_draft | `chapter-draft-v3` |
+| chapter_repair | `chapter-repair-v2` |
 
-`story_macro` / `chapter_list` 未显式固定，真实运行时可能走旧 Planner，无法验证 Beta-A2
-契约。任务要求的脱敏版本清单、RunContract 冻结断言、模板级验证与 7 项 Mock 测试均未实现。
+- 运行前打印脱敏清单 `M1_PROMPTS story_macro=… chapter_list=… chapter_draft=… chapter_repair=…`，
+  不含 endpoint、凭据或提示词正文。
+- `open_run` 的成对校验保证只固定一半时拒绝；旧 Run 的 v1 契约不受影响。
+- 仓库里已有 `RunContract.source_versions` 冻结与 `story_macro`/`chapter_list` 版本写入，
+  本轮不改其实现。
 
-结论：真实 M1 运行路径当前**不满足**验收条件。
+### 失败先行/契约测试（`src-tauri/src/bin/m1_run.rs`，13 项）
 
-## 3. Phase 3：费用与调用预算门禁（未完成，BLOCKED）
+| 测试 | 证明 |
+| --- | --- |
+| `prompt_versions_pin_the_new_planner_contract` | 四项版本被固定，清单脱敏 |
+| `planner_templates_load` | v2/v3 模板真实存在 |
+| `m1_run_uses_v2_prompts_and_writer_gets_source_event` | Mock 全链路：Worker 实际使用的 story/chapter 模板为 v2/v3，Writer 收到 `来源事件：ch1-event-1` |
+| `missing_key_events_stops_the_m1_run` | v2 契约下缺 keyEvents → DataIntegrity 暂停，Writer 未启动 |
+| `rewritten_canonical_event_stops_the_m1_run` | 章节计划改写规范事件 → 暂停 |
+| `legacy_v1_prompts_stay_compatible` | 不固定新版本的历史调用仍可跑通 |
 
-现状（未改代码）：
+“RunContract 真正冻结版本”通过行为验证：只有合同携带 `story_macro=story-macro-v2` 时，
+Worker 才会执行严格 keyEvents 校验；缺 keyEvents 的 Mock 输出被暂停，证明合同确实带上了
+v2，而不是仅配置字符串。
 
-- `M1_MAX_COST_CNY` 只被解析、校验与展示，没有扣减或预留逻辑。
-- `M1_MAX_CALLS` 在一次 `worker.tick()` 结束后检查；一次 tick 内可能发生结构化修复等多次
-  Provider 请求，因此不是请求级上限。
-- 未知 usage 与“超时但可能已计费”没有请求前预算保护。
+## 3. M1 费用与调用预算门禁（Phase 3）
 
-结论：不存在可强制执行的人民币费用硬上限，M1_RUNNER_SAFETY 判 **BLOCKED**。在实现
-请求前预算检查与逐次调用记账之前，不得启用真实付费运行；真实运行必须依赖供应商侧硬额度，
-或在本地 fail-closed。
+`src-tauri/src/bin/m1_run/budget.rs` 新增 `CallBudget` + `BudgetedLlm`（包裹真实 Provider）：
 
-改造建议（不搭建新计费系统）：
+- **请求前检查**：每次 `generate_with_protocol` / `generate` 先占用一次额度；额度用尽时
+  返回 `LlmError::BudgetExceeded`，请求不会到达 Provider。
+- **逐次占用**：正文生成、结构化调用与结构化修复、探针调用都走同一入口，各自占用预算。
+- **未知 usage**：`TokenUsage` 任一字段缺失即记录 `unknown_usage`，不推断零成本。
+- **失败与取消**：超时、取消等错误仍占用一次调用并标记 usage 未知（可能已计费）。
+- **输出**：`M1_BUDGET_GUARD` 打印上限与费用门禁；`M1_RESULT` 打印
+  `requests_started` 与 `unknown_usage`。
 
-1. 在 Provider 请求统一入口检查剩余调用预算，超限即拒绝并记录阻断原因。
-2. 每次 Provider 响应单独记一条 Invocation；结构化修复单独占用一次预算。
-3. 未知 usage 保留 `billed_unknown`，不得按零成本推断。
-4. 费用上限仅在“可信定价 + 请求前预留 + 事后对账”三者同时成立时声明可执行。
+### 费用上限
 
-## 4. Phase 4：PR #27 合并后正确性复核（未完成）
+本地没有可信定价与请求前预留，不能强制执行人民币上限。因此：
 
-时间不足，未完成对 `obligations.rs`、`worker_validation.rs`、`worker/context_budget.rs`、
-`context.rs`、`director.rs`、workflow plan/recover、SQLite workflow repository 与 Prompt
-Compiler 的系统复核。PR #27 合并后的代码未在本轮改动，Beta-A2 的冻结与契约测试仍以
-`a2` 分支已合并的 631 项 workspace 测试为准；本轮没有新增反例证据。
+- 真实模式必须设置 `M1_COST_GUARD=provider_side`，确认供应商侧已设置硬额度；
+- 未设置时 **fail-closed**，`M1_REFUSED` 输出阻断原因与改造建议；
+- `M1_MAX_COST_CNY` 保留为记录值，明确标注 `local_cost_enforcement=disabled`，不当成
+  可执行上限；
+- Dry-run 不调用模型，不受该限制。
 
-## 5. Phase 5：回归与 CI（部分完成）
+### 预算测试
 
-本轮执行：`cargo check`（桌面与 m1_run）、`main_binary_contract` 测试、`cargo fmt`。
-未执行：clippy 全量、novel-application / novel-prompt 测试、Run freeze 测试、Client
-typecheck/test、Native E2E——本轮只改了 Tauri manifest 与一个测试文件。
+`single_request_counts_once`、`structured_call_and_repair_each_consume_budget`、
+`call_limit_blocks_before_the_request_is_sent`（拒绝时 inner provider 调用数不增加）、
+`missing_usage_is_recorded_as_unknown`、`provider_timeout_still_consumes_the_call_and_marks_usage_unknown`、
+`cancelled_request_still_consumes_the_call`、`real_mode_requires_a_provider_side_cost_guard`。
 
-CI 状态：
+## 4. PR #27 合并后复核（Phase 4）
 
-- beta `14e7944c`：**FAIL**（Linux Bundle，运行 42441799638、42441948166）。
-- 本修复的新 HEAD：见 Draft PR 页面；本轮不以历史 commit 的成功替代新 HEAD 验证。
+定向复核以下实现，未发现可复现的新 P0/P1：
 
-## 6. Phase 6：Beta 验收准备
+- **Planner 契约**：story-macro-v2 缺 keyEvents、空数组、全 advisory → fail-closed；hard
+  不能降级；sourceEventId 与规范事件一致；旧产物宽松读取；新入口显式固定 v2/v3。
+- **Run 冻结**：`open_run` 快照 + `choose_run_artifact`（本 Run 产物 → 冻结版本 → 旧合同
+  最新非 stale）；缺冻结版本 fail-closed；历史 Run 的空冻结表保持旧语义；作者更新后新建
+  Run 快照最新版本，旧 Run 不受影响。集成测试与负向对照见 `p17_4_10_run_freeze.rs`。
+- **Context**：结构化预算不产生截断 JSON，keyEvents 保留，未来章节义务不进入当前上下文，
+  无法满足必需预算时暂停。
+- **已记录但不可复现**：`target_plan_from_artifacts` 对冻结版本仍过滤 stale，而
+  `choose_run_artifact` 接受冻结的 stale 版本。仓库只在 gate reject/regenerate 时把**本
+  Run** 的 draft 产物标记 stale，作者保存新计划不会把旧版本标 stale，因此当前无法构造
+  “context 通过、审校失败”的实际场景。按“只修复实际复现的 P0/P1”，本轮不改。
 
-- M1：`RETEST_PENDING`。
-- M2–M10：`NOT_RUN`。
-- 人工 GUI：`NOT_RUN`，沿用既有验收流程，本轮不新建冗余文档。
-- 本轮未调用任何真实模型，未使用任何 Key（包括此前暴露过的 Key）。
+## 5. 回归（Phase 5）
 
-## 7. 重新授权执行 M1 的工程条件
+| 检查 | 结果 |
+| --- | --- |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo clippy --workspace --exclude novel-http --lib -- -D warnings` | PASS |
+| `cargo clippy -p novel-desktop --all-targets -- -D warnings` | PASS |
+| `cargo test -p novel-desktop` | 40 lib + 13 runner + 门禁用例 PASS |
+| `cargo test -p novel-application` | PASS |
+| `cargo test --workspace --exclude novel-http` | **645 passed，0 failed** |
+| Client typecheck / test | NOT_RUN（本轮未改客户端） |
+| Native E2E | NOT_RUN（本轮未改桌面运行路径；manifest 与验收 bin 不参与 E2E 场景） |
+| Tauri Bundle | 本机 NOT_RUN；CI 在 `bd240f34` 上 Linux/macOS Bundle PASS |
 
-**当前不满足。** 需要同时具备：
+模块拆分：`m1_run.rs` 692 行、`m1_run/budget.rs` 135 行、`m1_run/tests.rs` 660 行，均在
+1,200 行建议阈值内；测试通过 `#[path = "m1_run/tests.rs"]` 引入，不新增 binary target。
 
-1. 新 HEAD 的 CI Linux Bundle PASS（本修复合入并通过）；
-2. M1 执行器固定 `story-macro-v2` + `chapter-list-v3`，并输出脱敏版本清单；
-3. 请求前调用预算与未知计费处理到位，费用上限真实可执行或明确 fail-closed；
-4. 本轮单独的模型、调用上限、费用控制与安全凭据授权。
+## 6. 重新授权执行 M1 的工程条件
 
-此前任一次 M1 授权不延续到下一次。
+**工程侧已满足**（构建、Planner 版本固定、请求前调用预算、费用 fail-closed），但真实运行
+仍需本轮**单独授权**：确认模型、调用次数上限、供应商侧费用硬额度与安全凭据，并设置
+`M1_AUTHORIZED=1`、`M1_MAX_CALLS`、`M1_MAX_COST_CNY`、`M1_COST_GUARD=provider_side`。
+此前任何一次授权不延续。
 
-## 8. 尚未完成的 P1/P2
+M1 仍是 `RETEST_PENDING`；M2–M10 `NOT_RUN`；人工 GUI `NOT_RUN`。
 
-- **P1**：M1 执行器 Planner 版本固定与 Mock 验证（Phase 2）。
-- **P1**：请求前调用预算、费用上限与未知计费（Phase 3）。
-- **P1/P2**：Phase 4 复核清单。
-- **P2**：Phase 5 的完整回归与 Native E2E。
+## 7. 尚未完成的 P1/P2
 
-## 9. 修复位置
+- **P1（数据模型）**：作者当前章节目标没有持久化字段（Phase C 缺口，未在本轮扩大范围）。
+- **P2**：本地费用上限不可执行，只能依赖供应商侧硬额度；如后续引入可信定价，可加请求前
+  预留与事后对账。
+- **P2**：`worker.rs` 仍超过 1,300 行硬阈值。
+- **P2**：完整 Native E2E 未重跑（与本轮改动无交集）。
 
-- `src-tauri/Cargo.toml`：`[package] default-run = "novel-desktop"`。
-- `src-tauri/tests/main_binary_contract.rs`：双 binary 回归门禁。
+## 8. 本轮约束遵守情况
+
+- 未修改 `main`，未 force push，未自动合并，未创建 Tag/Release。
+- 未调用真实付费模型，未使用任何 Key（含此前暴露过的 Key）。
+- 未进入 P17.5。
