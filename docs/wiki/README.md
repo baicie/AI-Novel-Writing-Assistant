@@ -31,6 +31,7 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 - [章节生产链路](./workflows/chapter-production-chain.md)
 - [义务违反的缺席断言需要可证伪](./workflows/obligation-absence-assertions.md)
 - [小说 AI 用量与调用日志边界](./workflows/novel-ai-usage.md)
+- [LLM 物理调用计费可追溯性](./workflows/llm-invocation-accounting.md)
 - [读者体验合同](./workflows/reader-experience-contract.md)
 - [Payoff Ledger 来源与同步合同](./workflows/payoff-ledger-contract.md)
 - [角色资源账本工作流](./workflows/character-resource-ledger.md)
