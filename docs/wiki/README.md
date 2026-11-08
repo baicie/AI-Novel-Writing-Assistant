@@ -55,6 +55,7 @@ Wiki 不记录单次提交改了什么，也不替代 release notes。它只记�
 ### Debugging
 
 - [重复故障模式与排查路径](./debugging/recurring-failure-modes.md)
+- [Provider 整包超时与流式中断](./debugging/provider-request-timeout.md)
 - [数据库 Schema 与迁移漂移](./debugging/database-migration-drift.md)
 - [服务端测试的进程与数据库隔离](./debugging/server-test-isolation.md)
 

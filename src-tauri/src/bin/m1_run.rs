@@ -20,7 +20,7 @@ use novel_application::{
     ModelSecrets, NoFault, OpenRunInput, PortError, Runtime, RuntimeDeps, SystemClock, TickOutcome,
     UuidIds,
 };
-use novel_llm::ProtocolRouterProvider;
+use novel_llm::{ProtocolRouterProvider, ProviderPolicy};
 use novel_platform::{OsSecretStore, SecretStore};
 use novel_storage_sqlite::{MODEL_SECRET_REF, SqliteKernel};
 
@@ -37,6 +37,24 @@ fn m1_prompt_versions() -> BTreeMap<String, String> {
     prompts.insert("chapter_draft".into(), "chapter-draft-v3".into());
     prompts.insert("chapter_repair".into(), "chapter-repair-v2".into());
     prompts
+}
+
+/// M1 执行器的 Provider 策略。
+///
+/// 产品默认的 120 秒是整包总超时（含响应体），真实模型写结构化产物时可能在流式返回
+/// 途中被切断。验收执行器单独放宽到 300 秒，仍可用 `M1_TIMEOUT_SECS` 覆盖。
+/// `max_attempts=1` 让每个调用预算单位只对应一次真实请求，避免 Provider 内部重试
+/// 绕过调用上限。
+fn m1_provider_policy() -> ProviderPolicy {
+    let timeout_secs = env("M1_TIMEOUT_SECS")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value >= 30)
+        .unwrap_or(300);
+    ProviderPolicy {
+        timeout: std::time::Duration::from_secs(timeout_secs),
+        max_attempts: 1,
+        ..ProviderPolicy::default()
+    }
 }
 
 /// 脱敏版本清单：只有版本名，不含 endpoint、凭据或提示词正文。
@@ -228,7 +246,9 @@ async fn run() -> Result<(), String> {
         lookups: kernel.clone(),
         task_center: kernel.clone(),
         llm: Arc::new(BudgetedLlm::new(
-            Arc::new(ProtocolRouterProvider::new()),
+            Arc::new(ProtocolRouterProvider::with_openai_policy(
+                m1_provider_policy(),
+            )),
             budget.clone(),
         )),
         clock: Arc::new(SystemClock),
@@ -511,7 +531,9 @@ async fn probe_run() -> Result<(), String> {
         lookups: kernel.clone(),
         task_center: kernel.clone(),
         llm: Arc::new(BudgetedLlm::new(
-            Arc::new(ProtocolRouterProvider::new()),
+            Arc::new(ProtocolRouterProvider::with_openai_policy(
+                m1_provider_policy(),
+            )),
             budget.clone(),
         )),
         clock: Arc::new(SystemClock),
@@ -529,7 +551,12 @@ async fn probe_run() -> Result<(), String> {
         .await
         .map_err(|error| format!("读取 Run 详情失败：{error}"))?;
     let artifacts = detail.artifacts;
-    let llm = BudgetedLlm::new(Arc::new(ProtocolRouterProvider::new()), budget.clone());
+    let llm = BudgetedLlm::new(
+        Arc::new(ProtocolRouterProvider::with_openai_policy(
+            m1_provider_policy(),
+        )),
+        budget.clone(),
+    );
     let context = artifacts
         .iter()
         .filter(|artifact| artifact.artifact_type == "context")

@@ -8,6 +8,7 @@ use crate::error::LlmError;
 use crate::ollama::OllamaProvider;
 use crate::provider::{
     LlmProvider, LlmRequest, LlmResponse, OpenAiCompatibleProvider, ProviderCapabilities,
+    ProviderPolicy,
 };
 
 pub struct ProtocolRouterProvider {
@@ -25,6 +26,15 @@ impl ProtocolRouterProvider {
     pub fn new() -> Self {
         Self {
             openai: OpenAiCompatibleProvider::new(),
+            ollama: OllamaProvider::new(),
+        }
+    }
+
+    /// 用显式策略覆盖 OpenAI 兼容通道的超时与重试；Ollama 通道保持自身默认。
+    /// 供本地验收执行器等需要更长整包超时的调用方使用，不改变产品默认。
+    pub fn with_openai_policy(policy: ProviderPolicy) -> Self {
+        Self {
+            openai: OpenAiCompatibleProvider::with_policy(policy),
             ollama: OllamaProvider::new(),
         }
     }

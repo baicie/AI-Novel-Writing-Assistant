@@ -15,7 +15,6 @@
 发布裁决仍以 [BETA-A2-R2-RELEASE-BLOCKERS.md](./BETA-A2-R2-RELEASE-BLOCKERS.md) 为准。
 
 ## 1. 授权清单（缺一项不得运行）
-
 真实模式会调用付费模型。以下各项必须由作者确认后才继续：
 
 | 项 | 说明 |
@@ -108,6 +107,16 @@ BIZ_NOVEL_DATA_DIR=/tmp/beta-a2-m1/real M1_AUTHORIZED=1 M1_MAX_CALLS=10 M1_MAX_C
 - `requests_started` 不超过 `M1_MAX_CALLS`；`unknown_usage` 大于 0 时说明有调用没能拿到
   usage，按“可能已计费”记录。
 
+### 超时
+
+执行器把 Provider 整包超时放宽到 **300 秒**，可用 `M1_TIMEOUT_SECS` 覆盖（最小 30）。
+产品默认仍是 120 秒，不受影响。执行器同时把 `max_attempts` 固定为 1，保证一次预算单位
+只对应一次真实请求。
+
+出现 `pause_signal=provider_unavailable` / 「模型流在返回中途断开」时，先看失败时刻与
+`M1_STARTED` 的差值：正好等于超时值说明是本地切断，不是鉴权或路径问题，按
+[Provider 整包超时与流式中断](../wiki/debugging/provider-request-timeout.md) 排查。
+
 执行器停在最终确认门，不会把候选提升为正式正文。
 
 ## 6. 失败路径探针（可选，3 次调用）
@@ -121,6 +130,14 @@ BIZ_NOVEL_DATA_DIR=/tmp/beta-a2-m1/real M1_AUTHORIZED=1 M1_PROBE=1 M1_RUN_ID=<ru
 
 预期：`M1_PROBE_REVIEW reviewer_cites_req1=true` → `M1_PROBE_REPAIR nonempty=true` →
 `M1_PROBE_REREVIEW issues=0` → `M1_READY_FOR_AUTHOR_REVIEW`。
+
+## 6.1 已有尝试记录
+
+| Run | 时间 | 结果 | 结论 |
+| --- | --- | --- | --- |
+| `7a7829ab-26b1-4066-916e-3d95585559bd` | 2026-11-08 17:26 | `paused` / `provider_unavailable`，`story_macro` 首次调用 | 与 `M1_STARTED` 相差正好 120 秒，是产品默认整包超时切断已开始的流；只有 `novel_seed` 产物，0 次完成调用，1 次请求可能已计费 |
+
+该次不构成 M1 结果。重跑前已把执行器超时放宽到 300 秒（见「超时」）。
 
 ## 7. 产物与记录
 
