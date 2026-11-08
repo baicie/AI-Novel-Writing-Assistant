@@ -293,7 +293,7 @@ Fork 对应：`client/src/pages/novels/components/chapterEditor/` 已有自己�
 
 ## 13. 同步后的潜在冲突
 
-1. **Beta-A3 工作区**：本轮分支基于 `origin/beta`，Beta-A3 在其上还有 4 个提交（含 reviewer 与桌面验收改动）。`worker.rs` 是双方都可能触碰的热点文件，合并时需按 hunk 复核。
+1. **Beta-A3 工作区**：本轮分支基于 `origin/beta`。审计期间 Beta-A3 从 `7d8e3a00` 前进到 `8e8486a3`，新增内容只有 `docs/acceptance/BETA-A3-REVIEW-AND-DESKTOP-VALIDATION.md`。实测与本 PR 的文件集**交集为空**，当前无冲突。但 Beta-A3 仍在活跃开发，`worker.rs` 是双方都可能触碰的热点文件，合并前需重新计算一次交集。
 2. **`RunUsageView` 是 IPC 契约**：新增字段向后兼容（旧客户端忽略未知字段），但若有测试对 `usage` 做严格对象比较需要同步更新——本轮已更新 `p8_director_loop` 与 `workflow_lease`。
 3. **迁移编号**：0028 之后若有并行分支新增迁移，需按序重新编号。
 4. **`usage.calls` 语义变化**：从"步骤数"变为"物理调用数"，含修复与失败请求。若后续有报表按 `calls` 推断步骤数，需要同时看 `step_id`。
@@ -309,7 +309,7 @@ WORKFLOW_RECOVERY:     ALREADY_EQUIVALENT
 EDITOR_UX:             DEFER
 CODE_MIGRATION:        DONE
 PR:                    Draft PR（见提交说明）
-BETA_A3_INTERFERENCE:  NONE（独立 worktree + 独立分支，未触碰 Beta-A3 与 main）
+BETA_A3_INTERFERENCE:  NONE（独立 worktree + 独立分支；实测文件交集为空，未触碰 Beta-A3 与 main）
 ```
 
 ## 15. 七问七答
