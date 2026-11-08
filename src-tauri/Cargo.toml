@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 description = "Biz Novel Studio local kernel"
+# 桌面主程序；src/bin/m1_run.rs 是内部 M1 验收执行器，不是 Tauri 打包入口。
+default-run = "novel-desktop"
 
 [lib]
 name = "novel_desktop"
