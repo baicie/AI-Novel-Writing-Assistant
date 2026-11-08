@@ -26,7 +26,8 @@ Writer 可以把“主角亲眼撞见老铁匠被灭口”改写成“主角到�
 - `id` 全书唯一。模型未提供时，系统按 `ch{chapterOrder}-{类型缩写}-{序号}` 生成；
   显式重复 ID 直接拒绝，避免审校引用歧义。
 - 义务位于目标章节对象内；上下文只选取目标章节计划，未来章节的义务不会进入当前上下文。
-- Planner 使用 `chapter-list-v2`，上下文包含 `story_macro`、卷策略与人物阵容。
+- Planner 新合同使用 `story-macro-v2` + `chapter-list-v3`，两者必须成对固定；只固定一半时
+  `open_run` 拒绝。`chapter-list-v2` / `story-macro-v1` 仍可重放历史 Run。
 - **新计划必须显式输出义务**：每章都要有 `obligations` 数组，且至少一条 `hard`。
   缺失、空数组或全部 advisory 会先触发一次结构化修复；仍不合格则 DataIntegrity 暂停，
   正文不会开始生成。历史计划仍走宽松读取路径，不迁移、不改写。
@@ -41,6 +42,16 @@ Writer 可以把“主角亲眼撞见老铁匠被灭口”改写成“主角到�
 - **Context 按 Run 冻结**：每个 Run 只读取自身 `run_id` 写入的 Context。旧 Context 通过
   产物自带的 `run_id` 归属；如果旧 Context 没有 `chapterPlanVersion`，用 ContextTrace 中
   `chapter_list` 来源哈希定位版本。定位失败就暂停，不能改用最新计划。
+- **Planner book 输入按 Run 冻结**：`open_run` 把当时 story_macro / character_cast /
+  volume_strategy / chapter_list 的最新非 stale 版本写入 `RunContract.source_versions`。
+  Context 组装、character_cast / volume_strategy / chapter_list 的 Planner Prompt、章节
+  计划引用校验和修复审校读取审校产物都按“本 Run 产物 → 冻结版本 → 旧合同最新非 stale”
+  选择；冻结版本缺失时 fail-closed，不能退回作者在 Run 打开之后保存的新版本。
+- **规范关键事件**：`story_macro.keyEvents` 描述必须发生的事件；新计划至少一条 hard。
+  `chapter_list` 的义务用 `sourceEventId` 引用事件，`description`、`participants`、`type`、
+  `chapterOrder` 与 hard 级别必须与事件一致；改写含义、替换参与者或降级都拒绝。
+- **Planner 上下文是结构化预算**：超预算时只裁剪解释性文本，保留 keyEvents、constraints、
+  人物身份与卷；必选内容放不下时明确失败，绝不返回被截断的 JSON。
 - **hard 违反的证据必须可定位**：evidence 去除空白后要能在当前候选正文中找到；
   找不到就 fail-closed。该校验只证明“引用存在”，不判断语义是否正确。
 - **advisory 不阻塞**：仅引用 advisory 的 issue 不触发修复、不阻塞章节完成，只作为质量提示。
@@ -85,6 +96,9 @@ Writer 写成“林动到达时老铁匠已经死亡”违反该义务：林动�
 - 审校 evidence 不在当前候选：暂停，不进入修复；引用历史正文或编造原句都属于这一类。
 - 同章有多个 Run：只使用本 Run 的 Context；本 Run Context 缺失时失败，不借用其他 Run 的
   上下文或更新后的计划。
+- Run 打开后作者又保存计划：该 Run 仍读取冻结版本；冻结来源被删除或找不到时暂停，不读
+  最新版本。唯一的例外是打开时书里还没有计划产物，此时没有可冻结输入，运行期新增计划仍
+  按旧合同读取。
 - 未来章节义务：目标计划之外的内容不得进入 Writer/Reviewer 上下文。
 - 旧 `context` 产物没有 `obligationsText`：Repair 使用占位说明，不伪造义务。
 - 只有 advisory 未实现：记录质量提示，章节继续；不要把它写成 hard 冲突或 replan。
@@ -92,12 +106,17 @@ Writer 写成“林动到达时老铁匠已经死亡”违反该义务：林动�
 ## 相关模块
 
 - `crates/novel-application/src/obligations.rs`：归一化、渲染、审校引用校验。
-- `crates/novel-application/src/context.rs`：目标章节计划、义务来源、ContextTrace。
+- `crates/novel-application/src/context.rs`：目标章节计划、义务来源、ContextTrace、
+  Run 冻结来源选择（`choose_run_artifact`）。
 - `crates/novel-application/src/worker.rs`：Planner/Writer/Reviewer/Repair 接线。
-- `crates/novel-prompt/src/lib.rs`：`chapter-list-v2`、`consistency-review-v2`、
-  `chapter-repair-v2`。
+- `crates/novel-application/src/worker/context_budget.rs`：Planner 上下文预算与 Run 作用域
+  产物读取。
+- `crates/novel-prompt/src/lib.rs`：`story-macro-v2`、`chapter-list-v3`、
+  `consistency-review-v2`、`chapter-repair-v2`。
+- `crates/novel-application/tests/p17_4_10_run_freeze.rs`：Run 打开后作者更新的交错测试。
 
 ## 来源文档
 
 - `docs/design/P17.4.10-CHAPTER-OBLIGATION-CONTRACT.md`
 - `docs/design/P17.4.9-CI-AND-M1-ROOT-CAUSE.md`
+- `docs/acceptance/BETA-A2-ENGINEERING-REVIEW.md`
