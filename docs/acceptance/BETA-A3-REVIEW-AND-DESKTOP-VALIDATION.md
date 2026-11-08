@@ -260,6 +260,8 @@ Draft PR。Reviewer 与 Provider 两项 P1 已优先完成并通过回归，避�
     - `rust-and-desktop-contract`：PASS（10m42s）
 - 更早提交上被 PR 并发策略取消的 `Tauri CI` 运行不计为通过或失败，最终结论以 `7d8e3a00`
   的完整运行为准。
+- 最终提交 `dbab3a82`（仅验收报告文本变化）：`Tauri CI` run `42499640698` 与
+  `Tauri Kernel Check` run `42499640677` 同样全部 PASS。
 
 ## 11.1 Tauri Bundle 与桌面运行验证
 
