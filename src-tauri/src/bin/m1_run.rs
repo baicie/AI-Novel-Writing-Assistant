@@ -385,6 +385,7 @@ fn issue_cites(issues: &[serde_json::Value], obligation_id: &str, candidate: &st
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn call_model(
     llm: &dyn novel_llm::LlmProvider,
     api_key: &str,
