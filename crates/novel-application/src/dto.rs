@@ -379,6 +379,9 @@ pub struct RunContract {
     pub novel_id: String,
     pub plan_version: String,
     pub chapter_plan_version: String,
+    /// open_run 时冻结的 book 来源产物版本；旧合同为空，按旧行为读取最新。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub source_versions: BTreeMap<String, i64>,
     pub target_chapter_id: String,
     pub provider: String,
     pub model: String,

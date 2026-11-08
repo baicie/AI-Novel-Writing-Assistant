@@ -4,10 +4,12 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use serde::Serialize;
 
-use novel_domain::{CreationExperience, NarrativeForm, PauseKind, ProjectMode, WritingMode};
+use novel_domain::{
+    ArtifactStatus, CreationExperience, NarrativeForm, PauseKind, ProjectMode, WritingMode,
+};
 use novel_llm::authorize_endpoint;
 use novel_prompt::resolve;
-use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION};
+use novel_workflow::{CHAPTER_PLAN_VERSION, PRODUCTION_PLAN_VERSION, book_scope};
 
 use crate::dto::{
     CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
@@ -503,15 +505,48 @@ impl DirectorService {
         }
         authorize_endpoint(&input.endpoint, input.allow_localhost_http)
             .map_err(|error| AppError::validation(error.to_string()))?;
+        let story_macro_v2 =
+            input.prompt_versions.get("story_macro").map(String::as_str) == Some("story-macro-v2");
+        let chapter_list_v3 = input
+            .prompt_versions
+            .get("chapter_list")
+            .map(String::as_str)
+            == Some("chapter-list-v3");
+        if story_macro_v2 != chapter_list_v3 {
+            return Err(AppError::validation(
+                "story_macro 与 chapter_list 的 Planner 契约版本必须成对固定（v2 + v3）。",
+            ));
+        }
         let chapter = self
             .get_chapter(&input.novel_id, &input.target_chapter_id)
             .await?;
+        let artifacts = self.runs.list_artifacts(&input.novel_id).await?;
+        let source_versions: BTreeMap<String, i64> = [
+            "story_macro",
+            "character_cast",
+            "volume_strategy",
+            "chapter_list",
+        ]
+        .iter()
+        .filter_map(|artifact_type| {
+            artifacts
+                .iter()
+                .filter(|artifact| {
+                    artifact.artifact_type == *artifact_type
+                        && artifact.scope == book_scope()
+                        && artifact.status != ArtifactStatus::Stale
+                })
+                .max_by_key(|artifact| artifact.version)
+                .map(|artifact| ((*artifact_type).to_string(), artifact.version))
+        })
+        .collect();
         let run_id = self.ids.new_id();
         let contract = RunContract {
             run_id: run_id.clone(),
             novel_id: input.novel_id.clone(),
             plan_version: PRODUCTION_PLAN_VERSION.to_string(),
             chapter_plan_version: CHAPTER_PLAN_VERSION.to_string(),
+            source_versions,
             target_chapter_id: input.target_chapter_id.clone(),
             provider: input.provider.clone(),
             model: input.model.clone(),

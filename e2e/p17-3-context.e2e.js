@@ -34,6 +34,7 @@ const story = () =>
       major_payoffs: ["翻案"],
       ending_flavor: "克制",
     },
+    keyEvents: [{ id: "ch1-event-1", chapterOrder: 1, type: "required_event", description: "林动按计划入山", participants: ["林动"], enforcement: "hard" }],
     constraints: ["不能替作者改设定"],
     issues: [],
   });
@@ -55,7 +56,7 @@ const script = [
     volumes: [{ volumeOrder: 1, title: "山门卷", roleLabel: "开局", coreReward: "入门", planningMode: "hard" }],
   }),
   JSON.stringify({
-    chapters: [{ chapterOrder: 1, title: "第一章", volumeTitle: "山门卷", summary: "入山", characterNames: ["林动"], obligations: [{ id: "ch1-req-1", type: "required_event", description: "林动按计划入山", enforcement: "hard", participants: ["林动"] }] }],
+    chapters: [{ chapterOrder: 1, title: "第一章", volumeTitle: "山门卷", summary: "入山", characterNames: ["林动"], obligations: [{ id: "ch1-req-1", type: "required_event", description: "林动按计划入山", enforcement: "hard", participants: ["林动"], sourceEventId: "ch1-event-1" }] }],
   }),
   "他推开门，屋里没有人。",
   JSON.stringify({ issues: [] }),

@@ -171,8 +171,13 @@ pub(crate) fn normalize_chapter_obligations(
 /// chapter-level key events the planner must carry into `chapter_list`
 /// obligations; an empty array is rejected so a planner cannot silently skip
 /// coverage by emitting `keyEvents: []`.
-pub(crate) fn normalize_story_key_events(value: &mut Value) -> Result<(), String> {
+pub(crate) fn normalize_story_key_events(value: &mut Value, require: bool) -> Result<(), String> {
     let Some(raw) = value.get_mut("keyEvents") else {
+        if require {
+            return Err(
+                "story_macro 缺少 keyEvents；story-macro-v2 要求至少一条合法关键事件".into(),
+            );
+        }
         return Ok(());
     };
     let items = raw
@@ -229,6 +234,14 @@ pub(crate) fn normalize_story_key_events(value: &mut Value) -> Result<(), String
             "enforcement": enforcement,
             "participants": participants,
         }));
+    }
+    if !normalized
+        .iter()
+        .any(|item| item.get("enforcement").and_then(Value::as_str) == Some("hard"))
+    {
+        return Err(
+            "story_macro.keyEvents 至少需要一条 hard 关键事件；不能全部用 advisory 规避约束".into(),
+        );
     }
     value["keyEvents"] = Value::Array(normalized);
     Ok(())
@@ -674,7 +687,7 @@ mod tests {
                 "enforcement": "hard"
             }]
         });
-        normalize_story_key_events(&mut macro_value).unwrap();
+        normalize_story_key_events(&mut macro_value, true).unwrap();
         let event = &macro_value["keyEvents"][0];
         assert_eq!(event["id"], "ch1-event-1");
         assert_eq!(event["type"], "required_event");
@@ -685,7 +698,7 @@ mod tests {
     #[test]
     fn empty_story_key_events_are_rejected() {
         let mut macro_value = json!({"keyEvents": []});
-        let error = normalize_story_key_events(&mut macro_value).unwrap_err();
+        let error = normalize_story_key_events(&mut macro_value, true).unwrap_err();
         assert!(error.contains("不能为空"), "{error}");
     }
 
