@@ -260,9 +260,11 @@ Draft PR。Reviewer 与 Provider 两项 P1 已优先完成并通过回归，避�
     - `rust-and-desktop-contract`：PASS（10m42s）
 - 更早提交上被 PR 并发策略取消的 `Tauri CI` 运行不计为通过或失败，最终结论以分支 head 的
   完整运行为准。
-- 最终 head `4f3870d7`：`Tauri CI` run `42500528529` 与 `Tauri Kernel Check` run
-  `42500528522` 全部 PASS（Rust、前端、发布脚本、Linux/macOS bundle、
-  `rust-and-desktop-contract`）。该提交仅修改验收报告文本。
+- 分支 head `d3a07e19`：`Tauri CI` run `42501387693`（Rust、前端、发布脚本、
+  Linux/macOS bundle）与 `Tauri Kernel Check` run `42501387718`
+  （`rust-and-desktop-contract`）全部 PASS。`原生端到端（可选）` 与矩阵占位 job 为 SKIPPED。
+- `02520476` 已被替换为 `d3a07e19`（仅把本报告从一次误包含无关文件的提交中拆分出来），
+  其陈旧 CI 运行不作为结论。
 
 ## 11.1 Tauri Bundle 与桌面运行验证
 
