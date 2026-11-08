@@ -164,6 +164,11 @@ export interface RunCandidateView {
 
 export interface RunUsageView {
   calls: number;
+  knownCalls: number;
+  /** 可能已计费但结果未知的调用次数；这部分费用无法从本地推断。 */
+  unknownCalls: number;
+  /** 明确没有产生费用的调用次数。 */
+  unbilledCalls: number;
   promptTokens: number;
   completionTokens: number;
 }

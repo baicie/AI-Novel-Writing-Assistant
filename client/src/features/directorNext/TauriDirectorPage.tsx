@@ -649,6 +649,15 @@ export default function TauriDirectorPage() {
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.calls ?? 0} 次模型调用</span>
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.promptTokens ?? 0} 输入 tokens</span>
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.completionTokens ?? 0} 输出 tokens</span>
+                {detail?.usage.unknownCalls ? (
+                  <span
+                    data-testid="director-usage-unknown"
+                    className="rounded-full bg-amber-50 px-2 py-1 text-amber-900"
+                    title="这些请求可能已经产生费用，但模型没有返回用量，本地无法估算"
+                  >
+                    {detail.usage.unknownCalls} 次调用费用未知
+                  </span>
+                ) : null}
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {detail?.legalActions?.includes("confirm") && gate ? <Button data-testid="director-approve-button" disabled={approve.isPending} onClick={() => approve.mutate()}>{approve.isPending ? "确认中…" : `确认「${artifactLabel(gate.artifactTypes[0] ?? "")}」并继续`}</Button> : null}

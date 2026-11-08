@@ -986,6 +986,9 @@ impl DirectorService {
             artifacts,
             usage: RunUsageView {
                 calls: usage.calls,
+                known_calls: usage.known_calls,
+                unknown_calls: usage.unknown_calls,
+                unbilled_calls: usage.unbilled_calls,
                 prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens,
             },

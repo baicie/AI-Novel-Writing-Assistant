@@ -258,6 +258,9 @@ async fn stale_worker_is_fenced_from_every_workflow_write() {
                 prompt_tokens: None,
                 completion_tokens: None,
                 status: "unknown".into(),
+                attempt_id: None,
+                outcome: novel_domain::InvocationOutcome::ProviderFailed,
+                usage_state: novel_domain::InvocationUsageState::Unknown,
             },
             1_012
         )
@@ -536,6 +539,9 @@ async fn candidate_checkpoint_rolls_back_when_attempt_is_not_saveable() {
             prompt_tokens: None,
             completion_tokens: None,
             status: "unknown".into(),
+            attempt_id: None,
+            outcome: novel_domain::InvocationOutcome::ProviderFailed,
+            usage_state: novel_domain::InvocationUsageState::Unknown,
         },
         1_001,
     )

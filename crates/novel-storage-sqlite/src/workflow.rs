@@ -1795,10 +1795,15 @@ impl WorkflowRepository for SqliteKernel {
     }
 
     async fn run_usage(&self, run_id: &str) -> Result<RunUsageView, PortError> {
+        // usage_state 是 0028 新增列；旧库升级后旧行落为 'known'，但没有 usage 的
+        // 历史行仍然按「未知」统计，避免把它们当成 0 计费。
         let row = sqlx::query(
             "SELECT COUNT(*) as calls,
-                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
+                    COALESCE(SUM(CASE WHEN usage_state = 'known' THEN 1 ELSE 0 END), 0) as known_calls,
+                    COALESCE(SUM(CASE WHEN usage_state = 'unknown' THEN 1 ELSE 0 END), 0) as unknown_calls,
+                    COALESCE(SUM(CASE WHEN usage_state = 'unbilled' THEN 1 ELSE 0 END), 0) as unbilled_calls,
+                    COALESCE(SUM(CASE WHEN usage_state = 'known' THEN prompt_tokens ELSE 0 END), 0) as prompt_tokens,
+                    COALESCE(SUM(CASE WHEN usage_state = 'known' THEN completion_tokens ELSE 0 END), 0) as completion_tokens
              FROM llm_invocation WHERE run_id = ?",
         )
         .bind(run_id)
@@ -1807,6 +1812,9 @@ impl WorkflowRepository for SqliteKernel {
         .map_err(map_sql)?;
         Ok(RunUsageView {
             calls: row.try_get("calls").map_err(map_sql)?,
+            known_calls: row.try_get("known_calls").map_err(map_sql)?,
+            unknown_calls: row.try_get("unknown_calls").map_err(map_sql)?,
+            unbilled_calls: row.try_get("unbilled_calls").map_err(map_sql)?,
             prompt_tokens: row.try_get("prompt_tokens").map_err(map_sql)?,
             completion_tokens: row.try_get("completion_tokens").map_err(map_sql)?,
         })
@@ -1996,8 +2004,8 @@ async fn insert_command(
 
 async fn insert_invocation(tx: &mut Tx<'_>, invocation: &NewInvocation) -> Result<(), PortError> {
     sqlx::query(
-        "INSERT INTO llm_invocation(id, request_id, run_id, step_id, provider, model, input_summary, started_at, finished_at, prompt_tokens, completion_tokens, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO llm_invocation(id, request_id, run_id, step_id, provider, model, input_summary, started_at, finished_at, prompt_tokens, completion_tokens, status, attempt_id, audit_status, usage_state, duration_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&invocation.id)
     .bind(&invocation.request_id)
@@ -2011,6 +2019,10 @@ async fn insert_invocation(tx: &mut Tx<'_>, invocation: &NewInvocation) -> Resul
     .bind(invocation.prompt_tokens)
     .bind(invocation.completion_tokens)
     .bind(&invocation.status)
+    .bind(&invocation.attempt_id)
+    .bind(invocation.outcome.as_str())
+    .bind(invocation.usage_state.as_str())
+    .bind(invocation.finished_at.saturating_sub(invocation.started_at))
     .execute(tx.deref_mut())
     .await
     .map_err(map_sql)?;
