@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use novel_domain::{
-    ChapterProtection, ControlEvent, PauseKind, RunPause, StopSignalKind, ensure_can_promote,
+    ChapterProtection, ControlEvent, InvocationOutcome, PauseKind, RunPause, StopSignalKind,
+    ensure_can_promote,
 };
 use novel_llm::{LlmProvider, LlmRequest, TokenUsage, redact_secrets};
 use novel_workflow::{
@@ -465,6 +466,17 @@ impl Worker {
                     )
                     .await?;
                 if matches!(error, novel_llm::LlmError::Cancelled) {
+                    record_failed_invocation(
+                        self,
+                        claimed,
+                        "draft",
+                        &request_id,
+                        &summary,
+                        started,
+                        &error,
+                        Some(&attempt_id),
+                    )
+                    .await?;
                     let reason = error.to_string();
                     return self
                         .write(
@@ -479,6 +491,18 @@ impl Worker {
                         )
                         .await;
                 }
+                // 请求已经发出但结果不可用时，费用可能已经发生；先记账再暂停。
+                record_failed_invocation(
+                    self,
+                    claimed,
+                    "draft",
+                    &request_id,
+                    &summary,
+                    started,
+                    &error,
+                    Some(&attempt_id),
+                )
+                .await?;
                 let signal = match error {
                     novel_llm::LlmError::RateLimit => StopSignalKind::Budget,
                     _ => StopSignalKind::ProviderUnavailable,
@@ -512,6 +536,8 @@ impl Worker {
                     &summary,
                     started,
                     &response.usage,
+                    InvocationOutcome::Succeeded,
+                    Some(&attempt_id),
                 ),
                 now,
             )
@@ -753,6 +779,17 @@ impl Worker {
                     )
                     .await?;
                 if matches!(error, novel_llm::LlmError::Cancelled) {
+                    record_failed_invocation(
+                        self,
+                        claimed,
+                        "bounded_repair",
+                        &request_id,
+                        &summary,
+                        started,
+                        &error,
+                        Some(&attempt_id),
+                    )
+                    .await?;
                     return self
                         .write(
                             claimed,
@@ -766,6 +803,17 @@ impl Worker {
                         )
                         .await;
                 }
+                record_failed_invocation(
+                    self,
+                    claimed,
+                    "bounded_repair",
+                    &request_id,
+                    &summary,
+                    started,
+                    &error,
+                    Some(&attempt_id),
+                )
+                .await?;
                 return self
                     .pause(
                         claimed,
@@ -800,6 +848,8 @@ impl Worker {
                 &summary,
                 started,
                 &response.usage,
+                InvocationOutcome::Succeeded,
+                Some(&attempt_id),
             )
             .await?;
             self.runs
@@ -846,6 +896,8 @@ impl Worker {
                     &summary,
                     started,
                     &response.usage,
+                    InvocationOutcome::Succeeded,
+                    Some(&attempt_id),
                 ),
                 now,
             )
@@ -1502,6 +1554,17 @@ async fn execute_structured(
                 )
                 .await?;
             if matches!(error, novel_llm::LlmError::Cancelled) {
+                record_failed_invocation(
+                    worker,
+                    claimed,
+                    step_id,
+                    &request_id,
+                    &summary,
+                    started,
+                    &error,
+                    Some(&attempt_id),
+                )
+                .await?;
                 return worker
                     .write(
                         claimed,
@@ -1515,6 +1578,17 @@ async fn execute_structured(
                     )
                     .await;
             }
+            record_failed_invocation(
+                worker,
+                claimed,
+                step_id,
+                &request_id,
+                &summary,
+                started,
+                &error,
+                Some(&attempt_id),
+            )
+            .await?;
             return worker
                 .pause(
                     claimed,
@@ -1530,7 +1604,12 @@ async fn execute_structured(
     } else {
         raw
     };
-    let mut usage = response.usage.clone();
+    // 首次物理请求到此结束。它自己的记录先落库，后续修复请求单独记账，
+    // 不能把两次物理调用的用量合并成一条。
+    let first_usage = response.usage.clone();
+    // 首次请求成功返回但结构不可用：这条记录仍算「已计费且结果已知」，
+    // 失败原因是结构校验，由 repair_failed / 诊断产物承载。
+    let first_outcome = InvocationOutcome::Succeeded;
     let payload = match validate_structured_output_with(
         step_id,
         &raw,
@@ -1548,7 +1627,9 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
+                    Some(&attempt_id),
                 )
                 .await?;
                 worker
@@ -1571,7 +1652,7 @@ async fn execute_structured(
                     None,
                     &raw,
                     None,
-                    &usage,
+                    &first_usage,
                 );
                 return worker
                     .pause_with_artifact(
@@ -1598,11 +1679,13 @@ async fn execute_structured(
                 }
                 text
             });
+            let repair_started = worker.clock.now_ms();
+            let repair_summary = summarize(&repair_prompt);
             let repair_generated = worker
                 .llm
                 .generate_with_protocol(
                     LlmRequest {
-                        request_id: repair_request_id,
+                        request_id: repair_request_id.clone(),
                         model: route.model_id(&claimed.contract.model).to_string(),
                         prompt: repair_prompt,
                         endpoint: route.endpoint(&claimed.contract.endpoint).to_string(),
@@ -1620,7 +1703,6 @@ async fn execute_structured(
             let repair_raw = repair_collect.await.unwrap_or_default();
             match repair_generated {
                 Ok(repair_response) => {
-                    accumulate_usage(&mut usage, &repair_response.usage);
                     let repair_text = if repair_raw.trim().is_empty() {
                         repair_response.text
                     } else {
@@ -1631,7 +1713,21 @@ async fn execute_structured(
                         &repair_text,
                         step_id == "story_macro" && story_macro_v2,
                     ) {
-                        Ok(payload) => payload,
+                        Ok(payload) => {
+                            record_repair_invocation(
+                                worker,
+                                claimed,
+                                step_id,
+                                &repair_request_id,
+                                &repair_summary,
+                                repair_started,
+                                &repair_response.usage,
+                                InvocationOutcome::Repaired,
+                                &attempt_id,
+                            )
+                            .await?;
+                            payload
+                        }
                         Err(repair_error) => {
                             record_usage_before_stop(
                                 worker,
@@ -1640,9 +1736,25 @@ async fn execute_structured(
                                 &request_id,
                                 &summary,
                                 started,
-                                &usage,
+                                &first_usage,
+                                first_outcome,
+                                Some(&attempt_id),
                             )
                             .await?;
+                            record_repair_invocation(
+                                worker,
+                                claimed,
+                                step_id,
+                                &repair_request_id,
+                                &repair_summary,
+                                repair_started,
+                                &repair_response.usage,
+                                InvocationOutcome::RepairFailed,
+                                &attempt_id,
+                            )
+                            .await?;
+                            let mut combined = first_usage.clone();
+                            accumulate_usage(&mut combined, &repair_response.usage);
                             worker
                                 .runs
                                 .mark_attempt_fenced(
@@ -1663,7 +1775,7 @@ async fn execute_structured(
                                 Some(&repair_error),
                                 &raw,
                                 Some(&repair_text),
-                                &usage,
+                                &combined,
                             );
                             return worker
                                 .pause_with_artifact(
@@ -1687,7 +1799,21 @@ async fn execute_structured(
                         &request_id,
                         &summary,
                         started,
-                        &usage,
+                        &first_usage,
+                        first_outcome,
+                        Some(&attempt_id),
+                    )
+                    .await?;
+                    // 修复请求同样是一次物理调用；失败也要留下自己的记录。
+                    record_failed_invocation(
+                        worker,
+                        claimed,
+                        step_id,
+                        &repair_request_id,
+                        &repair_summary,
+                        repair_started,
+                        &repair_error,
+                        Some(&attempt_id),
                     )
                     .await?;
                     worker
@@ -1728,7 +1854,7 @@ async fn execute_structured(
                         Some(&repair_error_text),
                         &raw,
                         None,
-                        &usage,
+                        &first_usage,
                     );
                     return worker
                         .pause_with_artifact(
@@ -1767,7 +1893,8 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
                     &error.to_string(),
                 )
                 .await;
@@ -1785,7 +1912,8 @@ async fn execute_structured(
                         &request_id,
                         &summary,
                         started,
-                        &usage,
+                        &first_usage,
+                        first_outcome,
                         &error.to_string(),
                     )
                     .await;
@@ -1804,7 +1932,8 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
                     &error,
                 )
                 .await;
@@ -1822,7 +1951,8 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
                     &error,
                 )
                 .await;
@@ -1839,7 +1969,8 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
                     "一致性审校缺少候选正文，无法核验审校证据。",
                 )
                 .await;
@@ -1860,7 +1991,8 @@ async fn execute_structured(
                     &request_id,
                     &summary,
                     started,
-                    &usage,
+                    &first_usage,
+                    first_outcome,
                     &error,
                 )
                 .await;
@@ -1880,7 +2012,9 @@ async fn execute_structured(
                 &request_id,
                 &summary,
                 started,
-                &usage,
+                &first_usage,
+                first_outcome,
+                Some(&attempt_id),
             ),
             worker.clock.now_ms(),
         )
@@ -2391,6 +2525,9 @@ fn accumulate_usage(total: &mut TokenUsage, extra: &TokenUsage) {
 /// 结构化调用即使最终校验失败，也已经发生了模型请求；在进入暂停/取消前先记录
 /// 已获得的 usage，避免失败路径把成本静默丢掉。使用非栅栏写入，保证取消竞争下
 /// 不会因控制版本变化而丢失调用记录。
+///
+/// `outcome` 描述这次物理请求的结果；`usage` 只在成功或修复成功时带有数值。
+#[allow(clippy::too_many_arguments)]
 async fn record_usage_before_stop(
     worker: &Worker,
     claimed: &ClaimedRun,
@@ -2399,11 +2536,75 @@ async fn record_usage_before_stop(
     summary: &str,
     started: i64,
     usage: &TokenUsage,
+    outcome: InvocationOutcome,
+    attempt_id: Option<&str>,
 ) -> Result<(), AppError> {
     worker
         .runs
         .record_invocation(invocation(
-            worker, claimed, step_id, request_id, summary, started, usage,
+            worker, claimed, step_id, request_id, summary, started, usage, outcome, attempt_id,
+        ))
+        .await?;
+    Ok(())
+}
+
+/// 结构化格式修复是一次独立的物理调用，必须有自己的记录与 requestId。
+#[allow(clippy::too_many_arguments)]
+async fn record_repair_invocation(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    usage: &TokenUsage,
+    outcome: InvocationOutcome,
+    attempt_id: &str,
+) -> Result<(), AppError> {
+    worker
+        .runs
+        .record_invocation(invocation(
+            worker,
+            claimed,
+            step_id,
+            request_id,
+            summary,
+            started,
+            usage,
+            outcome,
+            Some(attempt_id),
+        ))
+        .await?;
+    Ok(())
+}
+
+/// 一次失败的物理调用同样需要留下记录。
+///
+/// 取消也记账：取消可能发生在请求已经发出之后，无法证明 Provider 没有计费，
+/// 因此这条记录的用量状态是未知，而不是「没花钱」。
+#[allow(clippy::too_many_arguments)]
+async fn record_failed_invocation(
+    worker: &Worker,
+    claimed: &ClaimedRun,
+    step_id: &str,
+    request_id: &str,
+    summary: &str,
+    started: i64,
+    error: &novel_llm::LlmError,
+    attempt_id: Option<&str>,
+) -> Result<(), AppError> {
+    worker
+        .runs
+        .record_invocation(invocation(
+            worker,
+            claimed,
+            step_id,
+            request_id,
+            summary,
+            started,
+            &TokenUsage::unknown(),
+            invocation_outcome_for_error(error),
+            attempt_id,
         ))
         .await?;
     Ok(())
@@ -2419,10 +2620,19 @@ async fn pause_review_validation_error(
     summary: &str,
     started: i64,
     usage: &TokenUsage,
+    outcome: InvocationOutcome,
     error: &str,
 ) -> Result<TickOutcome, AppError> {
     record_usage_before_stop(
-        worker, claimed, step_id, request_id, summary, started, usage,
+        worker,
+        claimed,
+        step_id,
+        request_id,
+        summary,
+        started,
+        usage,
+        outcome,
+        Some(attempt_id),
     )
     .await?;
     worker
@@ -2504,6 +2714,11 @@ fn summarize(prompt: &str) -> String {
     redact_secrets(prompt).chars().take(80).collect()
 }
 
+/// 构造一条物理调用记录。
+///
+/// `outcome` 决定这次调用是否可能已计费；`usage` 只在成功路径才带有数值。
+/// 调用结果与用量可见性保持分离，避免把「结果未知」压成「0 计费」。
+#[allow(clippy::too_many_arguments)]
 fn invocation(
     worker: &Worker,
     claimed: &ClaimedRun,
@@ -2512,6 +2727,8 @@ fn invocation(
     summary: &str,
     started: i64,
     usage: &TokenUsage,
+    outcome: InvocationOutcome,
+    attempt_id: Option<&str>,
 ) -> NewInvocation {
     let route = claimed
         .contract
@@ -2520,6 +2737,22 @@ fn invocation(
         crate::provider_service::EffectiveRoute::Step(step) => step.provider_id.clone(),
         crate::provider_service::EffectiveRoute::Contract => claimed.contract.provider.clone(),
     };
+    let finished_at = worker.clock.now_ms();
+    // 明确的未计费结果不保留任何 token 数字，防止被下游当成真实用量累加。
+    // 其余情况以 Provider 实际返回的用量为准：拿到了就是已知，没拿到就是未知。
+    let prompt_tokens = usage
+        .prompt_tokens
+        .map(|value| i64::try_from(value).unwrap_or(i64::MAX));
+    let completion_tokens = usage
+        .completion_tokens
+        .map(|value| i64::try_from(value).unwrap_or(i64::MAX));
+    let usage_state = match outcome.usage_state() {
+        novel_domain::InvocationUsageState::Unbilled => {
+            novel_domain::InvocationUsageState::Unbilled
+        }
+        _ => novel_domain::InvocationUsageState::for_legacy_row(prompt_tokens, completion_tokens),
+    };
+    let billable = usage_state != novel_domain::InvocationUsageState::Unbilled;
     NewInvocation {
         id: worker.ids.new_id(),
         request_id: request_id.to_string(),
@@ -2529,14 +2762,37 @@ fn invocation(
         model: route.model_id(&claimed.contract.model).to_string(),
         input_summary: summary.to_string(),
         started_at: started,
-        finished_at: worker.clock.now_ms(),
-        prompt_tokens: usage
-            .prompt_tokens
-            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-        completion_tokens: usage
-            .completion_tokens
-            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
-        status: "succeeded".into(),
+        finished_at,
+        prompt_tokens: billable.then_some(prompt_tokens).flatten(),
+        completion_tokens: billable.then_some(completion_tokens).flatten(),
+        status: outcome.as_str().to_string(),
+        attempt_id: attempt_id.map(str::to_string),
+        outcome,
+        usage_state,
+    }
+}
+
+/// 把 Provider 错误映射成调用结果分类。
+///
+/// 只做计费语义归类，不参与重试、暂停或质量政策判断。
+fn invocation_outcome_for_error(error: &novel_llm::LlmError) -> InvocationOutcome {
+    match error {
+        novel_llm::LlmError::RateLimit => InvocationOutcome::RateLimited,
+        novel_llm::LlmError::Timeout => InvocationOutcome::TimedOut,
+        novel_llm::LlmError::Cancelled => InvocationOutcome::Cancelled,
+        novel_llm::LlmError::Unauthorized => InvocationOutcome::Unauthorized,
+        // `billed` 是 Provider 层给出的「请求是否可能已经到达服务端」判断。
+        novel_llm::LlmError::Unavailable { billed, .. } => {
+            if *billed {
+                InvocationOutcome::ProviderFailed
+            } else {
+                InvocationOutcome::Rejected
+            }
+        }
+        novel_llm::LlmError::InvalidResponse(_)
+        | novel_llm::LlmError::EndpointRejected(_)
+        | novel_llm::LlmError::StructuredOutput(_)
+        | novel_llm::LlmError::BudgetExceeded(_) => InvocationOutcome::Rejected,
     }
 }
 

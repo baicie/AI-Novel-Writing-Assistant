@@ -539,10 +539,14 @@ async fn cancel_during_structured_repair_cancels_instead_of_pausing() {
         .get_run_detail(&novel.id, &run_id)
         .await
         .unwrap();
+    // 首次请求与修复请求是两次物理调用，取消发生时两次都必须留在调用记录里；
+    // 修复请求的结果未知，不能把它折叠进首次请求。
     assert_eq!(
-        detail.usage.calls, 1,
-        "the first model call must still be recorded when repair is cancelled"
+        detail.usage.calls, 2,
+        "first request and repair request are separate physical calls"
     );
+    assert_eq!(detail.usage.known_calls, 1);
+    assert_eq!(detail.usage.unknown_calls, 1);
     assert_eq!(detail.usage.prompt_tokens, 11);
     assert_eq!(detail.usage.completion_tokens, 3);
 }
@@ -686,7 +690,8 @@ async fn repair_invalid_output_records_usage_and_pauses() {
         .await
         .unwrap();
     assert_eq!(detail.pause_signal.as_deref(), Some("data_integrity"));
-    assert_eq!(detail.usage.calls, 1);
+    assert_eq!(detail.usage.calls, 2, "首次请求与修复请求分别记账");
+    assert_eq!(detail.usage.known_calls, 2);
     assert_eq!(detail.usage.prompt_tokens, 24);
     assert_eq!(detail.usage.completion_tokens, 8);
     let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
@@ -727,7 +732,12 @@ async fn provider_unavailable_on_first_structured_call_pauses_without_artifact()
         .await
         .unwrap();
     assert_eq!(detail.pause_signal.as_deref(), Some("provider_unavailable"));
-    assert_eq!(detail.usage.calls, 0);
+    // 传输层判定请求没有发出（billed: false），所以这条记录计为未计费，
+    // 但它仍然是一次真实发生的调用尝试，必须可见。
+    assert_eq!(detail.usage.calls, 1);
+    assert_eq!(detail.usage.unbilled_calls, 1);
+    assert_eq!(detail.usage.unknown_calls, 0);
+    assert_eq!(detail.usage.prompt_tokens, 0);
     let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
         .await
         .unwrap();
@@ -770,7 +780,9 @@ async fn provider_unavailable_during_repair_records_first_usage() {
         .await
         .unwrap();
     assert_eq!(detail.pause_signal.as_deref(), Some("provider_unavailable"));
-    assert_eq!(detail.usage.calls, 1);
+    assert_eq!(detail.usage.calls, 2, "首次请求与失败的修复请求分别记账");
+    assert_eq!(detail.usage.known_calls, 1);
+    assert_eq!(detail.usage.unbilled_calls, 1);
     assert_eq!(detail.usage.prompt_tokens, 11);
     assert_eq!(detail.usage.completion_tokens, 3);
 }

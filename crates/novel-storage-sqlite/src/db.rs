@@ -344,6 +344,10 @@ pub(crate) const MIGRATION_SCRIPTS: &[(&str, &str)] = &[
         "0027",
         include_str!("../../../migrations/0027_plot_event_lookup_index.sql"),
     ),
+    (
+        "0028",
+        include_str!("../../../migrations/0028_invocation_observability.sql"),
+    ),
 ];
 
 async fn migrate(pool: &SqlitePool) -> Result<(), PortError> {

@@ -330,13 +330,57 @@ pub(crate) fn validate_structured_output(step_id: &str, raw: &str) -> Result<Str
     validate_structured_output_with(step_id, raw, false)
 }
 
+/// Models often wrap otherwise valid JSON in a Markdown fence, or add a line of
+/// prose around it. Parsing that as "not valid JSON" would spend the single
+/// bounded repair call on output that was already correct, so extract the first
+/// complete JSON value before giving up.
+///
+/// This only widens what counts as the payload; it never accepts a payload that
+/// is truncated or fails schema validation downstream.
+fn extract_json_payload(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(start) = trimmed.find(['{', '[']) {
+        let opener = trimmed.as_bytes()[start];
+        let closer = if opener == b'{' { b'}' } else { b']' };
+        let bytes = trimmed.as_bytes();
+        let mut depth = 0_i64;
+        let mut in_string = false;
+        let mut escaped = false;
+        for index in start..bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => in_string = true,
+                b if b == opener => depth += 1,
+                b if b == closer => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &trimmed[start..=index];
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    trimmed
+}
+
 pub(crate) fn validate_structured_output_with(
     step_id: &str,
     raw: &str,
     require_story_key_events: bool,
 ) -> Result<String, String> {
-    let mut value: serde_json::Value =
-        serde_json::from_str(raw).map_err(|_| "模型输出不是合法 JSON".to_string())?;
+    let mut value: serde_json::Value = serde_json::from_str(extract_json_payload(raw))
+        .map_err(|_| "模型输出不是合法 JSON".to_string())?;
     if step_id == "story_macro" {
         normalize_story_macro(&mut value);
     }
@@ -602,6 +646,73 @@ mod tests {
         validate_chapter_plan_references, validate_structured_output,
         validate_structured_output_with,
     };
+
+    /// Models routinely wrap JSON in a Markdown fence even when the prompt says
+    /// not to. Accepting the fence here is what keeps that from burning the one
+    /// bounded repair call on output that was already valid.
+    #[test]
+    fn fenced_json_is_accepted_without_a_repair_round() {
+        let body = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"],
+                "obligations": [{
+                    "type": "continuity_constraint",
+                    "description": "保持文风一致",
+                    "enforcement": "hard"
+                }]
+            }]
+        })
+        .to_string();
+
+        for fenced in [
+            format!("```json\n{body}\n```"),
+            format!("```\n{body}\n```"),
+            format!("```JSON\n{body}\n```"),
+        ] {
+            assert!(
+                validate_structured_output("chapter_list", &fenced).is_ok(),
+                "a fenced payload must validate: {fenced}"
+            );
+        }
+    }
+
+    #[test]
+    fn text_around_the_fenced_json_does_not_break_validation() {
+        let body = serde_json::json!({
+            "chapters": [{
+                "chapterOrder": 1,
+                "title": "第一章",
+                "volumeTitle": "卷一",
+                "summary": "入山",
+                "characterNames": ["林动"],
+                "obligations": [{
+                    "type": "continuity_constraint",
+                    "description": "保持文风一致",
+                    "enforcement": "hard"
+                }]
+            }]
+        })
+        .to_string();
+        let raw = format!("以下是规划结果：\n```json\n{body}\n```\n如需调整请告知。");
+        assert!(validate_structured_output("chapter_list", &raw).is_ok());
+    }
+
+    /// Truncated output must still fail: accepting an incomplete payload would
+    /// let a half-written plan pass as a valid one.
+    #[test]
+    fn truncated_json_still_fails_closed() {
+        let truncated = r#"{"chapters":[{"chapterOrder":1,"title":"第一章""#;
+        assert!(validate_structured_output("chapter_list", truncated).is_err());
+    }
+
+    #[test]
+    fn prose_without_json_still_fails_closed() {
+        assert!(validate_structured_output("chapter_list", "抱歉，我无法完成。").is_err());
+    }
 
     #[test]
     fn story_macro_normalizes_mystery_box_array_to_string() {
