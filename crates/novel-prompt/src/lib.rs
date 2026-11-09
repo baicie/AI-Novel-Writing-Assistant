@@ -116,7 +116,7 @@ pub fn builtin_prompts() -> &'static [PromptAsset] {
             id: "consistency_review",
             version: "consistency-review-v2",
             family: "director",
-            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；如违反结构化章节义务，必须填写 obligationId，且只能使用上下文中列出的义务 ID；必要时填写 violationType、needsAuthorConfirmation；无问题用空数组）。evidence 必须逐字引用候选正文，不得引用历史正文。没有采用 advisory 建议不构成问题；只有违反 hard 义务或造成已确认事实冲突时才报告。不要把调用失败或无法判断当作没有问题；不得编造 obligationId。不要返回 Markdown。\n{{context}}",
+            template: "STEP:consistency_review\n审校章节正文与规划。只输出严格 JSON：issues（数组，每项含 type、severity、evidence、suggestion；如违反结构化章节义务，必须填写 obligationId，且只能使用上下文中列出的义务 ID；必要时填写 violationType、enforcement、confidence、needsAuthorConfirmation；无问题用空数组）。evidence 必须逐字引用当前候选正文，不得引用历史正文。必须完整阅读候选正文后再判断 missing_element：局部引文只能证明引文存在，不能证明全文缺少要素；如果无法确认全文缺席，confidence 写 suspected_absence、needsAuthorConfirmation=true，并保留问题，不能返回 clean。如果全文明确出现与 hard 义务直接矛盾的事实，confidence 写 confirmed_violation；如果解释或证据不足以支持结论，confidence 写 insufficient_evidence、needsAuthorConfirmation=true。一般质量建议必须写 enforcement=advisory，不得触发 hard repair；hard 义务不能被模型自行降级。没有采用 advisory 建议不构成问题。不要把调用失败或无法判断当作没有问题；不得编造 obligationId。不要返回 Markdown。\n{{context}}",
         },
         PromptAsset {
             id: "chapter_selection_rewrite",

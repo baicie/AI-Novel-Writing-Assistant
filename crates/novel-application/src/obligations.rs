@@ -426,9 +426,14 @@ fn push_obligation_line(output: &mut String, item: &ChapterObligation) {
 }
 
 /// Classify review issues by the enforcement of the obligation they cite and
-/// rewrite the review payload so the workflow guard only counts hard issues.
-/// Advisory-only feedback stays visible in `issueDetails` but must not trigger a
-/// repair or block the chapter.
+/// rewrite the review payload so the workflow guard only counts issues that are
+/// safe to repair automatically.
+///
+/// A quote proves only that the cited text exists. In particular, a local quote
+/// cannot prove that an element is absent from the whole candidate. Such
+/// findings remain visible and require author confirmation unless the model
+/// explicitly reports a full-candidate, confirmed violation. Advisory feedback
+/// also remains visible but never enters the hard-repair count.
 pub(crate) fn annotate_review_obligations(
     payload: &str,
     obligations: &[ChapterObligation],
@@ -442,8 +447,9 @@ pub(crate) fn annotate_review_obligations(
     let Some(issues) = value.get_mut("issueDetails").and_then(Value::as_array_mut) else {
         return Ok(payload.to_string());
     };
-    let mut hard = 0usize;
+    let mut repairable = 0usize;
     let mut advisory = 0usize;
+    let mut manual = 0usize;
     for issue in issues.iter_mut() {
         let Some(object) = issue.as_object_mut() else {
             continue;
@@ -453,45 +459,108 @@ pub(crate) fn annotate_review_obligations(
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|id| !id.is_empty());
-        match obligation_id {
+        let level = match obligation_id {
             Some(id) => {
                 let Some(level) = enforcement.get(id) else {
                     return Err(format!("审校引用了不存在的章节义务：{id}"));
                 };
-                object.insert(
-                    "obligationEnforcement".into(),
-                    Value::String((*level).to_string()),
-                );
-                if *level == "hard" {
-                    hard += 1;
-                } else {
-                    advisory += 1;
-                }
+                *level
             }
-            // 没有引用义务的普通审校问题仍按需要修复的问题处理。
-            None => hard += 1,
-        }
+            None => match object
+                .get("enforcement")
+                .and_then(Value::as_str)
+                .map(str::trim)
+            {
+                None | Some("hard") => "hard",
+                Some("advisory") => "advisory",
+                Some(other) => {
+                    return Err(format!(
+                        "审校 enforcement 不受支持：{other}；允许 hard/advisory"
+                    ));
+                }
+            },
+        };
+        object.insert("obligationEnforcement".into(), Value::String(level.into()));
+
+        let classification = object
+            .get("violationType")
+            .and_then(Value::as_str)
+            .or_else(|| object.get("type").and_then(Value::as_str))
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string();
+        let confidence = match object.get("confidence").and_then(Value::as_str) {
+            Some("confirmed_violation") => "confirmed_violation",
+            Some("suspected_absence") => "suspected_absence",
+            Some("insufficient_evidence") => "insufficient_evidence",
+            Some(other) => {
+                return Err(format!(
+                    "审校 confidence 不受支持：{other}；允许 confirmed_violation/suspected_absence/insufficient_evidence"
+                ));
+            }
+            None if classification == "missing_element" => "suspected_absence",
+            None if object
+                .get("needsAuthorConfirmation")
+                .and_then(Value::as_bool)
+                == Some(true) =>
+            {
+                "insufficient_evidence"
+            }
+            None => "model_asserted",
+        };
+        object.insert("reviewConfidence".into(), Value::String(confidence.into()));
+
+        let author_confirmation = object
+            .get("needsAuthorConfirmation")
+            .and_then(Value::as_bool)
+            == Some(true);
+        let missing_without_confirmation =
+            classification == "missing_element" && confidence != "confirmed_violation";
+        let needs_manual_confirmation = level == "hard"
+            && (author_confirmation
+                || missing_without_confirmation
+                || confidence == "insufficient_evidence");
+        let disposition = if level == "advisory" {
+            advisory += 1;
+            "advisory"
+        } else if needs_manual_confirmation {
+            manual += 1;
+            object.insert("needsAuthorConfirmation".into(), Value::Bool(true));
+            "manual_confirmation"
+        } else {
+            repairable += 1;
+            "repair"
+        };
+        object.insert(
+            "automationDisposition".into(),
+            Value::String(disposition.into()),
+        );
     }
     if let Some(object) = value.as_object_mut() {
-        object.insert("issues".into(), Value::from(hard));
+        object.insert("issues".into(), Value::from(repairable));
         object.insert("advisoryIssueCount".into(), Value::from(advisory));
-        let status = if hard == 0 && advisory == 0 {
-            "clean"
-        } else if hard == 0 {
+        object.insert("manualReviewCount".into(), Value::from(manual));
+        let status = if repairable > 0 {
+            "issues_found"
+        } else if manual > 0 {
+            "needs_author_confirmation"
+        } else if advisory > 0 {
             "advisory_only"
         } else {
-            "issues_found"
+            "clean"
         };
         object.insert("status".into(), Value::String(status.into()));
         object.insert(
             "reviewOutcome".into(),
             Value::String(
-                if hard == 0 && advisory == 0 {
-                    "review_succeeded_no_issues"
-                } else if hard == 0 {
+                if repairable > 0 {
+                    "review_succeeded_with_issues"
+                } else if manual > 0 {
+                    "review_succeeded_needs_author_confirmation"
+                } else if advisory > 0 {
                     "review_succeeded_with_advisory_notes"
                 } else {
-                    "review_succeeded_with_issues"
+                    "review_succeeded_no_issues"
                 }
                 .into(),
             ),
@@ -500,46 +569,36 @@ pub(crate) fn annotate_review_obligations(
     serde_json::to_string(&value).map_err(|_| "审校结果无法序列化".into())
 }
 
-/// Hard-obligation violations must quote the current candidate. The check is
-/// deliberately narrow: it only proves the quoted text exists in the candidate
-/// after whitespace normalization; it does not judge semantics.
+/// Every reported issue must quote the current candidate. The check is
+/// deliberately narrow: it proves only that the quote exists after whitespace
+/// normalization; it never treats the quote as proof that the reported
+/// violation is semantically true.
 pub(crate) fn validate_review_evidence(
     payload: &str,
     candidate: &str,
-    obligations: &[ChapterObligation],
+    _obligations: &[ChapterObligation],
 ) -> Result<(), String> {
-    let hard_ids: BTreeSet<&str> = obligations
-        .iter()
-        .filter(|item| item.enforcement == "hard")
-        .map(|item| item.id.as_str())
-        .collect();
     let value: Value =
         serde_json::from_str(payload).map_err(|_| "审校结果不是合法 JSON".to_string())?;
     let Some(issues) = value.get("issueDetails").and_then(Value::as_array) else {
         return Ok(());
     };
     let candidate = normalize_quote(candidate);
-    for issue in issues {
-        let Some(obligation_id) = issue
-            .get("obligationId")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        if !hard_ids.contains(obligation_id) {
-            continue;
-        }
+    for (index, issue) in issues.iter().enumerate() {
         let evidence = issue
             .get("evidence")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|text| !text.is_empty())
-            .ok_or_else(|| format!("审校问题 {obligation_id} 缺少正文证据"))?;
+            .ok_or_else(|| format!("审校问题 #{index} 缺少正文证据"))?;
         if !quote_is_located(evidence, &candidate) {
+            let identity = issue
+                .get("obligationId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .unwrap_or("未命名问题");
             return Err(format!(
-                "审校问题 {obligation_id} 的证据无法在当前候选正文中定位：{evidence}"
+                "审校问题 {identity} 的证据无法在当前候选正文中定位：{evidence}"
             ));
         }
     }
@@ -844,7 +903,7 @@ mod tests {
         assert!(validate_review_evidence(invented, candidate, &obligations).is_err());
 
         let advisory = r#"{"issueDetails":[
-            {"obligationId":"ch1-adv-1","type":"style","severity":"low","evidence":"这条建议没有采用","suggestion":"可忽略"}
+            {"obligationId":"ch1-adv-1","type":"style","severity":"low","evidence":"林动赶到时","suggestion":"可忽略"}
         ]}"#;
         assert!(validate_review_evidence(advisory, candidate, &obligations).is_ok());
     }
@@ -858,5 +917,89 @@ mod tests {
         assert!(validate_review_obligation_ids(invalid, &allowed).is_err());
         let empty = r#"{"issueDetails":[{"obligationId":" ","type":"timeline","severity":"high","evidence":"x","suggestion":"y"}]}"#;
         assert!(validate_review_obligation_ids(empty, &allowed).is_err());
+    }
+
+    #[test]
+    fn suspected_missing_element_waits_for_author_confirmation() {
+        let obligations = vec![obligation("ch1-req-1", "hard")];
+        let payload = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"missing_element","severity":"high","evidence":"他蹲下去，扒开雪","suggestion":"补充废井旁的拾取事件"}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 0);
+        assert_eq!(value["manualReviewCount"], 1);
+        assert_eq!(value["status"], "needs_author_confirmation");
+        assert_eq!(value["issueDetails"][0]["needsAuthorConfirmation"], true);
+        assert_eq!(
+            value["issueDetails"][0]["automationDisposition"],
+            "manual_confirmation"
+        );
+        assert_ne!(value["status"], "clean");
+    }
+
+    #[test]
+    fn confirmed_missing_element_remains_repairable() {
+        let obligations = vec![obligation("ch1-req-1", "hard")];
+        let payload = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"missing_element","confidence":"confirmed_violation","severity":"high","evidence":"他走到废井旁，却没有拾取任何东西","suggestion":"补写拾玉事件"}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 1);
+        assert_eq!(value["manualReviewCount"], 0);
+        assert_eq!(
+            value["issueDetails"][0]["reviewConfidence"],
+            "confirmed_violation"
+        );
+        assert_eq!(value["issueDetails"][0]["automationDisposition"], "repair");
+    }
+
+    #[test]
+    fn insufficient_explanation_stays_visible_without_becoming_clean() {
+        let obligations = vec![obligation("ch1-req-1", "hard")];
+        let payload = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"contradiction","confidence":"insufficient_evidence","severity":"high","evidence":"他蹲下去，扒开雪","suggestion":"请作者确认这是否违反义务","needsAuthorConfirmation":true}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 0);
+        assert_eq!(value["manualReviewCount"], 1);
+        assert_eq!(value["status"], "needs_author_confirmation");
+        assert_eq!(
+            value["issueDetails"][0]["reviewConfidence"],
+            "insufficient_evidence"
+        );
+    }
+
+    #[test]
+    fn explicit_general_advisory_never_counts_as_hard_repair() {
+        let obligations = vec![obligation("ch1-req-1", "hard")];
+        let payload = r#"{"issueDetails":[
+            {"type":"style","enforcement":"advisory","severity":"low","evidence":"他蹲下去，扒开雪","suggestion":"可以增加环境描写"}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 0);
+        assert_eq!(value["advisoryIssueCount"], 1);
+        assert_eq!(value["status"], "advisory_only");
+        assert_eq!(
+            value["issueDetails"][0]["obligationEnforcement"],
+            "advisory"
+        );
+    }
+
+    #[test]
+    fn mixed_findings_keep_repairable_and_manual_counts_separate() {
+        let obligations = vec![obligation("ch1-req-1", "hard")];
+        let payload = r#"{"issueDetails":[
+            {"obligationId":"ch1-req-1","type":"missing_element","severity":"high","evidence":"他蹲下去，扒开雪","suggestion":"补写拾玉事件"},
+            {"obligationId":"ch1-req-1","type":"ordering_violation","severity":"high","evidence":"他先离开，之后才听见异响","suggestion":"恢复事件顺序"}
+        ]}"#;
+        let annotated = annotate_review_obligations(payload, &obligations).unwrap();
+        let value: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(value["issues"], 1);
+        assert_eq!(value["manualReviewCount"], 1);
+        assert_eq!(value["status"], "issues_found");
     }
 }

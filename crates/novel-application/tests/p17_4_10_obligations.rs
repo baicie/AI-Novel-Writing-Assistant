@@ -541,7 +541,7 @@ fn known_issue_review() -> String {
 }
 
 fn advisory_only_review() -> String {
-    r#"{"issues":[{"type":"style","severity":"low","evidence":"没有补雪夜环境描写","suggestion":"可以补一句","obligationId":"ch1-adv-1","needsAuthorConfirmation":true}]}"#.to_string()
+    r#"{"issues":[{"type":"style","severity":"low","evidence":"林动赶到时","suggestion":"可以补一句","obligationId":"ch1-adv-1","needsAuthorConfirmation":true}]}"#.to_string()
 }
 
 fn invented_evidence_review() -> String {
@@ -959,6 +959,67 @@ async fn advisory_only_review_does_not_trigger_repair_or_block_completion() {
         "advisory"
     );
     assert_eq!(payload["issueDetails"][0]["needsAuthorConfirmation"], true);
+}
+
+#[tokio::test]
+async fn suspected_missing_element_is_manual_review_without_auto_repair() {
+    let llm = Arc::new(ScriptedLlm::new(vec![
+        ("STEP:story_macro", story_macro()),
+        ("STEP:character_cast", scripted_cast()),
+        ("STEP:volume_strategy", scripted_volume()),
+        ("STEP:chapter_list", chapter_list()),
+        ("STEP:chapter_draft", "林动赶到时，老铁匠已经死亡。".into()),
+        (
+            "STEP:consistency_review",
+            r#"{"issues":[{"type":"missing_element","severity":"high","evidence":"林动赶到时","suggestion":"请作者确认全文是否缺少本章事件","obligationId":"ch1-req-1"}]}"#.into(),
+        ),
+    ]));
+    let (_dir, kernel, runtime) = runtime_for(llm.clone(), "p17410-missing-manual").await;
+    let novel = runtime.director.create_novel("疑似缺席", "").await.unwrap();
+    let chapter = runtime
+        .director
+        .create_chapter(&novel.id, "第一章", 1)
+        .await
+        .unwrap();
+    let run_id = open_run(
+        &runtime,
+        &novel.id,
+        &chapter.id,
+        "p17410-missing-manual-open",
+    )
+    .await;
+    let (status, signal) = drive_until_paused_or_done(&runtime, &novel.id, &run_id, 40).await;
+    assert_eq!(status, "succeeded");
+    assert!(signal.is_none());
+    assert!(
+        !llm.prompts()
+            .iter()
+            .any(|prompt| prompt.contains("STEP:chapter_repair")),
+        "疑似缺席不能自动触发修复"
+    );
+    let artifacts = WorkflowRepository::list_artifacts(kernel.as_ref(), &novel.id)
+        .await
+        .unwrap();
+    let review = artifacts
+        .iter()
+        .filter(|artifact| artifact.artifact_type == "consistency_review")
+        .max_by_key(|artifact| artifact.version)
+        .expect("review artifact");
+    let payload: serde_json::Value = serde_json::from_str(&review.payload_json).unwrap();
+    assert_eq!(payload["issues"], 0);
+    assert_eq!(payload["manualReviewCount"], 1);
+    assert_eq!(payload["status"], "needs_author_confirmation");
+    assert_eq!(payload["issueDetails"][0]["needsAuthorConfirmation"], true);
+    let debts = WorkflowRepository::list_quality_debt(kernel.as_ref(), &novel.id, &chapter.id)
+        .await
+        .unwrap();
+    assert_eq!(debts.len(), 1, "疑似缺席必须进入可追踪 quality debt");
+    assert!(
+        !artifacts
+            .iter()
+            .any(|artifact| artifact.artifact_type == "repair_notes"),
+        "只有人工确认项时不应调度修复步骤，也不应伪造修复记录"
+    );
 }
 
 #[tokio::test]

@@ -126,13 +126,12 @@ async fn main() {
                     .active_run(&novel_id)
                     .await
                     .expect("active run")
-                {
-                    if matches!(
+                    && matches!(
                         run.state.as_str(),
                         "waiting_approval" | "paused" | "succeeded" | "cancelled" | "failed"
-                    ) {
-                        break;
-                    }
+                    )
+                {
+                    break;
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }

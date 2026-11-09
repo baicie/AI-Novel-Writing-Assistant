@@ -374,6 +374,51 @@ fn clean_review() -> String {
     r#"{"issues":[]}"#.to_string()
 }
 
+#[test]
+fn probe_review_contract_rejects_unknown_ids_and_invented_evidence() {
+    let allowed = BTreeSet::from(["ch1-req-1".to_string()]);
+    let unknown = serde_json::json!({
+        "issues": [{
+            "type": "timeline",
+            "severity": "high",
+            "evidence": "正文证据",
+            "suggestion": "修复",
+            "obligationId": "other-run-id"
+        }]
+    });
+    assert!(validate_review_contract(&unknown, &allowed, "正文证据").is_err());
+
+    let invented = serde_json::json!({
+        "issues": [{
+            "type": "timeline",
+            "severity": "high",
+            "evidence": "不存在的引文",
+            "suggestion": "修复",
+            "obligationId": "ch1-req-1"
+        }]
+    });
+    assert!(validate_review_contract(&invented, &allowed, "正文证据").is_err());
+}
+
+#[test]
+fn probe_detects_a_new_high_issue_after_repair() {
+    let before = vec![serde_json::json!({
+        "type": "continuity_violation",
+        "severity": "high",
+        "obligationId": "ch1-req-1"
+    })];
+    let after = vec![
+        before[0].clone(),
+        serde_json::json!({
+            "type": "contradiction",
+            "severity": "high",
+            "obligationId": "ch1-order-1"
+        }),
+    ];
+    assert!(has_new_high_issues(&before, &after));
+    assert!(!repair_candidate_is_complete("修复后的正文……"));
+}
+
 const DRAFT: &str = "候选正文：雪夜，林动看见老铁匠被杀。";
 
 #[tokio::test]

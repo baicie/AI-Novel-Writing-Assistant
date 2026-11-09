@@ -214,7 +214,7 @@ fn chapters() -> String {
 }
 
 fn issues() -> String {
-    serde_json::json!({"issues":[{"type":"timeline","severity":"high","evidence":"时间线冲突","suggestion":"修正时间"}]}).to_string()
+    serde_json::json!({"issues":[{"type":"timeline","severity":"high","evidence":"候选正文","suggestion":"修正时间"}]}).to_string()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

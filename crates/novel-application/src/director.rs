@@ -15,7 +15,7 @@ use crate::dto::{
     CandidateEditDraftView, ChapterDraftView, ChapterRevisionSnapshot, ChapterSnapshot,
     CharacterSnapshot, CreateNovelInput, GenerationEvent, ListNovelsQuery, ListNovelsResult,
     NovelDetail, NovelSummary, RunCandidateView, RunContract, RunDetailView, RunGateView,
-    RunUsageView, UpdateNovelFields, VolumeSnapshot, event_from_stored,
+    RunInputSnapshot, RunUsageView, UpdateNovelFields, VolumeSnapshot, event_from_stored,
 };
 use crate::error::AppError;
 use crate::hash::{json_hash, sha256_hex};
@@ -517,6 +517,7 @@ impl DirectorService {
                 "story_macro 与 chapter_list 的 Planner 契约版本必须成对固定（v2 + v3）。",
             ));
         }
+        let novel = self.get_novel(&input.novel_id).await?;
         let chapter = self
             .get_chapter(&input.novel_id, &input.target_chapter_id)
             .await?;
@@ -547,6 +548,11 @@ impl DirectorService {
             plan_version: PRODUCTION_PLAN_VERSION.to_string(),
             chapter_plan_version: CHAPTER_PLAN_VERSION.to_string(),
             source_versions,
+            input_snapshot: Some(RunInputSnapshot {
+                title: novel.title.clone(),
+                description: novel.description.clone(),
+                novel_updated_at: novel.updated_at,
+            }),
             target_chapter_id: input.target_chapter_id.clone(),
             provider: input.provider.clone(),
             model: input.model.clone(),

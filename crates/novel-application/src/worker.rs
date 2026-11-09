@@ -33,7 +33,7 @@ mod worker_validation;
 
 pub(super) use context_budget::{context_payload_for_run, payload_for_run, run_scoped_payload};
 pub(super) use worker_validation::{
-    truncate_chars, validate_chapter_plan_references, validate_structured_output_with,
+    validate_chapter_plan_references, validate_structured_output_with,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -589,7 +589,8 @@ impl Worker {
                 )
                 .await;
         }
-        // advisory 只是建议：未采用不触发修复，也不阻塞章节完成。
+        // advisory 只是建议，疑似缺席或证据不足需要作者确认：两者都不能触发
+        // hard repair；问题仍保留在审校产物和 quality debt 中供作者查看。
         let issues: Vec<serde_json::Value> = issues
             .into_iter()
             .filter(|issue| {
@@ -597,6 +598,10 @@ impl Worker {
                     .get("obligationEnforcement")
                     .and_then(serde_json::Value::as_str)
                     != Some("advisory")
+                    && issue
+                        .get("automationDisposition")
+                        .and_then(serde_json::Value::as_str)
+                        != Some("manual_confirmation")
             })
             .collect();
         if issues.is_empty() {
@@ -2276,12 +2281,16 @@ async fn structured_prompt(
     let artifacts = worker.runs.list_artifacts(&claimed.novel_id).await?;
     let (id, version, vars) = match step_id {
         "story_macro" => {
-            let novel = worker.novels.get_novel(&claimed.novel_id).await?;
+            let story_input = if let Some(snapshot) = &claimed.contract.input_snapshot {
+                format!("{}\n{}", snapshot.title, snapshot.description)
+            } else {
+                // 历史合同没有输入快照：明确兼容旧行为，继续读取当前详情；新 Run
+                // 一律在 open_run 时冻结快照，不会进入这条回退路径。
+                let novel = worker.novels.get_novel(&claimed.novel_id).await?;
+                format!("{}\n{}", novel.title, novel.description)
+            };
             let mut vars = BTreeMap::new();
-            vars.insert(
-                "story_input".into(),
-                format!("{}\n{}", novel.title, novel.description),
-            );
+            vars.insert("story_input".into(), story_input);
             let version = match claimed
                 .contract
                 .prompt_versions
@@ -2365,10 +2374,10 @@ async fn structured_prompt(
                 .ok_or_else(|| AppError::integrity("上下文产物缺少 promptText"))?;
             let mut context = prompt_text.to_string();
             context.push_str(
-                "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；没有采用 advisory 建议不构成问题；evidence 必须逐字引用候选正文并能在候选正文中定位；不得引用历史正文。\n",
+                "\n审校要求：必须完整阅读下面的候选正文后再判断；违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；一般质量建议必须标记 enforcement=advisory；missing_element 只有在全文明确确认缺席时才可标记 confidence=confirmed_violation，否则标记 confidence=suspected_absence 并设置 needsAuthorConfirmation=true；证据不足时标记 confidence=insufficient_evidence 并设置 needsAuthorConfirmation=true；evidence 必须逐字引用当前候选正文并能在候选正文中定位；不得引用历史正文。\n",
             );
-            context.push_str("\n候选正文：");
-            context.push_str(&truncate_chars(&candidate.content, 20_000));
+            context.push_str("\n完整候选正文：");
+            context.push_str(&candidate.content);
             let mut vars = BTreeMap::new();
             vars.insert("context".into(), context);
             ("consistency_review", "consistency-review-v2", vars)

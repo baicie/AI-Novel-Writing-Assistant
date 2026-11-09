@@ -44,8 +44,9 @@ fn chapters() -> String {
 }
 fn issues() -> String {
     serde_json::json!({"issues":[
-        {"type":"timeline","severity":"high","evidence":"时间线冲突","suggestion":"修正时间"},
-        {"type":"character","severity":"medium","evidence":"人物状态冲突","suggestion":"修正状态"}]}).to_string()
+        {"type":"timeline","severity":"high","evidence":"正文","suggestion":"修正时间"},
+        {"type":"character","severity":"medium","evidence":"正文","suggestion":"修正状态"}]})
+    .to_string()
 }
 
 async fn run_with(
@@ -201,7 +202,7 @@ async fn residual_issues_after_repair_stop_at_safety_without_commit() {
             ("STEP:volume_strategy", volume()),
             ("STEP:chapter_list", chapters()),
             ("STEP:consistency_review", issues()),
-            ("STEP:chapter_repair", "仍有问题的修复候选".into()),
+            ("STEP:chapter_repair", "仍有问题的修复候选正文".into()),
             ("STEP:consistency_review", issues()),
             ("STEP:chapter_draft", "原始候选正文".into()),
         ],
@@ -771,7 +772,7 @@ async fn cancelled_quality_stop_cannot_be_resumed() {
             ("STEP:volume_strategy", volume()),
             ("STEP:chapter_list", chapters()),
             ("STEP:consistency_review", issues()),
-            ("STEP:chapter_repair", "仍有问题的修复候选".into()),
+            ("STEP:chapter_repair", "仍有问题的修复候选正文".into()),
             ("STEP:consistency_review", issues()),
             ("STEP:chapter_draft", "原始候选正文".into()),
         ],

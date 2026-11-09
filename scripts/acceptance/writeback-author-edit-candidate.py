@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""把作者修订稿写回验收 Run 的候选表（工具，不是产品路径）。
+"""把作者修订稿写回验收 Run 的候选表（验收工具，不是产品路径）。
 
-按产品 `confirm_candidate_after_edit` 的字段语义插入一条新的
-`step_id='author_edit'` 候选，而不是覆盖原候选：
-- 原始 draft / bounded_repair 候选保持不动，验收证据仍可复核；
+正式产品路径是 `confirm_candidate_after_edit`：它会校验 Run 状态、Control Version、
+Gate 类型、候选 CAS 与命令幂等，并在事务内 ResolveGate。日常作者修改必须走产品入口，
+不要把本脚本当成编辑通道。
+
+本脚本只用于已经结束的验收 Run：原始 draft / bounded_repair 候选保持不动，验收证据仍可复核；
 - 不触碰 gate、workflow_control、章节正文与 artifact；
 - 只追加一条 checkpoint_saved 事件，便于在 Run 记录里看到这次编辑。
 
-守卫：写入前必须与「当前最新候选的 id 与 sha256」完全一致，否则拒绝写入，
-防止覆盖其他窗口或后续运行产生的候选。
+守卫：
+1. Run 必须仍停在 `waiting_approval`，Gate 必须包含 `chapter_approval`；
+2. 写入前必须与「当前最新候选的 id 与 sha256」完全一致，否则拒绝写入，
+   防止覆盖其他窗口或后续运行产生的候选。
 
 用法：
   python3 -I writeback-author-edit-candidate.py \\
@@ -16,6 +20,7 @@
 """
 import datetime
 import hashlib
+import json
 import pathlib
 import sqlite3
 import sys
@@ -32,6 +37,23 @@ now_ms = int(datetime.datetime.now().timestamp() * 1000)
 con = sqlite3.connect(db_path)
 con.execute("PRAGMA foreign_keys = ON")
 cur = con.cursor()
+
+# 0. 只允许写回仍在章节确认门上的 Run；已结束、已取消或已提交的 Run 一律拒绝。
+status_gate = cur.execute(
+    "SELECT status, gate_json FROM workflow_control WHERE run_id = ?",
+    (run_id,),
+).fetchone()
+if status_gate is None:
+    raise SystemExit("没有找到这次创作，拒绝写入")
+status, gate_json = status_gate
+if status != "waiting_approval":
+    raise SystemExit(f"这次创作当前状态是 {status}，不在章节确认门上，拒绝写入")
+try:
+    gate = json.loads(gate_json) if gate_json else {}
+except json.JSONDecodeError:
+    raise SystemExit("确认门信息损坏，拒绝写入")
+if "chapter_approval" not in gate.get("artifact_types", []):
+    raise SystemExit("当前确认门不是章节候选，拒绝写入")
 
 # 1. 确认最新候选仍是预期的那条（防止覆盖别人的编辑）
 row = cur.execute(

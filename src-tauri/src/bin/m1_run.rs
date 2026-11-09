@@ -11,7 +11,7 @@
 //! 停在最终确认门，不自动把候选提升为正式正文。产物写入数据目录的
 //! `m1-<runId>.json`，供人工按 M1 复测包评分。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -393,7 +393,7 @@ const VIOLATING_CANDIDATE: &str = "林动揣着玉佩赶回铁匠铺时，院门
 
 const PROBE_REPAIR_OUTPUT_TOKENS: u64 = 16_384;
 
-const REVIEW_INSTRUCTION: &str = "\n审校要求：违反 hard 章节义务时必须填写 obligationId，且只能使用上下文中的义务 ID；没有采用 advisory 建议不构成问题；evidence 必须逐字引用候选正文并能在候选正文中定位；不得引用历史正文。\n";
+const REVIEW_INSTRUCTION: &str = "\n审校要求：必须完整阅读候选正文后再判断；违反 hard 章节义务时必须填写 obligationId，且只能使用本 Run 上下文中的义务 ID；一般质量建议必须标记 enforcement=advisory；missing_element 只有在全文明确确认缺席时才可标记 confidence=confirmed_violation，否则标记 confidence=suspected_absence 并设置 needsAuthorConfirmation=true；证据不足时标记 confidence=insufficient_evidence 并设置 needsAuthorConfirmation=true；evidence 必须逐字引用当前候选正文并能在候选正文中定位；不得引用历史正文。\n";
 
 fn build_review_prompt(context_text: &str, candidate: &str) -> Result<String, String> {
     let asset = novel_prompt::resolve("consistency_review", "consistency-review-v2")
@@ -412,15 +412,6 @@ fn parse_review(text: &str) -> Result<serde_json::Value, String> {
         .map_err(|_| "Reviewer 返回的不是合法 JSON".to_string())
 }
 
-fn review_issues(value: &serde_json::Value) -> Vec<serde_json::Value> {
-    value
-        .get("issues")
-        .or_else(|| value.get("issueDetails"))
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
 fn normalized(text: &str) -> String {
     text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
@@ -433,6 +424,7 @@ fn normalized(text: &str) -> String {
 struct ExpectedViolationIds {
     forbidden: Option<String>,
     required: Option<String>,
+    hard: Vec<String>,
 }
 
 fn expected_violation_ids(
@@ -479,6 +471,7 @@ fn expected_violation_ids(
         let Some(id) = obligation.get("id").and_then(serde_json::Value::as_str) else {
             continue;
         };
+        expected.hard.push(id.to_string());
         match kind {
             "forbidden_event" if expected.forbidden.is_none() => {
                 expected.forbidden = Some(id.to_string())
@@ -526,6 +519,102 @@ fn issue_cites_any(
         });
     }
     ids.into_iter().any(|id| issue_cites(issues, id, candidate))
+}
+
+fn validate_review_contract(
+    value: &serde_json::Value,
+    allowed_obligation_ids: &BTreeSet<String>,
+    candidate: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let issues = value
+        .get("issueDetails")
+        .and_then(serde_json::Value::as_array)
+        .or_else(|| value.get("issues").and_then(serde_json::Value::as_array))
+        .ok_or_else(|| "Reviewer JSON 缺少 issues 数组或 issueDetails 数组".to_string())?;
+    let mut seen_issue_ids = BTreeSet::new();
+    for (index, issue) in issues.iter().enumerate() {
+        for key in ["type", "severity", "evidence", "suggestion"] {
+            if issue.get(key).and_then(serde_json::Value::as_str).is_none() {
+                return Err(format!("Reviewer 问题 #{index} 缺少字符串字段 {key}"));
+            }
+        }
+        if let Some(id) = issue.get("obligationId") {
+            let id = id
+                .as_str()
+                .ok_or_else(|| format!("Reviewer 问题 #{index} 的 obligationId 不是字符串"))?;
+            if !allowed_obligation_ids.contains(id) {
+                return Err(format!("Reviewer 引用了当前 Run 之外的义务 ID：{id}"));
+            }
+        }
+        if issue.get("severity").and_then(serde_json::Value::as_str) == Some("high")
+            && issue.get("obligationId").is_none()
+        {
+            return Err(format!("Reviewer high 问题 #{index} 缺少 obligationId"));
+        }
+        if let Some(issue_id) = issue.get("issueId").and_then(serde_json::Value::as_str)
+            && !seen_issue_ids.insert(issue_id.to_string())
+        {
+            return Err(format!("Reviewer 返回了重复 issueId：{issue_id}"));
+        }
+        if let Some(enforcement) = issue.get("enforcement")
+            && !matches!(enforcement.as_str(), Some("hard" | "advisory"))
+        {
+            return Err(format!("Reviewer 问题 #{index} 的 enforcement 无效"));
+        }
+        if let Some(confidence) = issue.get("confidence")
+            && !matches!(
+                confidence.as_str(),
+                Some("confirmed_violation" | "suspected_absence" | "insufficient_evidence")
+            )
+        {
+            return Err(format!("Reviewer 问题 #{index} 的 confidence 无效"));
+        }
+        if issue
+            .get("needsAuthorConfirmation")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(format!(
+                "Reviewer 问题 #{index} 的 needsAuthorConfirmation 无效"
+            ));
+        }
+        let evidence = issue
+            .get("evidence")
+            .and_then(serde_json::Value::as_str)
+            .filter(|evidence| !evidence.trim().is_empty())
+            .ok_or_else(|| format!("Reviewer 问题 #{index} 缺少 evidence"))?;
+        if !normalized(candidate).contains(&normalized(evidence)) {
+            return Err(format!("Reviewer 问题 #{index} 的 evidence 不来自当前候选"));
+        }
+    }
+    Ok(issues.clone())
+}
+
+fn high_issue_identity(issue: &serde_json::Value) -> Option<String> {
+    if issue.get("severity").and_then(serde_json::Value::as_str) != Some("high") {
+        return None;
+    }
+    let kind = issue
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let obligation = issue
+        .get("obligationId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    Some(format!("{kind}\u{001f}{obligation}"))
+}
+
+fn has_new_high_issues(before: &[serde_json::Value], after: &[serde_json::Value]) -> bool {
+    let known: BTreeSet<String> = before.iter().filter_map(high_issue_identity).collect();
+    after
+        .iter()
+        .filter_map(high_issue_identity)
+        .any(|identity| !known.contains(&identity))
+}
+
+fn repair_candidate_is_complete(candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    !candidate.is_empty() && !candidate.ends_with("...") && !candidate.ends_with('…')
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -686,14 +775,39 @@ async fn probe_run() -> Result<(), String> {
     )
     .await?;
     let review1 = parse_review(&review1_raw)?;
-    let issues1 = review_issues(&review1);
+    let allowed_obligation_ids: BTreeSet<String> = expected.hard.iter().cloned().collect();
+    let issues1 =
+        match validate_review_contract(&review1, &allowed_obligation_ids, VIOLATING_CANDIDATE) {
+            Ok(issues) => issues,
+            Err(error) => {
+                let path = data_dir.join(format!("m1-probe-{run_id}.json"));
+                let probe = serde_json::json!({
+                    "runId": run_id,
+                    "violatingCandidate": VIOLATING_CANDIDATE,
+                    "review1": review1_raw,
+                    "review1Parsed": review1,
+                    "deterministicContract": {"reviewJsonValid": false, "error": error},
+                    "reviewerCitesExpected": false,
+                    "repair": null,
+                    "review2": null,
+                    "authorReading": "NOT_RUN",
+                    "usage": {"review1": usage_json(&usage1)},
+                    "verdict": "M1_FAIL_REVIEWER_CONTRACT"
+                });
+                std::fs::write(&path, serde_json::to_string_pretty(&probe).unwrap())
+                    .map_err(|error| format!("写入探针产物失败：{error}"))?;
+                println!("M1_PROBE_RESULT reviewer=FAIL_CONTRACT repair=NOT_RUN rereview=NOT_RUN");
+                println!("M1_PROBE_ARTIFACTS file={}", path.display());
+                return Ok(());
+            }
+        };
     let reviewer_pass = issue_cites_any(
         &issues1,
         &[expected.forbidden.clone(), expected.required.clone()],
         VIOLATING_CANDIDATE,
     );
     println!(
-        "M1_PROBE_REVIEW issues={} reviewer_cites_expected={reviewer_pass}",
+        "M1_PROBE_REVIEW issues={} reviewer_cites_expected={reviewer_pass} current_evidence=true",
         issues1.len()
     );
 
@@ -704,9 +818,15 @@ async fn probe_run() -> Result<(), String> {
             "violatingCandidate": VIOLATING_CANDIDATE,
             "review1": review1_raw,
             "review1Parsed": review1,
+            "deterministicContract": {
+                "reviewJsonValid": true,
+                "obligationIdsCurrentRun": true,
+                "evidenceFromCurrentCandidate": true
+            },
             "reviewerCitesExpected": false,
             "repair": null,
             "review2": null,
+            "authorReading": "NOT_RUN",
             "usage": {"review1": usage_json(&usage1)},
             "verdict": "M1_FAIL_REVIEWER"
         });
@@ -742,10 +862,11 @@ async fn probe_run() -> Result<(), String> {
     .await?;
     let repaired = repair_raw.trim().to_string();
     let repair_nonempty = !repaired.is_empty();
+    let repair_not_truncated = repair_candidate_is_complete(&repaired);
     // 修复是否真的补上了“在场目击”由复验阶段的 AI 审校判断（review2 的结构化结果），
     // 这里不做关键词匹配：修文可以换用同义词，硬编码词表只会产生假阴性。
     println!(
-        "M1_PROBE_REPAIR nonempty={repair_nonempty} chars={} budget={PROBE_REPAIR_OUTPUT_TOKENS}",
+        "M1_PROBE_REPAIR nonempty={repair_nonempty} not_truncated={repair_not_truncated} chars={} budget={PROBE_REPAIR_OUTPUT_TOKENS}",
         repaired.chars().count()
     );
 
@@ -762,22 +883,35 @@ async fn probe_run() -> Result<(), String> {
     )
     .await?;
     let review2 = parse_review(&review2_raw)?;
-    let issues2 = review_issues(&review2);
+    let review2_contract = validate_review_contract(&review2, &allowed_obligation_ids, &repaired);
+    let issues2 = match &review2_contract {
+        Ok(issues) => issues.clone(),
+        Err(_) => Vec::new(),
+    };
     let residual_expected = issue_cites_any(
         &issues2,
         &[expected.forbidden.clone(), expected.required.clone()],
         &repaired,
     );
+    let new_high = has_new_high_issues(&issues1, &issues2);
+    let rereview_contract_pass = review2_contract.is_ok();
+    let model_review_clean = rereview_contract_pass && issues2.is_empty();
     println!(
-        "M1_PROBE_REREVIEW issues={} residual_expected={residual_expected}",
+        "M1_PROBE_REREVIEW issues={} residual_expected={residual_expected} new_high={new_high} contract={rereview_contract_pass}",
         issues2.len()
     );
 
     let path = data_dir.join(format!("m1-probe-{run_id}.json"));
-    let verdict = if repair_nonempty && !residual_expected {
-        "M1_READY_FOR_AUTHOR_REVIEW"
-    } else {
+    let verdict = if !repair_nonempty || !repair_not_truncated {
         "M1_FAIL_REPAIR"
+    } else if !rereview_contract_pass {
+        "M1_FAIL_REREVIEW_CONTRACT"
+    } else if new_high {
+        "M1_FAIL_NEW_HIGH"
+    } else if residual_expected || !model_review_clean {
+        "M1_FAIL_REPAIR"
+    } else {
+        "M1_READY_FOR_AUTHOR_REVIEW"
     };
     let probe = serde_json::json!({
         "runId": run_id,
@@ -788,7 +922,22 @@ async fn probe_run() -> Result<(), String> {
         "repair": repaired,
         "review2": review2_raw,
         "review2Parsed": review2,
-        "residualExpected": residual_expected,
+        "deterministicContract": {
+            "reviewJsonValid": true,
+            "obligationIdsCurrentRun": true,
+            "review1EvidenceFromCurrentCandidate": true,
+            "review2EvidenceFromCurrentCandidate": rereview_contract_pass,
+            "repairNonEmpty": repair_nonempty,
+            "repairNotTruncated": repair_not_truncated,
+            "newHighAbsent": !new_high
+        },
+        "modelReview": {
+            "reviewerCitesExpected": reviewer_pass,
+            "residualExpected": residual_expected,
+            "newHigh": new_high,
+            "cleanAfterRepair": model_review_clean
+        },
+        "authorReading": "NOT_RUN",
         "usage": {
             "review1": usage_json(&usage1),
             "repair": usage_json(&usage2),

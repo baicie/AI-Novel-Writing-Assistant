@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::Value;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 use tokio_util::sync::CancellationToken;
@@ -67,6 +69,21 @@ pub async fn consume_sse<R>(
 where
     R: AsyncBufRead + Unpin,
 {
+    consume_sse_with_idle_timeout(reader, tokens, cancel, Duration::ZERO).await
+}
+
+/// Consume an SSE response while bounding the time between data reads. A zero
+/// duration preserves the legacy unbounded-idle behavior for callers that do
+/// not have a provider policy.
+pub async fn consume_sse_with_idle_timeout<R>(
+    reader: R,
+    tokens: &tokio::sync::mpsc::Sender<String>,
+    cancel: &CancellationToken,
+    idle_timeout: Duration,
+) -> Result<(String, TokenUsage), LlmError>
+where
+    R: AsyncBufRead + Unpin,
+{
     let mut lines = reader.lines();
     let mut text = String::new();
     let mut usage = TokenUsage::unknown();
@@ -76,10 +93,7 @@ where
         if cancel.is_cancelled() {
             return Err(LlmError::Cancelled);
         }
-        let line_result = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
-            line = lines.next_line() => line,
-        };
+        let line_result = next_line(&mut lines, cancel, idle_timeout).await?;
         let line = match line_result {
             Ok(Some(line)) => line,
             Ok(None) => break,
@@ -91,8 +105,8 @@ where
             }
             Err(_) => {
                 return Err(LlmError::Unavailable {
-                    billed: false,
-                    reason: "模型流没有开始".into(),
+                    billed: true,
+                    reason: "模型流没有开始，无法确认是否已计费".into(),
                 });
             }
         };
@@ -126,6 +140,32 @@ where
         });
     }
     Ok((text, usage))
+}
+
+async fn next_line<R>(
+    lines: &mut tokio::io::Lines<R>,
+    cancel: &CancellationToken,
+    idle_timeout: Duration,
+) -> Result<Result<Option<String>, std::io::Error>, LlmError>
+where
+    R: AsyncBufRead + Unpin,
+{
+    if idle_timeout.is_zero() {
+        return Ok(tokio::select! {
+            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+            line = lines.next_line() => line,
+        });
+    }
+    tokio::select! {
+        _ = cancel.cancelled() => Err(LlmError::Cancelled),
+        result = tokio::time::timeout(idle_timeout, lines.next_line()) => match result {
+            Ok(line) => Ok(line),
+            Err(_) => Err(LlmError::Unavailable {
+                billed: true,
+                reason: "模型流长时间没有新数据，无法确认是否已计费".into(),
+            }),
+        },
+    }
 }
 
 #[cfg(test)]

@@ -24,25 +24,33 @@
 
 ## 决策
 
-把「缺席」当成一个需要举证的断言，而不是默认成立的事实。
+把「缺席」当成需要完整候选正文和可信度标记的断言，而不是默认成立的事实。
 
-- 审校输出保持 AI-first：判定仍由 AI 给出，不引入关键词兜底来判断「某个要素在不在」。
-- 但在契约层要求审校**说明它检索了什么范围**，并由确定性代码提供一个可反驳的通道：
-  如果义务要求的关键要素在正文/上下文中确实存在，则该 `missing_element` 判定不成立。
-- 两类问题分开处理：`contradiction`（找到反例）默认可信度高；`missing_element`
-  （没找到）需要更强的证据或更低的默认严重度。
+- 审校保持 AI-first：语义判断仍由 AI 给出，不引入关键词匹配或固定词表替代自然语言理解。
+- `evidence` 的确定性校验只证明引文确实来自当前候选正文，不能把引文存在当成缺席成立的证明。
+- 直接矛盾类问题（`contradiction`、`continuity_violation`、`ordering_violation`、
+  `causal_violation`）可以在 AI 明确断言且证据可定位时进入有界修复。
+- `missing_element` 必须在完整候选正文上判断。局部证据无法支持全文缺席时，结果进入人工确认，
+  不触发自动修复，也不伪装成 clean。
 
 ## 当前规则
 
-- 新增或修改审校 schema 时，`missing_element` 必须携带：
-  - 已检查范围（正文全文、上下文来源）；
-  - 缺失的具体要素（不是「不够好」，而是「义务里的哪一项没有出现」）。
-- 确定性代码可以对**结构化要素**做存在性核对（例如义务里点名的地点名、参与者名是否出现），
-  这属于「对已结构化 AI 输出的确定性后处理」，允许；不得用它替代 AI 的语义判断。
-- 缺席类问题不得单独构成「一次修复收敛」的证据。验收报告里若要声称 Repair 能力，
-  必须说明被修的问题在修复前**确实成立**。
-- 章节审计与自动导演链路的非阻断规则不变：这类误判只会产生一次无意义修复，
-  不会升级成 replan 或全局失败。
+- `consistency-review-v2` 要求审校完整阅读候选正文，并使用以下可信度字段：
+  - `confidence=confirmed_violation`：全文足以支持确定违反；
+  - `confidence=suspected_absence`：局部证据不足以证明全文缺席；
+  - `confidence=insufficient_evidence`：解释或证据不足以支持结论；
+  - `needsAuthorConfirmation=true`：保留人工确认路径。
+- 没有明确 `confidence` 的 `missing_element` 默认按 `suspected_absence` 处理；确定性代码不会替模型
+  判断同义表达是否满足义务。
+- 每个 issue 的 `evidence` 都必须能在当前候选正文中定位。不存在的引文、历史正文引文和空证据
+  直接 fail-closed，不能转成 PASS。
+- `enforcement=advisory` 的建议只进入提示和 quality debt，不进入 hard repair。对 hard 义务，
+  系统写入 `automationDisposition=repair`、`manual_confirmation` 或 `advisory`，并以 `issues`
+  只统计可自动修复项；`manualReviewCount` 统计需要作者确认的项。
+- 缺席类问题不得单独构成「一次修复收敛」的证据。验收报告里若要声称 Repair 能力，必须说明
+  被修的问题在修复前确实成立；`M1_READY_FOR_AUTHOR_REVIEW` 也不等于作者阅读通过。
+- 章节审计与自动导演链路的非阻断规则不变：疑似缺席是可追踪的质量债和人工确认项，不升级为
+  replan 或全局失败。
 
 ## 示例
 
@@ -56,8 +64,9 @@
 结论：前提为假；该义务已满足
 ```
 
-正确做法：要求审校给出缺失要素清单与检索范围；确定性核对发现要素存在时，
-把该判定降级为「审校存疑」，不触发修复，也不计入收敛证据。
+正确做法：把完整候选正文提供给审校；如果模型不能确认全文缺席，输出
+`confidence=suspected_absence` 与 `needsAuthorConfirmation=true`。系统把该判定保留为人工确认项，
+不触发修复，也不计入自动修复收敛证据。
 
 ## 失败模式
 
