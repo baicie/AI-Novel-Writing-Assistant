@@ -616,3 +616,64 @@ A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑�
 本分支基于 `0a51abc0`。Beta-A3 同期前进到 `8e8486a3`，新增内容只有 `docs/acceptance/BETA-A3-REVIEW-AND-DESKTOP-VALIDATION.md`，与本分支文件集交集为空。
 
 与 `beta` 的合并冲突仅发生在 `docs/architecture/UPSTREAM-SYNC-A1-AUDIT.md`（两轮审计同路径），已通过「保留第一轮正文 + 追加本轮落地记录」解决；`worker_validation.rs` 的围栏 JSON 提取修复与本轮改动无重叠，自动合并成功。
+
+---
+
+## 16. 第三轮：调用观测正确性收口（Sync-A1-R2，2026-11-09）
+
+§15 落地了记账粒度，但两处分类错误让「调用次数」和「费用未知」仍不可信。本节记录这两处缺陷的复现、修复与**计数保证的真实边界**。
+
+### 16.1 已确认的分类错误
+
+**（1）0028 的默认值把 NULL 用量标成 known。**
+
+`ALTER TABLE llm_invocation ADD COLUMN usage_state TEXT NOT NULL DEFAULT 'known'` 在 SQLite 上会把**所有已有行**填成默认值。于是 0027 之前 provider 未返回 usage（两个 token 列都是 NULL）的历史调用，升级后全部变成「用量已确认」。复现结果：5 条历史记录里 `known_calls = 5`，正确值应为 1。
+
+后果是 `known_calls` 虚高、`prompt_tokens` 被 0 掩盖、界面永远不会提示「费用未知」。
+
+修复用 `0029` 一次性回填，不原地改写已发布的 `0028`：
+
+```sql
+UPDATE llm_invocation SET usage_state = 'unknown'
+WHERE usage_state = 'known' AND audit_status = 'succeeded'
+  AND (prompt_tokens IS NULL OR completion_tokens IS NULL);
+```
+
+三个约束：不清空已有数值、不改变总条数、只处理 `succeeded` 行（避免覆盖新代码写入的 `provider_failed` / `cancelled` / `unbilled`）。
+
+**（2）`InvalidResponse` 同时代表两种阶段，被统一算作未计费。**
+
+| 构造点 | 实际阶段 | 正确结论 |
+| --- | --- | --- |
+| `classify_http` 未处理状态码 | 请求已到达服务端 | unknown |
+| `parse_sse_line` 非 JSON 行 | 流已开始 | unknown |
+| 空密钥 / 预算预检 | 请求未发出 | unbilled |
+
+旧映射把它们与「发出前拒绝」一起归入 `Rejected`。修复方式是新增 `StreamCorrupted` 与 `ProviderError` 变体，让**错误来源**决定分类。新增的契约测试把同一句话放进两个阶段，断言结论不同——用字符串匹配实现的版本会失败。
+
+### 16.2 计数保证的真实边界（重要）
+
+§15 与 §7 都使用了「一次物理请求一条记录」的措辞。**这个精度不存在。** `ProviderPolicy.max_attempts` 默认 2，遇到可安全重试的失败会重发：
+
+| 场景 | 真实 HTTP 请求 | 记录行数 |
+| --- | --- | --- |
+| 首次成功 | 1 | 1 (known) |
+| 429 / 流前 5xx 后重试成功 | 2 | 1 (known) |
+| 429 重试仍失败 | 2 | 1 (unbilled) |
+| 流开始后断开 | 1（不重发） | 1 (unknown) |
+| 结构化解析失败 + 一次修复 | 2 | 2 |
+
+因此记录粒度是**逻辑调用**（一次 `generate`），不是 HTTP 请求。本轮选择修正文档与界面文案，而不是把观测点下沉到发送层：后者会扩大改动面，且不改变费用准确性。如果未来确实需要逐请求精度，观测点必须下沉到 `novel-llm` 的发送层。
+
+### 16.3 PR #29 兼容性结论
+
+PR #29（`dd5b887a`）改动 `ProviderPolicy`、SSE 长响应与空闲超时、Reviewer 与 Run 输入冻结，未触及记账路径。本轮以该 HEAD 为基线，用真实 `OpenAiCompatibleProvider` 覆盖长流、空闲超时、取消、上游 error 事件四种结果，全部通过。未使用 PR #29 旧 HEAD 的测试结果。
+
+### 16.4 残余项
+
+| 项 | 级别 | 说明 |
+| --- | --- | --- |
+| `first_token_ms` 未采集 | P1 | 需先让 `consume_sse` 返回 metrics |
+| 失败分类未携带 `httpStatus` | P1 | 能力档案的前置条件 |
+| `estimated_cost_micros` / `usage_ledger` 死结构 | P2 | 既未启用也未清理 |
+| SQLite 无保留策略（§7.5） | P1 | 仍成立，未在本轮处理 |
