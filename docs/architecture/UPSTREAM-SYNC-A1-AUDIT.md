@@ -1,358 +1,618 @@
-# Upstream-Sync-A1 审计与选择性同步报告
+# 上游同步审计 A1：差异盘点与选择性同步
 
-## 摘要
+本文件记录 `AI-Novel-Writing-Assistant` fork 与上游 `ExplosiveCoderflome/AI-Novel-Writing-Assistant` 的一次全量差异审计，以及本轮实际落地的移植。
 
-| 项目 | 结果 |
-| --- | --- |
-| 审计日期 | 2026-11-09 |
-| Fork head（审计时） | `7d8e3a00`（`fix/beta-a3-reviewer-and-desktop-acceptance`） |
-| Fork beta / main | `0a51abc0` / `eff69f22` |
-| Upstream main / beta | `ebee8eef`（与 beta 同 SHA） |
-| Merge-base | `5cd6a1324eeabb3990a872ad955eec20f75ecd3d` |
-| 上游独有提交 | 118 |
-| Fork beta 独有提交 | 372 |
-| Fork main 独有提交 | 244 |
-| 上游 rename-only 差异文件 | 1168（+63,561 / −8,879） |
+审计立场：**不因为上游更新就默认上游更好。** fork 已在 Rust/Tauri 内核上重写了创作主链路，上游的 Node/Prisma 实现多数不适用；本文件区分「值得移植的能力」「只需要吸收的测试与设计思路」「不应移植的实现」。
 
-**结论先行**：不建议整体合并上游。上游 118 个提交中真正值得引入的是三个工程契约——**物理调用独立记账**、**模型能力档案（ProviderCapabilityProfile）**、**结构化输出失败分类**——以及一批可直接转成 Fork 测试 fixture 的故障场景。本轮已落地其中范围最小、收益最高的一项：物理调用独立记账。其余形成 Backlog。
+## 1. 基线
 
-> 关于 Agent 协作：仓库 AGENTS.md 允许在用户逐次批准后使用 **Luna 系列**子代理，本环境未提供 Luna 模型，因此本轮审计与实现全部由主代理完成，未派生任何子代理。
+审计开始前重新 `fetch --all --prune`，以下 SHA 为重新计算后的实际值（与任务书给出的起点一致）。
 
----
+| 项 | SHA | 说明 |
+|---|---|---|
+| `upstream/main` | `ebee8eef2287864b30be826fb2f1a39eef757d44` | 上游唯一活跃分支 |
+| `upstream/beta` | `ebee8eef` | 与 upstream/main 相同 |
+| `origin/main` | `eff69f229727ab90f4102c05cfc705116cb1ded5` | fork 主线 |
+| `origin/beta` | `0a51abc06515866ea7197e8ef4fa8b3c07d6c388` | fork 当前研发基线 |
+| merge-base | `5cd6a1324eeabb3990a872ad955eec20f75ecd3d` | 2026-10-11 |
 
-## 1. 分叉状态
-
-审计开始时重新 fetch 了 `origin` 与 `upstream`，未依赖任务描述中的旧 SHA。计算结果与任务给出的基线完全一致：
+双向提交数量：
 
 ```
-upstream/main ... origin/main : 118 (upstream-only) / 244 (fork-only)
-upstream/main ... origin/beta : 118 (upstream-only) / 372 (fork-only)
-upstream/beta ...  origin/beta : 118 (upstream-only) / 372 (fork-only)
-merge-base                    : 5cd6a1324eeabb3990a872ad955eec20f75ecd3d
+upstream/main 独有   118
+fork/beta 独有       372
+fork/main 独有       244
 ```
 
-`upstream/beta` 与 `upstream/main` 同 SHA，说明上游没有独立的预发布分支，不能按 Fork 的 `beta` 模型对照。
+## 2. 完整差异文件统计
 
-## 2. 差异文件统计
+`git diff --name-status origin/beta upstream/main` 的完整结果（不是 GitHub 界面截断的前 300 条）：
 
-上游侧（`merge-base..upstream/main`）：
+```
+总计 2224 个文件
+  A（新增）  621
+  D（删除） 1012
+  M（修改）  591
+```
 
-| 目录 | 文件数 |
-| --- | --- |
-| `server/` | 836 |
-| `client/` | 175 |
-| `docs/` | 110 |
-| `shared/` | 28 |
-| `site/` | 8 |
-| `desktop/` | 3 |
-| `.github/` | 3 |
-| 其他（lock、README、AGENTS、临时 summary） | 4 |
+按顶层目录：
 
-按状态：新增 621、删除 6、修改 541。
+| 目录 | 文件数 | 解读 |
+|---|---|---|
+| `server/src` | 578 | 上游 Express/Prisma 实现，fork 未采用 |
+| `server/tests` | 259 | 上游 Node 测试 |
+| `client/src` | 232 | React 前端，与 fork 同源但有分叉 |
+| `src-tauri/permissions` | 136 | 上游桌面壳权限清单 |
+| `docs/tauri-migration` | 120 | 上游迁移文档 |
+| `crates/*` | 约 200 | **fork 独有**的 Rust 内核 |
+| `backups/` | 54 | fork 侧的历史备份目录 |
+| `tests/desktop-e2e` | 53 | E2E |
 
-上游 118 个提交中，**96 个提交只碰 `docs/` 与 `README.md`**，15 个提交触及 `server/src/llm`，32 个触及 `client/`。真正带运行时语义的改动远少于提交数量给人的印象。
+其中 1012 个 `D` 绝大多数是 fork 主动删除的上游 `server/` 与 `docs/` 文件——因为 fork 用 Rust 重写了同一批能力。
 
-## 3. 架构差异（决定移植方式）
+## 3. 关键结构性事实
 
-| 维度 | Upstream | Fork |
-| --- | --- | --- |
-| 运行时 | Node + Express + Prisma | Rust workspace（11 crates，182 个 `.rs`，约 64.8k 行）+ Tauri 2 |
-| 桌面入口 | `desktop/` Electron/Tauri 薄壳 | `src-tauri` → `novel-application::Runtime` |
-| 持久化 | Prisma migration | 手写 SQL migration（`migrations/0001..0028`）+ `novel-storage-sqlite` |
-| 生成入口 | LangChain `@langchain/*` | `novel-llm` 自研 reqwest + SSE |
-| 结构化输出 | `structuredInvoke` + Zod + 原生 JSON 模式 | 提示约束 + `serde` 校验 + 一次有界修复 |
-| 编排 | `app/director/productionKernel` | `novel-workflow` + `novel-application::worker` |
-| 任务中心 | Prisma 投影 | SQLite 投影 + Tauri IPC |
+这一条决定了后面所有判断：
 
-`server/` 在 Fork 中仍保留 1,803 个文件，但它是**旧内核遗留**，Tauri 组合根只装配 Rust crates。任何"把上游 TypeScript 搬进来"的做法都会同时维护两套运行时，因此本报告的所有移植建议都按"提取契约 + 在 Rust 中重写"处理。
+fork 存在**两套 LLM 实现**，但桌面产品只跑 Rust 那套。
 
-## 4. 领域差异矩阵
+- **Rust 内核（产品路径）**：`src-tauri/src/lib.rs:29-32` 的 `llm_provider()` 直接返回 `ProtocolRouterProvider::new()`。Tauri 进程是纯 Rust，`tauri.conf.json` 无 sidecar。
+- **Node server（遗留副本）**：`server/src/llm/**` 仍在 `origin/beta` 中，`Dockerfile.api` 仍构建它作为 Web API；但桌面端不启动它。`client/src/platform/desktopApiAdapter.ts:496-497` 把 `/llm/model-routes` 等路径全部截到 Tauri command。
 
-图例：`UPSTREAM_ONLY` 上游有而 Fork 无；`FORK_ONLY` Fork 独有；`BOTH_DIFFERENT` 双方都有但路线不同；`ALREADY_EQUIVALENT` 能力等效；`INCOMPATIBLE` 依赖旧内核、不可直接引入。
+因此「fork 是否支持 X」必须分别回答。本轮所有结论以 **Rust 内核**为准。
 
-| 领域 | 判定 | 证据与说明 |
-| --- | --- | --- |
-| 模型 Provider 与路由 | `BOTH_DIFFERENT` | 上游 `server/src/llm/factory.ts` + `modelRouter.ts` 走 LangChain 多协议；Fork `crates/novel-llm/src/router.rs` 只支持 `openai-compatible` 与 `ollama`，Anthropic 等协议仅能读模型列表、不能生成。上游多协议不能直接移植。 |
-| 模型能力探测 | `UPSTREAM_ONLY` | 上游 `server/src/llm/compatibility/`（`profile.ts`/`defaults.ts`/`probe.ts`/`adapter.ts`/`store.ts`）；Fork `ProviderCapabilities` 是**静态 struct**，`structured_output: false`、`tool_call: false`（`crates/novel-llm/src/provider.rs:13-19`），无端点级隔离、无探测、无能力存储。 |
-| 结构化输出与修复 | `BOTH_DIFFERENT` | 上游按 `json_schema → json_object → tool_calling → prompt_only` 顺序降级并带失败模式记录；Fork 只有提示约束 + 一次修复（`novel-llm/src/structured.rs`，`may_repair`），`parse_structured_json` 仅剥离 code fence。 |
-| 结构化失败分类 | `UPSTREAM_ONLY` | 上游 `compatibility/adapter.ts::implicatesStructuredMode` 明确把 401/403/429、限流、网络、取消、超时、预算耗尽排除在"不支持该模式"之外；Fork 无此概念。**这是最值得移植的工程思想之一。** |
-| 思考/推理参数 | `BOTH_DIFFERENT` | 上游有 5 种控制方式（`thinking`/`thinking_boolean`/`enable_thinking`/`reasoning_effort`/`none`）与 4 种 reasoning 字段探测；Fork 仅在用户显式选择时透传 `reasoning_effort`（`provider.rs`）。 |
-| Prompt 管理 | `BOTH_DIFFERENT` | 上游 Prompt Registry（TS，`server/src/prompting`）；Fork `novel-prompt` 单文件 `PromptAsset` 表，版本化但无 contextPolicy/outputSchema。路线不同，**不合并**。 |
-| Token 与费用 | `BOTH_DIFFERENT` | 上游按物理调用记录 + 压缩 payload 存储；Fork 按 step 记录 → 本轮已修正为按物理调用。 |
-| 调用观测 | `UPSTREAM_ONLY` → **本轮已同步** | 上游 `0026d0cd`：链式 attempt、首次/修复独立、payload 留存策略。Fork 原实现把修复用量合并进首次请求、失败请求不落库。见第 6 节。 |
-| Director/Agent 编排 | `BOTH_DIFFERENT` | 上游 `productionKernel`（阶段 + 检查点 + 未知结果确认）；Fork `novel-workflow` plan + `worker`。语义接近，实现不可复用。 |
-| 暂停/恢复/幂等 | `ALREADY_EQUIVALENT` | Fork `RecoveryDecision::HoldInterrupted`（`novel-workflow/src/recover.rs`）已实现"结果未知必须人工确认"，与上游 `93a1c914` 同结论；Fork 还额外有 `AttemptPhase` 与租约栅栏。 |
-| 章节规划与正文生成 | `BOTH_DIFFERENT` | 上游 production kernel + 短篇参考；Fork `production_plan` v1/v2/v3 + `chapter-chain-v1`，硬义务（hard obligations）机制更严格。 |
-| Reviewer 与质量债 | `ALREADY_EQUIVALENT` | Fork 已有 `chapter_quality_debt`、`structured_failure` 产物、审校证据可定位校验（`obligations::validate_review_evidence`）。上游 `0e52138e`/`9facdb62` 的问题 Fork 已用别的机制解决。 |
-| 人物/世界观/伏笔/记忆 | `BOTH_DIFFERENT` | 上游结构化记忆 + 短篇参考；Fork 有 `structured_memory`、`knowledge`、`plot`、`continuity` 独立模块。功能重叠，不建议互换。 |
-| 章节编辑器 | `BOTH_DIFFERENT` | 上游 `5ca31f93` 重写 `ChapterTextEditor.tsx`（+759 行）、新增 Ghost Text 与 `editorDocument`。Fork 编辑器已有自己的 document/draftState 模型。**只应吸收交互设计，不能照搬。** |
-| 桌面 UI 与运行时 | `FORK_ONLY` | 上游 `desktop/` 仅 3 个文件变更；Fork 已完成 Tauri 2 迁移（`src-tauri` + `client/src/platform/desktopTransport.ts`）。 |
-| 数据持久化 | `INCOMPATIBLE` | 上游 Prisma/PostgreSQL+SQLite 双 schema；Fork 手写 SQL + `SqliteKernel`。上游 migration 不能执行。 |
-| 安全与权限 | `ALREADY_EQUIVALENT` | Fork 已有端点鉴权（`authorize_endpoint`）、`redact_secrets`、`OsSecretStore`、credential intent。上游 `redactInvocationPayload` 的字段白名单思想可借鉴，但核心能力已有。 |
-| 构建/发布/CI | `FORK_ONLY` | Fork 有独立发布链路与 `v0.1.1-beta.6` 版本；上游 `release/desktop-v0.5.22` 等分支与 Fork 无关。 |
-| 渠道通知（飞书/钉钉） | `S3` | 上游 `2681d30a`/`ebee8eef`。与当前 Beta 验收无关，且会引入外部回调面。 |
-| 官网动画 | `S3` | 上游 `9e0276b4`/`432cb0d0`（`site/`）。与产品无关。 |
+## 4. 功能领域差异矩阵
 
-## 5. 第二阶段：模型兼容能力专项回答
+标注含义：`UPSTREAM_ONLY` 上游有 fork 无；`FORK_ONLY` fork 有上游无；`BOTH_DIFFERENT` 双方都有但路线不同；`ALREADY_EQUIVALENT` 已等效；`INCOMPATIBLE` 架构冲突不宜引入。
 
-对照上游 `44e0a335`、`20650f07`、`7c94bb2a`、`9a68e37f`，逐条回答任务提出的十个问题。
+| 领域 | 判定 | 说明 |
+|---|---|---|
+| **模型 Provider 与路由** | BOTH_DIFFERENT | fork 有三态能力字段与四层来源优先级（更严格）；上游有端点级 profile |
+| **结构化输出与修复** | UPSTREAM_ONLY | fork 只会「prompt 要求 JSON + 一次修复」；上游有 json_schema / json_object / tool_calling |
+| **Prompt 管理** | BOTH_DIFFERENT | fork 用 `crates/novel-prompt` 版本化资产；上游用模板工作台 |
+| **Token 与费用** | BOTH_DIFFERENT | fork 用 `RunContract.token_budget` 冻结；上游用 8192 安全钳制 |
+| **Director/Agent 编排** | BOTH_DIFFERENT | fork 用版本化 `production_plan`；上游用 `productionKernel`（52 文件） |
+| **工作流暂停、恢复与幂等** | BOTH_DIFFERENT | 写入侧 fork 更强（合同不可变/fence/租约）；读取侧有两个 S1 缺陷（见 §8.2） |
+| **章节规划和正文生成** | BOTH_DIFFERENT | 各自实现 |
+| **Reviewer 与 Quality Debt** | ALREADY_EQUIVALENT | fork 有 `quality_debt` 表与 fail-closed 审校 |
+| **人物、世界观、伏笔与记忆** | BOTH_DIFFERENT | fork 在 `novel-application/memory.rs` 重新实现 |
+| **章节编辑器** | BOTH_DIFFERENT | fork 工作台结构更丰富（导航器/右栏/版本抽屉）；上游编辑态保持更成熟（见 §9） |
+| **桌面 UI 与运行时** | FORK_ONLY | fork 是 Tauri，上游是 Electron + Express |
+| **数据持久化** | INCOMPATIBLE | fork 用 SQLite + sqlx 迁移；上游用 Prisma |
+| **安全与权限** | 见 §6 | fork 用 ChaCha20Poly1305 + keyring；**但仓库历史泄露了真实密钥** |
+| **构建、发布与 CI** | FORK_ONLY | Tauri 打包链路 |
+| **渠道通知（飞书/钉钉）** | S3 暂不同步 | 与 beta 验收无关 |
+| **官网动画** | S3 暂不同步 | 产品无关 |
 
-| # | 问题 | 结论 |
-| --- | --- | --- |
-| 1 | Fork 是否支持 json_schema / json_object / tool calling？ | **都不支持。** `ProviderCapabilities` 把 `structured_output`/`tool_call` 固定为 `false`，请求体只有 `model/stream/max_tokens/messages`（`novel-llm/src/provider.rs`）。全部结构化步骤依赖提示约束 + 一次修复。 |
-| 2 | 哪些 Provider 能力由静态配置决定？ | 全部。`ProviderCapabilities`（streaming/structured_output/tool_call/reasoning/context_limit）与 `catalog.rs` 中 `supports_reasoning` 是常量表，与端点无关。 |
-| 3 | 是否具备端点级能力隔离？ | **没有。** 上游用 `[provider, model, host]` 三元组做 `identityKey`；Fork 只有 `provider`，同一模型名经不同网关会共享同一份静态判断。 |
-| 4 | 结构化失败时是否有安全降级？ | 有，但只有一级：解析失败 → 一次修复 → 仍失败则 `DataIntegrity` 暂停并存 `structured_failure` 产物。没有模式级降级。 |
-| 5 | 网络/限流/鉴权失败是否被误判为"不支持结构化"？ | **Fork 不存在该误判**，因为它根本没有探测结论可被污染。这正是上游 `implicatesStructuredMode` 要解决的问题——若未来引入探测，必须同时引入该分类，否则会把 429/超时写成"不支持"。 |
-| 6 | 同一网关同名模型是否会错误共享能力？ | 会。当前静态表按 provider 归类，`https://gw-a/v1` 与 `https://gw-b/v1` 上的 `deepseek-chat` 无法区分。 |
-| 7 | 是否存在思考参数不兼容？ | 存在风险。Fork 只在用户显式选择时发送 `reasoning_effort`，默认不发送，因此不会硬失败；但也不具备上游"禁用思考"的验证能力。 |
-| 8 | 自动探测是否可能产生未授权付费调用？ | 上游已用 `allowNetwork` 显式开关 + 默认关闭的 autoProbe 约束。Fork 目前无探测，无此风险；**未来引入时必须沿用"默认不发真实请求"**。 |
-| 9 | 能否在不改变旧 Run 冻结参数的情况下应用新能力？ | 可以。上游结论是"能力档案的失败模式属于调用观察，不进入配置哈希"——一次原生模式拒绝只更新观察，不改变已冻结的调用参数；若观察会改变实际参数，围栏仍须拒绝。Fork 的 `RunContract` 冻结模型/端点/预算，同样适用：能力只影响请求构造，不参与合同哈希。 |
-| 10 | 是否会增加重复请求与计费风险？ | 若按上游顺序逐个模式尝试，最坏情况一次步骤会发出 4 次请求。因此移植时必须：**成功即停**、按端点缓存成功顺序、并把每次尝试独立记账（本轮已具备该基础）。 |
+## 5. 模型兼容性与结构化输出
 
-**判定：`MODEL_COMPATIBILITY: DEFER`**。理由：Fork 目前没有原生结构化模式，引入能力档案的前提是先实现模式本身。按正确顺序应先在 `novel-llm` 内实现 `json_object`（所有 OpenAI 兼容网关支持面最广），再以最小档案（provider+model+host → 模式序列 + 失败模式）驱动，最后才做设置页。一次性搬入 profile+probe+store+UI 风险过高，且探测会产生真实付费请求。
+### 5.1 fork 现状
 
-## 6. 第三阶段：LLM 调用观测专项
+**能力声明是死的。** `ProviderCapabilities.structured_output` 与 `tool_call` 在三个实现里全部硬编码为 `false`：
 
-### 6.1 上游设计要点（`0026d0cd` / `674ad098`）
+- `crates/novel-llm/src/provider.rs:86-94`（`UnconfiguredProvider`）
+- `crates/novel-llm/src/provider.rs:161-169`（`OpenAiCompatibleProvider`）
+- `crates/novel-llm/src/provider.rs:41-49`（`OllamaProvider`）
 
-- `observation.ts` 用 `AsyncLocalStorage` 维护调用链：首次请求与 JSON 修复各自拥有 parse scope，修复是**独立的物理请求**。
-- `InvocationPayloadStore` 对 payload gzip 压缩，**默认关闭**（`enabled: false`），保留 7 天 / 100MB 双上限，超限按最旧优先删除；只删 payload，保留 usage 行与正文。
-- 脱敏是**字段白名单 + 正则**双保险（`apiKey`/`authorization`/`token`/`secret`/`headers` → `[REDACTED]`，再对 `Bearer`/`sk-` 做文本替换）。
+而且 `capabilities()` 在生成路径上**从未被读取**——`grep` 全仓只有 `crates/novel-llm/src/router.rs:45-47` 自身转发。
 
-### 6.2 Fork 实际缺陷（本轮修复的正是这两处）
+**从不发送 `response_format`。** 请求体固定在 `crates/novel-llm/src/provider.rs:221-226`：
 
-| 缺陷 | 位置 | 后果 |
-| --- | --- | --- |
-| 结构化修复调用的用量被合并进首次请求 | `worker.rs` 修复分支 `accumulate_usage(&mut usage, &repair_response.usage)` | 修复流量在运行记录中完全不可见；`usage.calls` 恒为 1，无法据此判断真实请求数。 |
-| Provider 失败（含 `billed: true`）完全不落库 | `worker.rs` 三个生成入口的 `Err(error) =>` 分支 | 连接中断/首字节超时/5xx 这类**可能已计费**的请求没有任何记录，成本静默消失。 |
+```rust
+let mut body = serde_json::json!({
+    "model": request.model,
+    "stream": true,
+    "max_tokens": requested_tokens,
+    "messages": [{"role": "user", "content": request.prompt}]
+});
+```
 
-### 6.3 本轮实现
+结构化完全依赖「prompt 要求严格 JSON → `serde_json::from_str` → 失败则修复一次」。
 
-新增 `migrations/0028_invocation_observability.sql`（纯增量）：
+### 5.2 上游设计（值得吸收的部分）
+
+上游 `44e0a335` 把静态表升级为「内置默认 + 探测 + 用户覆盖」三层，核心在 `server/src/llm/compatibility/`：
+
+- **`profile.ts:16-18`** —— 身份键是 `[provider, model, modelHost(baseURL)]`。README 明确写「存储身份保留完整模型名，防止网关别名串用结果」。
+- **`defaults.ts:1-47`** —— 按 provider 家族给出 `structuredModes`，并区分「直连」与「网关」：例如 DeepSeek 只有在 `api.deepseek.com` 直连时才给 `json_object`。
+- **`probe.ts:78-88`** —— 失败分类的关键安全边界：**401/403/429、网络故障、5xx 一律不算作「不支持结构化模式」**，只把 400/422 且明确提及 `response_format` 的拒绝记入 `failedModes`。
+- **`probe.ts:32-33`** —— 探测必须显式 `allowNetwork`，启动应用不探测。
+
+### 5.3 fork 的反向优势（不应回退）
+
+- **三态能力**：`crates/novel-domain/src/provider.rs:103-114` 用 `None` 表示「未知」，不允许把未知解释为支持或不支持。上游没有这个区分。
+- **冻结路由**：`RunContract` 存 provider/model/endpoint/protocol/credential_ref/reasoning_effort 并参与请求哈希（`crates/novel-application/src/dto.rs:375-408`、`director.rs:572-587`）。上游的备用模型（`structuredFallbackSettings`）会绕过冻结路由，与 fork 的安全模型冲突。
+
+### 5.4 本轮修正的一个真实缺陷
+
+`crates/novel-application/src/worker/worker_validation.rs:342` 此前直接：
+
+```rust
+serde_json::from_str(raw)
+```
+
+模型把合法 JSON 包进 Markdown 围栏（非常常见）时，整段解析失败，随即触发**唯一一次**有界修复调用——输出本身是对的，费用却白花。
+
+本轮改为先提取第一个完整 JSON 值再校验（见 §9）。**只移植上游 `extractJSONValue` 的「提取」思路，不移植 `tryFixTruncatedJson`**——补齐截断后当成成功会让半截计划通过校验。
+
+### 5.5 一个被误判为缺陷的设计
+
+`crates/novel-application/src/worker.rs:2296-2302` 的修复预算会把合同预算抬到 16 384：
+
+```rust
+fn repair_output_budget(contract_budget: Option<u64>) -> u64 {
+    contract_budget.unwrap_or(DEFAULT_OUTPUT_RESERVE).max(REPAIR_MIN_OUTPUT_TOKENS)
+}
+```
+
+初看像是「越过冻结参数」，但注释与测试（`worker.rs:2681-2682`）表明这是有意的：默认 8k 常被推理 token 吃光，导致候选被截断在中句，所以抬高下限并在触顶时 fail-closed。上游 `9a68e37f` 是反方向（往下压到 8k）。**判定为 FORK_ONLY 的更强行为，不改。**
+
+## 6. 安全：仓库历史泄露了真实 API 密钥（S0）
+
+**这是本次审计最重要的发现，与上游同步无关，但必须优先处理。**
+
+fork 的 `origin/main` 与 `origin/beta` 中跟踪着 3 个 SQLite 备份文件：
+
+```
+server/tmp/db-backups/dev_20260313_1655_before_rebuild.db   9.7M
+server/tmp/db-backups/dev_20260313_1705_replaced.db         9.7M
+server/tmp/db-backups/dev_restore_backup_20260313_171051.db  668K
+```
+
+前两个文件的 `APIKey` 表各含 **3 条非空记录**，特征（只看长度与前缀，未打印完整值）：
+
+| provider | 长度 | 前缀 |
+|---|---|---|
+| deepseek | 35 | `sk-a***` |
+| siliconflow | 51 | `sk-x***` |
+| grok | 84 | `xai-***` |
+
+- 引入提交 `fb39b485`（2026-03-13），已暴露约 8 个月
+- 仓库 `visibility=PUBLIC`
+- `.gitignore` 第 16 行有 `server/tmp/**/*.db`，但这 3 个文件更早被强制加入，gitignore 对已跟踪文件无效
+- **上游已修复**：`9ddbac86`「源码分发不再包含本地数据库备份」删掉了同批文件，但 fork 未同步
+
+缓解事实：Rust 内核用 ChaCha20Poly1305 + 系统 keyring 加密密钥（`crates/novel-platform/src/secrets.rs:177-195`），不读取这些 db。泄露仅在仓库历史层面。
+
+处置要求（需仓库所有者执行）：
+
+1. 在 DeepSeek / SiliconFlow / xAI 控制台吊销并重签这 3 个密钥
+2. 用 `git filter-repo` 清理历史；仅从最新提交删除不够——`git log` 仍可取到
+
+## 7. LLM 调用观测
+
+### 7.1 fork 已有
+
+`migrations/0001_init.sql:178-192` 的 `llm_invocation` 表：
 
 ```sql
-ALTER TABLE llm_invocation ADD COLUMN attempt_id TEXT;
-ALTER TABLE llm_invocation ADD COLUMN audit_status TEXT NOT NULL DEFAULT 'succeeded';
-ALTER TABLE llm_invocation ADD COLUMN usage_state TEXT NOT NULL DEFAULT 'known';
-ALTER TABLE llm_invocation ADD COLUMN duration_ms INTEGER;
-CREATE INDEX ... ON llm_invocation(run_id, started_at);
+id, request_id (UNIQUE), run_id, step_id, provider, model,
+input_summary, started_at, finished_at,
+prompt_tokens, completion_tokens, estimated_cost_micros, status
 ```
 
-`novel-domain/src/observability.rs` 定义稳定契约：
+- **未知 usage 保留为 NULL**：`TokenUsage` 用 `Option<u64>`，`None` 就是未知，不会写成 0。有测试专门锁死这一点（`crates/novel-storage-sqlite/tests/p11_recovery_process.rs:443-453`「unknown usage must not be recorded as a fake zero」）
+- **调用耗时可直接算出**：`finished_at - started_at` 已存在
+- **未知计费可追溯**：`workflow_step_attempt.phase='remote_started'` 能定位「发出去了但结果未知」的调用
 
-- `InvocationOutcome`：`succeeded / repaired / repair_failed / unauthorized / rate_limited / timed_out / cancelled / provider_failed / rejected`
-- `InvocationUsageState`：`known / unknown / unbilled`
+### 7.2 fork 的实际缺陷（比 §7.1 的乐观印象严重）
 
-关键语义（本轮裁决）：
+审计深入后发现四处，均有代码证据：
 
-| 结果 | 用量状态 | 依据 |
-| --- | --- | --- |
-| 成功 / 修复成功 | `known` | Provider 返回了用量 |
-| 超时 / 连接中断 / 5xx | `unknown` | 请求可能已到达服务端 |
-| 修复请求失败 | `unknown` | 首次请求可能已计费 |
-| **取消** | `unknown` | 取消可能发生在请求已发出之后，**不能断言未计费** |
-| 鉴权失败 / 限流 / 发出前被拒 | `unbilled` | 请求未被受理 |
+**（1）粒度是「一次步骤尝试」，不是「一次物理请求」。**
 
-> 这里推翻了代码中一处既有注释的假设（"取消路径不写记录"）。理由：`LlmError::Cancelled` 只在客户端侧产生，无法证明上游没有收到并计费；把它归为 `unbilled` 会让费用汇总系统性偏低。归类逻辑是确定性的错误分类，不属于 AI 意图识别范畴（AGENTS.md 允许"对已结构化输入的确定性后处理"）。
+写入点只有 4 处（draft 成功 / bounded_repair 成功 / 结构化步骤成功 / 失败前补记），全部是步骤级。
 
-`RunUsageView` 扩展为 `calls / known_calls / unknown_calls / unbilled_calls / prompt_tokens / completion_tokens`，`prompt_tokens` 只累加 `known` 行，未知调用不再被当成 0 混入。运行详情页新增"`N 次调用费用未知`"提示。
+**（2）修复调用的 usage 被合并进首次请求那一行。**
 
-### 6.4 明确未做的部分（有意的边界）
+`crates/novel-application/src/worker.rs:1618`：
 
-- **不持久化 prompt / response 全文**。上游默认关闭且有压缩与留存策略；Fork 已有 `input_summary`（80 字符 + 脱敏）与 `structured_failure` 诊断产物，足够定位问题，且避免 SQLite 无界增长与密钥泄漏面。
-- **不引入上游 Prisma 模型**。
-- **不做首 token 延迟**。当前 SSE 读取路径未记录首字节时间戳；这是下一步观测增强的独立项。
+```rust
+accumulate_usage(&mut usage, &repair_response.usage);
+```
 
-**判定：`LLM_OBSERVABILITY: SYNC`（本轮已完成最小闭环）**。
+修复请求有独立的 `request_id`（`worker.rs:1587`），但**从未落库**——最终只写一行，用首次请求的 id。成功时无法区分首发与修复各花了多少 token。
 
-## 7. 第四阶段：工作流恢复能力对照
+**（3）`status` 硬编码为 `"succeeded"`。**
 
-上游 `93a1c914` 修复五类恢复冲突：请求摘要别名、RAG 禁用配置比对、验收二次校验、预算估算漂移、结果未知步骤的显式确认解除。
+`worker.rs:2530`：
 
-逐项对照 Fork：
+```rust
+status: "succeeded".into(),
+```
 
-| 上游问题 | Fork 现状 | 判定 |
-| --- | --- | --- |
-| 结果未知必须人工确认才能继续 | `RecoveryDecision::HoldInterrupted`，且 `note_lease` 拒绝对 `WaitingApproval`/`Paused` 领取 | **已等效** |
-| 预算估算漂移导致误冲突 | `RunContract` 冻结 `token_budget`，`repair_output_budget` 只在下界提升、不改合同 | **已等效（更强）** |
-| 验收二次校验冲突 | Fork 用 `content_sha256` 校验候选正文一致性，不一致即 `DataIntegrity` 暂停 | **已等效** |
-| 已确认候选被后续 Run 覆盖 | `PromoteOutcome` + `protected_user_content` + 候选表按 run 隔离 | **已等效** |
-| 多进程租约/取消 | `LeaseFence` + `verify_lease_fence` + 每 run `CancellationToken` | **已等效** |
-| 质量债务阻塞无关章节 | AGENTS.md 已有明确的非阻塞策略与 `defer_and_continue` 口径 | **已等效** |
+即使经 `record_usage_before_stop` 的失败路径，也标成功。前端 `UsageLogTable` 的 status 列对 Rust 数据永远显示「调用完成」。
 
-本轮**未修改任何状态机**——没有证据表明 Rust 实现存在对应缺陷。上游这三个提交的价值在于**故障场景清单**：`preparationResumeCandidateDigest`、`selectedAssessmentUnboundVerification`、`productionKernelRagDisabledResume`、`productionKernelBudgetSqlite` 四个测试用例值得改写成 Fork fixture（见 Backlog）。
+**（4）传输失败不写行。**
 
-**判定：`WORKFLOW_RECOVERY: ALREADY_EQUIVALENT`**。
+draft（`worker.rs:454-490`）、bounded_repair（`737-772`）、结构化（`1485-1526`）三处，超时/断流/429/5xx 都只 `mark_attempt_fenced(Interrupted)` 然后 pause，不写 `llm_invocation` 行。
 
-## 8. 第五阶段：编辑器 UX
+后果：超时（`Unavailable { billed: true }`）这类**可能已经计费**的调用，在用量页上完全看不见。
 
-上游 `5ca31f93`（+1168/−69）重写 `ChapterTextEditor.tsx`（+759）、新增 `document/editorDocument.ts`、`document/ghostText.ts` 与其测试；`2c980d4d` 在导演阶段旁显示卷拆章进度。
+**（5）两列死结构。**
 
-Fork 对应：`client/src/pages/novels/components/chapterEditor/` 已有自己的 `document/draftState`、`editPosition`、`navigation/chapterNavigatorModel`、`rightPanel/panelModel` 及其测试，说明编辑器文档模型早已独立演进。
+`estimated_cost_micros` 与 `usage_ledger` 表在 `migrations/0001_init.sql:190,194-201` 定义后**零读写**，容易被误读为「有费用估算」。
 
-可吸收的是**交互结论**而非代码：
+### 7.3 上游设计
 
-1. 光标/滚动位置在章节切换后保持；
-2. 未保存修改的离开守卫（Fork 已有 `chapter leave guard`，P17.1 引入）；
-3. Ghost Text 的触发与提交语义；
-4. 卷拆章进度显示在导演阶段旁（`2c980d4d` 的做法）。
+`0026d0cd` 的 migration 新增 `durationMs`、`firstTokenMs`、`attemptNumber`、`chainId`、`parentInvocationId`、`structuredMode`，另有 `LlmInvocationPayload` 压缩载荷表。
 
-因 Fork 已转为 Tauri IPC，上游实现强依赖原服务端 API，**不能照搬**。
+关键在 `compatibility/invocation.ts` 与 `observation.ts`：每次物理请求 `beginAttempt` 生成独立 `invocationId`，修复再开一个独立 parse scope 并用 `parentInvocationId` 链起来。
 
-**判定：`EDITOR_UX: DEFER`**。这是 Beta 验收后的体验增强项，不进入本轮。
+### 7.4 判断
 
-## 9. 第六阶段：同步清单
+**值得做（S1）：**
 
-### S0 — 必须同步（本轮）
+1. 失败路径补写 invocation 行（`usage_status='unknown'`、token 为 NULL、`error_kind` 取 `LlmError` 变体）——这是成本最高的一件事：现在超时完全不可见
+2. `status` 去硬编码
+3. 修复调用拆成独立行（`chain_id` + `attempt_number` + `parent_invocation_id`）
+4. `first_token_ms`：需要改 `sse.rs` 让 `consume_sse` 返回 metrics
 
-| 项 | 上游提交 | 缺口 | 受益 | 风险 | 测试 | 工作量 |
-| --- | --- | --- | --- | --- | --- | --- |
-| 物理调用独立记账 + 未知用量可见 | `0026d0cd`、`674ad098` | 修复调用不可见；失败请求零记录 | 费用可追溯；未知不再伪装为 0 | 低（纯增量列） | 6 个新测试 + 1 个迁移测试 | 已完成 |
+**不需要：**
 
-### S1 — 优先同步（Backlog，按序）
+- `durationMs` 不必新加列，`finished_at - started_at` 够用（但注意当前 `finished_at` 在结构化路径上包含本地校验时间，不是纯请求耗时）
+- `estimated_cost_micros` / `usage_ledger` 应删除或显式标注未启用
 
-| 项 | 上游提交 | Fork 对应 | 需要做什么 | 风险 |
-| --- | --- | --- | --- | --- |
-| 结构化失败分类 | `44e0a335`（`adapter.ts`） | 无 | 在 `novel-llm` 加 `classify_structured_failure`，明确 401/403/429/network/timeout/budget 不算"模式不支持"。**不产生任何网络请求。** | 低 |
-| 首 token 延迟与逐调用耗时 | `0026d0cd` | 已有 `duration_ms`，缺首字节 | 在 SSE 首次收到数据时记录时间戳 | 低 |
-| `max_tokens` 优先级（路由/显式值覆盖安全下限） | `9a68e37f` | `requested_tokens` 已按 contract 传入 | Fork 已有等效保护（`absolute_max_output_tokens`），**无需动作**；仅借鉴其"route > 8k clamp"的优先级断言为测试 | 无 |
-| 原生 `json_object` 模式 | `44e0a335`、`20650f07` | 无 | 在 `novel-llm` 为 OpenAI 兼容通道加 `response_format`，成功后按端点缓存 | 中（网关差异） |
-| 模型能力档案（最小版） | `44e0a335` | 静态 `ProviderCapabilities` | provider+model+host → 模式序列 + 失败模式 + 来源；无 UI、无探测 | 中 |
-| 上游恢复故障 fixture | `93a1c914`、`71b4fd6b`、`d7fbd2c1` | 语义已等效 | 把 4 个上游测试场景改写为 `novel-workflow`/`novel-storage-sqlite` 用例 | 低 |
+**不应照搬：**
 
-### S2 — 择机同步
+- Prisma 迁移与 `DirectorLlmUsageRecord` 双写
+- `AsyncLocalStorage` 装饰 SDK 的机制（Rust 没有可补丁对象）
+- **`LlmInvocationPayload` 全文持久化**（默认关闭，且与 fork 的数据保护规则冲突）
 
-- 编辑器交互（光标保持、Ghost Text、卷拆章进度）——`5ca31f93`、`2c980d4d`。
-- 章节诊断给出具体修复目标与保留项——`579ba451`。
-- 短篇按目标篇幅生成与逐段恢复——`41b4130f`、`f9072e55`（需先确认 Fork 是否规划短篇模式）。
+### 7.5 一个相邻问题：SQLite 无限增长
 
-### S3 — 暂不同步
+fork 没有任何数据库保留/清理机制。增长点：
 
-- 飞书/钉钉/企业微信通知——`2681d30a`、`ebee8eef`。
-- 官网首屏动画——`9e0276b4`、`432cb0d0`。
-- 上游 production kernel 全量实现——`c5ac06d1`、`4e9472a0`、`26767919`、`72a68d6f`、`1307a3df`、`f9072e55`。
-- 上游 Prisma migration 与 `schema.sqlite.prisma`。
-- 探测 UI 与自动探测——`44e0a335`（会产生真实付费请求，需另行授权）。
+- `workflow_artifact.payload_json` 存全量 context prompt（`worker.rs:2128`），**无长度上限**
+- `chapter_candidate.content` 每次 draft 与 bounded_repair 各存一份全文
+- `structured_failure` 的 raw 有 200k 上限（`worker.rs:2314`），是唯一有约束的
 
-## 10. 不应移植的重复功能
+上游按 `retentionDays` + `maxMb` 清理。fork 若引入载荷表，必须先设计保留策略。
 
-| 上游能力 | Fork 已有实现 | 结论 |
-| --- | --- | --- |
-| 导演恢复的未知结果确认 | `RecoveryDecision::HoldInterrupted` | 重复，Fork 更严格（带租约栅栏） |
-| 预算漂移防护 | `RunContract.token_budget` 冻结 + `repair_output_budget` 下界 | 重复 |
-| 候选覆盖保护 | `content_sha256` + `protected_user_content` | 重复 |
-| 质量债非阻塞 | AGENTS.md 策略 + `defer_and_continue` | 重复 |
-| 调用记录基础表 | `llm_invocation` + `usage_ledger` | 重复（本轮只补齐语义列） |
-| 结构化失败诊断产物 | `structured_failure` artifact（含 firstRaw/repairRaw） | 重复，Fork 已保存原文 |
+## 8. 工作流恢复
 
-## 11. 本轮实际代码修改
+上游相关提交：`93a1c914`、`71b4fd6b`、`d7fbd2c1`。
 
-基线：`origin/beta`（`0a51abc0`），独立分支 `feat/upstream-sync-a1-invocation-observability`，独立 worktree，未触碰 Beta-A3 工作区与 `main`。
+### 8.1 fork 明确更强（这些不要回退）
 
-| 文件 | 变更 |
-| --- | --- |
-| `migrations/0028_invocation_observability.sql` | 新增（纯增量 4 列 + 1 索引） |
-| `crates/novel-domain/src/observability.rs` | 新增：`InvocationOutcome`、`InvocationUsageState` 及其语义与单元测试 |
-| `crates/novel-domain/src/lib.rs` | 导出新类型 |
-| `crates/novel-application/src/ports.rs` | `NewInvocation` 增加 `attempt_id`/`outcome`/`usage_state` |
-| `crates/novel-application/src/worker.rs` | 首次请求与修复请求分别记账；失败/取消路径补记；新增 `record_failed_invocation`、`record_repair_invocation`、`invocation_outcome_for_error` |
-| `crates/novel-application/src/dto.rs` | `RunUsageView` 增加 `known_calls`/`unknown_calls`/`unbilled_calls` |
-| `crates/novel-application/src/director.rs` | 投影透传新字段 |
-| `crates/novel-storage-sqlite/src/db.rs` | 注册 0028 |
-| `crates/novel-storage-sqlite/src/workflow.rs` | 插入新列；`run_usage` 按 `usage_state` 分组聚合 |
-| `crates/novel-application/tests/sync_a1_invocation_observability.rs` | 新增 6 个测试 |
-| `crates/novel-storage-sqlite/tests/invocation_observability_migration.rs` | 新增历史库升级测试 |
-| `crates/novel-application/tests/p8_director_loop.rs` | 4 个测试的记账契约从"合并为 1 条"更新为"物理调用 2 条" |
-| `crates/novel-storage-sqlite/tests/workflow_lease.rs` | 构造函数补新字段 |
-| `client/src/platform/desktopTransport.ts` | `RunUsageView` 类型补新字段 |
-| `client/src/features/directorNext/TauriDirectorPage.tsx` | 未知费用提示 |
+| 能力 | fork 依据 |
+|---|---|
+| 底层错误分类与计费安全 | `LlmError::Timeout` 不可重试、`Unavailable{billed}` 仅未计费可重试（`error.rs:26-40`） |
+| 失败即停、不自动重发 | 未知结果停在 `remote_started`，`decide()` 返回 `HoldInterrupted`（`recover.rs:104-116`） |
+| 租约与多进程接管 | version CAS + fence 校验，有真实 SIGKILL 回归（`p166_i_double_takeover`） |
+| 质量债务不阻塞其他章节 | 唯一键 `(run_id, issue_id)`，阻塞判定全按 `run_id` 过滤 |
+| 合同不可变 | `contract_json` 只在 `open_run` 插入，全仓无 UPDATE |
+| 安全停点不可被普通恢复绕过 | `PauseKind::Safety` 普通 resume 一律拒绝；质量停点走专用命令 + 债务全接受 + CAS |
 
-新增测试覆盖：修复调用独立记账、未知计费失败留痕、鉴权/取消不伪造计费、聚合分离 known/unknown、取消后不再调度、旧行兼容、历史库升级幂等。
+上游 `93a1c914` 修的四类「恢复被卡死」bug（请求摘要别名、RAG 禁用配置比对、验收二次校验、预算估算漂移）在 fork 中**结构上不存在**——fork 没有请求级快照、没有 RAG 冻结配置、没有预算预留台账。这批属于 `INCOMPATIBLE`，不移植。
 
-## 12. 测试与 CI 结果
+### 8.2 fork 自己的两个 S1 缺陷（与上游不同源）
 
-| 检查 | 结果 |
-| --- | --- |
-| `cargo fmt --all` | PASS |
-| `cargo clippy --workspace --all-targets` | PASS（新增代码 0 warning） |
-| `cargo test --workspace` | PASS，101 个测试二进制，0 失败 |
-| `novel-domain`（含新契约单测） | PASS |
-| `novel-application`（含 6 个新测试） | PASS |
-| `novel-application` p8_director_loop（10 个） | PASS |
-| `novel-workflow` | PASS |
-| `novel-storage-sqlite`（含迁移升级测试） | PASS |
-| `novel-desktop`（src-tauri 编译） | PASS（workspace 内构建） |
-| Client typecheck | **部分**：本 worktree 为符号链接依赖环境，全量 typecheck 报 119 个**既有**错误（`main` 未改动基线相同）；改动前 119、改动后 119，`TauriDirectorPage.tsx` 与 `desktopTransport.ts` **零新增错误** |
-| Client 单测 | NOT_RUN（Node 测试需要完整 workspace 依赖图，未在隔离 worktree 中安装） |
-| Tauri macOS/Linux bundle | NOT_RUN（本轮未改打包配置） |
-| Native E2E | NOT_RUN（UI 验收按 AGENTS.md 交由用户） |
-| `git diff --check` | 见下方验证记录 |
+审计深入后发现，fork 在**读取侧**有上游同类问题：写入侧严格按 run 隔离，推进侧没有。
 
-重点验证项：旧 Run 恢复（未改状态机，全套 recovery 测试通过）、结构化修复（p8_director_loop 全绿）、Provider 失败与取消（新增 3 个用例）、请求预算（未改）、物理调用计费（新增 6 个用例 + 迁移用例）、M1 Mock fixture（未改）。
+**S1-1 —— 同一 `command_id` 携带不同编辑内容时被静默丢弃。**
+
+`crates/novel-application/src/director.rs:701-706`：
+
+```rust
+let request_hash = json_hash(&RunCommandHash {
+    run_id,
+    kind: "confirm_after_edit",
+    intent: expected_version.map(|_| "expected"),
+})?;
+```
+
+`RunCommandHash` 只有 `run_id`、`kind`、`intent` 三个字段（`director.rs:1262-1266`）——**不含 payload_json**。
+
+后果：同一 `command_id` 第二次携带不同正文时，`lookup_command` 认为哈希相同，直接返回 `replayed=true` 的旧结果。作者新编辑的内容**没有写入**，接口却返回成功。
+
+同类但较轻：`approve`/`reject`/`regenerate` 只记录「有无 expected_version」，不记录具体值（`director.rs:626-630`、`673-678`）。
+
+**S1-2 —— 取消后对同一章新开 Run 会卡在章节确认门。**
+
+`crates/novel-workflow/src/plan.rs:301-310` 的 `latest()`：
+
+```rust
+artifacts
+    .iter()
+    .filter(|a| a.artifact_type == artifact_type && a.scope == scope)
+    .max_by_key(|a| a.version)
+```
+
+**不区分 `run_id`**。而 worker 取的是全书产物：`self.runs.list_artifacts(&claimed.novel_id)`（`worker.rs:265`）。
+
+可达路径：Run A 在章节确认门暂停 → 取消 A → 同章开 Run B → B 的 `next_action` 看到 A 的 draft → `OpenGate` → `approve` 只更新 `run_id=B` 的产物（0 行）→ 控制流仍 `ResolveGate` → 下一 tick 又 `OpenGate`。**无限门循环**，唯一破环办法是 `confirm_after_edit`（插入属于 B 的产物），但 UI 不会引导。
+
+### 8.3 S2 清单（登记，不在本轮修）
+
+| 编号 | 问题 | 依据 |
+|---|---|---|
+| S2-a | `finalize_accepted` 硬编码只处理 `draft` 步骤，质量债恢复会给已 committed 的 `consistency_review` 打 accept 并多写一条 `chapter_draft` | `worker.rs:1051-1091` |
+| S2-b | `execute_commit` 在 `MissingCandidate` 时仍写 `status="confirmed"` 的 `chapter_commit`，单章 Run 会因此 Succeed | `worker.rs:1093-1135` |
+| S2-c | HTTP cancel 不取消在途模型请求（Tauri 两条都调） | `novel-http/src/routes/runs.rs:83-95` |
+| S2-d | `claim_next` 取候选 `LIMIT 8`，前 8 个不可领取时后续 Run 饥饿 | `workflow.rs:124-136` |
+| S2-e | `open_run` 重放哈希不覆盖 `credential_ref`/`step_routes`/`protocol`/`reasoning_effort` | `director.rs:1246-1258` |
+| S2-f | `RateLimit` 映射为 `StopSignalKind::Budget`，语义误导（实际可普通恢复） | `worker.rs:481-484` |
+| S2-g | 未知计费与普通 provider 失败共用 `provider_unavailable`，无机器可读标记 | `director.rs:1268-1284` |
+
+### 8.4 结论修正
+
+原先按「失败即停 + 强租约」判定工作流恢复 `FORK_ONLY`，**过于乐观**。准确判定是：
+
+- **写入侧**：FORK_ONLY（合同不可变、fence、租约接管）
+- **读取/推进侧**：有两个 S1 缺陷，且都属「静默错误」——一个丢数据，一个死循环
+- 上游 `71b4fd6b` 补的正是跨任务归属隔离，方向相同但实现不同（上游用 `productionUnitRun` 归属键）
+
+**建议**：S1-1 与 S1-2 应优先于本文件列出的多数 S1 后端项修复——它们是正确性问题，不是可观测性问题，且修复面小（哈希加字段 / `latest()` 加 run 过滤）。
+
+## 9. 编辑器与产品功能
+
+这一领域不能用一个标签概括：**fork 在工作台结构上更丰富，上游在编辑态保持上更成熟。**
+
+### 9.1 fork 明显更强（不要用上游覆盖）
+
+| 能力 | fork 位置 | 上游 |
+|---|---|---|
+| 章节导航器（卷/章分组、搜索、上一/下一、Alt+←/→） | `chapterEditor/navigation/ChapterNavigator.tsx`（182 行） | 无 |
+| 章节切换守卫（3 种原因 × 3 种去向分别措辞） | `navigation/chapterNavigatorModel.ts:286` `shouldBlockChapterSwitch` | 只有 `window.confirm` |
+| 编辑位置恢复（按书隔离、版本/长度校验） | `document/editPosition.ts` | 无 |
+| 右栏工作区（剧情、连贯性、Run 恢复） | `rightPanel/`（7 个组件，约 1800 行） | 无 |
+| 版本抽屉、AI Diff 面板 | `ChapterVersionDrawer.tsx`、`AIDiffPanel.tsx` | 无 |
+
+其余 `client/src` 与上游差异共 232 个文件，多数是 fork 侧新增。
+
+### 9.2 fork 明显更弱（S1 候选）
+
+**A1 —— 外部写回时整篇重建编辑器。**
+
+`ChapterTextEditor.tsx:231-239`：只要 `value` 变化就 `setEditorSeed(n+1)`，`usePlateEditor` 因依赖变化重建整个实例。后果是 AI 候选采纳、载入历史版本、后台保存刷新之后，光标跳回开头、选区丢失、撤销历史清空。长篇创作里每次 AI 写回都付一次。
+
+上游 `5ca31f93` 的对策是段落级增量补丁：`computeParagraphSpan` + `getPointFromAbsoluteOffset`（`document/editorDocument.ts:214,249`），只替换变化的段，`withNewBatch` 内还原选区。
+
+**注意时序**：fork 有 `restorePosition` 机制（`ChapterTextEditor.tsx:252-283`），A1 落地必须保持「先文档、后光标」，否则光标恢复会失效。
+
+**C3 —— `hasExternalChange` 只比时间戳。**
+
+`document/useChapterDraft.ts:63`：
+
+```ts
+const hasExternalChange = incoming.updatedAt > draft.savedUpdatedAt
+```
+
+作者自己保存后刷新，也可能弹「本章已有新的保存版本」。上游 `66fc3894` 改为「时间更新 **且** 内容不同」。
+
+**A5 / A3 / A7 / A8 —— 纯前端能力缺失**：章内查找替换、字号行距与专注模式、布局三态（standard/wide/immersive）、左右栏可收起。这些不依赖任何新接口，只用到 localStorage。
+
+### 9.3 需要先补数据源（ADAPT）
+
+| 项 | 阻塞点 |
+|---|---|
+| Ghost Text 续写建议 | 算法（`ghostText.ts` 56 行纯函数）可直搬，但桌面 `previewChapterCursorContinuation` 无 IPC 映射，只有「本地创作模式」可用。直接搬会得到一个「默认关闭且打开后无反应」的开关 |
+| 诊断段落标记 | 桌面 `get_chapter_editor_workspace` 的 `diagnostic_cards` 恒为 `[]`（`src-tauri/src/commands/editor.rs`） |
+| 质量提醒收进左栏 | 桌面未映射 `chapter.riskFlags` |
+| 卷拆章进度 | fork 的 Rust 内核没有 `volume_chapter_list` 步骤产物 |
+| 导演阅读页进正文编辑 | 桌面 `TauriDirectorPage` 无 `DashboardView` 工作区数据 |
+
+### 9.4 落地顺序建议
+
+1. **A1**（编辑态保持）—— 其他 UX 改动的前提；上游 A3 专注模式、A5 查找替换都依赖「实例不重建」
+2. **C3**（`hasExternalChange` 一行修正）—— 成本最低、误报最烦人
+3. **A2 + A7 + A8**（布局与浮动条定位）
+4. Ghost Text 与诊断标记等数据源补齐后再做
+
+### 9.5 明确排除
+
+官网动画、飞书/钉钉/企业微信通知、远程导演确认、首页进度入口、ZIP/漫画导出，均与当前 beta 验收无关或桌面端无对应后端。
+
+## 10. S0 / S1 / S2 / S3 分级
+
+### S0 必须处理
+
+| 项 | 来源 | 动作 |
+|---|---|---|
+| 仓库历史泄露 3 个真实 API 密钥 | fork 自身，上游 `9ddbac86` 已修 | **吊销密钥 + 清理历史**（需仓库所有者执行） |
+
+### S1-A 正确性缺陷（优先于所有功能同步）
+
+这两项不是「上游有而 fork 没有」，是 fork 自身的静默错误，被发现于审计过程中。修复面都很小。
+
+| 项 | 问题 | 修复方向 |
+|---|---|---|
+| S1-1 | 同一 `command_id` 携带不同正文被静默丢弃，接口返回成功 | `RunCommandHash` 加入 `payload_json` 摘要 |
+| S1-2 | 取消后同章新开 Run 卡在章节确认门，无限 OpenGate | `latest()` 加 `run_id` 归属过滤，或 `approve` 更新 0 行时报 Conflict |
+
+### S1-B 优先同步
+
+| 项 | 上游 | Fork 落点 | 理由 |
+|---|---|---|---|
+| 结构化输出提取围栏 JSON | `structuredInvokeParser.ts:60-111` | `worker_validation.rs` | **本轮已实现** |
+| 端点级能力档案 | `compatibility/profile.ts` | `novel-domain/src/provider.rs` + migration | 后续原生结构化前置 |
+| 失败分类携带 httpStatus | `adapter.ts:14-20` | `error.rs:43-54` | 能力档案的正确性依赖它 |
+| 思考控制适配 + 思考字段采集 | `adapter.ts:2-12`、`reasoning.ts:97-111` | `provider.rs` + `sse.rs` | 推理模型当前返回「成功但空正文」 |
+| 生产级请求预算 | `RequestBudget.ts:27-29` | `novel-llm` 或 `novel-application` | 多模式链的前置条件 |
+
+### S2 择机同步
+
+- 原生 `response_format` / `tool_calling` 传输（需先有 S1 的能力档案与预算）
+- `firstTokenMs`、`structuredMode` 落库
+- **A1 段落级补丁保持编辑态**（见 §9.2，实际优先级高于这里——列在 S2 是因为它属 UI 层，不阻塞后端同步）
+- **C3 `hasExternalChange` 内容比对**（同上）
+- 查找替换、字号行距与专注模式、布局三态、左右栏收起
+- Ghost Text（需先补桌面续写 IPC）
+- 卷拆章进度显示
+
+### S3 暂不同步
+
+- 渠道通知（飞书/钉钉/企业微信）
+- 官网动画与手绘书稿首屏
+- 远程导演确认
+- `structuredFallbackSettings` 备用模型（与冻结路由冲突）
+- 上游 `compatibility/invocation.ts` / `observation.ts`（Prisma + AsyncLocalStorage 台账）
+- 任何 `server/` 下的 Node 实现
+
+## 11. 本轮实际修改
+
+单一改动，范围最小、收益明确、可独立验证：
+
+**`crates/novel-application/src/worker/worker_validation.rs`**
+
+新增 `extract_json_payload()`：在送进 `serde_json::from_str` 之前，提取第一个完整 JSON 值。字符串感知的括号配对（正确处理 `"` 与 `\\` 转义），未闭合时原样返回交给解析器报错。
+
+```rust
+let mut value: serde_json::Value = serde_json::from_str(extract_json_payload(raw))
+    .map_err(|_| "模型输出不是合法 JSON".to_string())?;
+```
+
+**未改动 fail-closed 语义**：截断输出、纯散文、schema 不满足仍然照常失败。新增的两个 fail-closed 测试锁定这一点。
+
+## 12. 测试与结果
+
+```
+cargo fmt --check                                  通过
+cargo test -p novel-application --lib worker_validation::tests
+                                                   18 passed（含 4 个新增）
+cargo test -p novel-application                    245 passed + 全部集成测试通过
+cargo test -p novel-llm                            66 passed
+cargo test -p novel-workflow                       6 passed
+cargo test -p novel-storage-sqlite                 9 passed
+cargo test -p novel-domain                         20 passed
+cargo clippy -p novel-application --lib -- -D warnings   通过
+```
+
+新增测试：
+
+| 测试 | 目的 |
+|---|---|
+| `fenced_json_is_accepted_without_a_repair_round` | 三种围栏写法都能通过 |
+| `text_around_the_fenced_json_does_not_break_validation` | 前后有散文也能提取 |
+| `truncated_json_still_fails_closed` | 截断仍然失败 |
+| `prose_without_json_still_fails_closed` | 纯散文仍然失败 |
+
+**已知既有问题（非本改动引入）**：`cargo clippy -p novel-application --all-targets` 在 `crates/novel-application/src/context.rs:1051` 报 `clippy::bool-assert-comparison`。已用 `git stash` 验证该错误在干净的 `0a51abc0` 上同样存在。不在本轮范围内修改。
+
+未运行：
+
+| 检查 | 状态 |
+|---|---|
+| `cargo test -p novel-desktop` | NOT_RUN |
+| Client typecheck / test | NOT_RUN |
+| Tauri Linux/macOS Bundle | NOT_RUN |
+| Native E2E | NOT_RUN |
+| `git diff --check` | 通过 |
 
 ## 13. 同步后的潜在冲突
 
-1. **Beta-A3 工作区**：本轮分支基于 `origin/beta`。审计期间 Beta-A3 从 `7d8e3a00` 前进到 `8e8486a3`，新增内容只有 `docs/acceptance/BETA-A3-REVIEW-AND-DESKTOP-VALIDATION.md`。实测与本 PR 的文件集**交集为空**，当前无冲突。但 Beta-A3 仍在活跃开发，`worker.rs` 是双方都可能触碰的热点文件，合并前需重新计算一次交集。
-2. **`RunUsageView` 是 IPC 契约**：新增字段向后兼容（旧客户端忽略未知字段），但若有测试对 `usage` 做严格对象比较需要同步更新——本轮已更新 `p8_director_loop` 与 `workflow_lease`。
-3. **迁移编号**：0028 之后若有并行分支新增迁移，需按序重新编号。
-4. **`usage.calls` 语义变化**：从"步骤数"变为"物理调用数"，含修复与失败请求。若后续有报表按 `calls` 推断步骤数，需要同时看 `step_id`。
+- 本轮改动只在 `novel-application` 的校验层，**不影响 Beta-A3 的 Reviewer 与 Provider 修复**（`fix/beta-a3-reviewer-and-desktop-acceptance` 分支未触碰）
+- 后续若引入「能力档案 + 多模式链」，会与 `worker.rs` 的结构化分支（`:1529-1676`）产生交集。建议在 Beta-A3 合并后再做，避免与 Reviewer 修复重叠
+- 引入请求预算会修改 `RunContract` 字段与 `OpenRunHash`——必须带 `#[serde(default)]` 以保证旧 Run 可反序列化
 
-## 14. 最终裁决
+## 14. 下一轮建议
 
-```
-UPSTREAM_AUDIT:        COMPLETE
-FULL_MERGE:            NOT_RECOMMENDED
-MODEL_COMPATIBILITY:   DEFER
-LLM_OBSERVABILITY:     SYNC（本轮已完成最小闭环）
-WORKFLOW_RECOVERY:     ALREADY_EQUIVALENT
-EDITOR_UX:             DEFER
-CODE_MIGRATION:        DONE
-PR:                    Draft PR（见提交说明）
-BETA_A3_INTERFERENCE:  NONE（独立 worktree + 独立分支；实测文件交集为空，未触碰 Beta-A3 与 main）
-```
+### 第一优先：正确性（不依赖上游）
 
-## 15. 七问七答
+1. **S1-1** `RunCommandHash` 加入 payload 摘要 —— 现在会静默丢失作者编辑
+2. **S1-2** `latest()` 加 `run_id` 归属过滤 —— 现在取消后重开同章会死循环
 
-**1. 上游 118 个独有提交中，究竟哪些能力值得我们引入？**
+这两项修复面都小（一个哈希加字段、一个过滤加条件），但都是「静默错误」：一个丢数据、一个假成功。应排在所有后端同步之前。
 
-三项工程契约与一批测试场景：物理调用独立记账（`0026d0cd`，本轮已做）、结构化输出失败分类（`44e0a335` 的 `implicatesStructuredMode`）、端点级能力档案（`44e0a335` 的 `identityKey`）。此外 `9a68e37f` 的 `max_tokens` 优先级结论、`93a1c914` 的四类恢复冲突场景，可作为测试输入。
+### 第二优先：S0
 
-**2. 哪些功能 Fork 已经有更好的等效实现？**
+3. 处理密钥泄露（需所有者操作）
 
-工作流恢复（`HoldInterrupted` + 租约栅栏，比上游更严格）、请求预算冻结、候选覆盖保护、质量债非阻塞策略、结构化失败诊断产物（Fork 已保存首次与修复的原始输出）。
+### 第三优先：后端同步
 
-**3. 有没有当前必须立即修复的上游安全或稳定性问题？**
+4. `error.rs` 失败分类携带 httpStatus —— 能力档案正确性的前提
+5. 失败路径补写 `llm_invocation` 行（现在超时完全不可见）
+6. 端点级能力档案（host 进身份键、改 baseURL 失效旧能力）
+7. 生产级请求预算
+8. 原生结构化传输
 
-没有"必须从上游修"的项。但审计中发现 Fork **自身**的两个计费可追溯缺陷（修复调用不记账、失败调用零记录），已在本轮修复——它们属于费用静默丢失，等级为 S0。
+顺序理由：没有可靠的失败分类，能力档案会把瞬时故障记成「不支持」；没有请求预算，多模式链会把单步请求数放大 3–4 倍。
 
-**4. 哪些功能需要从 TypeScript 移植到 Rust？**
+### 与后端并行：编辑器
 
-只有三项，且都是契约而非实现：`ProviderCapabilityProfile`（含 `identityKey` 端点隔离）、结构化模式降级序列、失败原因分类。三者都应在 `novel-llm` 内重写，不复用上游代码。
+1. **A1 段落级补丁**——当前每次 AI 写回都重建编辑器实例，光标、选区、撤销历史全丢
+2. **C3 `hasExternalChange` 加内容比对**——一行修正，消除误报
+3. A2/A7/A8 布局与浮动条定位
+4. Ghost Text、诊断段落标记等数据源补齐后再做
 
-**5. 哪些功能只需要吸收测试案例或设计思想？**
-
-恢复冲突的四类场景、探测必须显式授权且默认不发真实请求、能力档案失败模式不进配置哈希、payload 留存策略（默认关闭 + 双上限 + 字段白名单脱敏）、思考开关"不能只凭 HTTP 200 判定"的验证原则。
-
-**6. 上游同步对目前 Beta 发布的实际价值有多大？**
-
-中等偏低但方向明确。118 个提交里 96 个只动文档，32 个动前端（多为上游自有 UI 结构），15 个动 `server/src/llm`。对 Beta 验收真正有直接帮助的是记账与失败分类这两项——前者本轮已落地，后者可减少"结构化失败被误判为模型不支持"导致的无效排障。渠道通知、官网、production kernel 与本 Beta 无关。
-
-**7. 下一次同步应该安排在什么阶段？**
-
-建议在 Beta-A3 合入 `beta` 并通过验收之后、下一次大版本规划之前，安排一次 Upstream-Sync-A2，范围限定为 S1 前三项：失败分类 → 首 token 延迟 → 原生 `json_object` + 最小能力档案。能力档案必须与"默认不探测、探测显式授权"一起设计，避免引入未授权付费调用。
+A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑器实例不重建」。
 
 ---
 
-## 附：Backlog 摘要
+## 15. 第二轮落地记录：物理调用独立记账（2026-11-09）
 
-| 优先级 | 项目 | 依赖 | 预估 |
-| --- | --- | --- | --- |
-| S1-1 | `novel-llm` 结构化失败分类（无网络请求） | 无 | 小 |
-| S1-2 | 首 token 延迟记录 | 无 | 小 |
-| S1-3 | OpenAI 兼容 `json_object` 模式 | S1-1 | 中 |
-| S1-4 | 最小能力档案（provider+model+host） | S1-3 | 中 |
-| S1-5 | 上游恢复故障 fixture 改写 | 无 | 小 |
-| S2-1 | 编辑器光标保持 / Ghost Text / 卷拆章进度 | Beta 验收后 | 中 |
-| S2-2 | 章节诊断给出具体修复目标 | 无 | 小 |
-| S3 | 通知渠道、官网、production kernel | 暂不 | — |
+本节记录本报告 §7.4「值得做（S1）」第 1–3 项的**实际落地结果**，以及落地过程中对 §7 部分结论的修正。实现分支 `feat/upstream-sync-a1-invocation-observability`，独立 worktree 完成，未触碰 Beta-A3 工作区与 `main`。
+
+### 15.1 已落地的内容
+
+本报告 §7.4 列出的四项 P0/P1 缺陷，本轮已全部修复：
+
+| §7.2 缺陷 | 修复方式 |
+| --- | --- |
+| （1）粒度为「步骤尝试」而非「物理请求」 | 首次请求与修复请求各自写入独立 `llm_invocation` 行，各自持有自己的 `request_id` |
+| （2）修复 usage 被合并进首次请求 | 删除 `accumulate_usage(&mut usage, ...)`；两行各记各的用量 |
+| （3）`status` 硬编码 `"succeeded"` | 改为由 `InvocationOutcome` 驱动，失败路径不再标成功 |
+| （4）传输失败不写行 | 新增 `record_failed_invocation`，draft / bounded_repair / 结构化三条路径的失败与取消都补写记录 |
+
+实现要点：
+
+- 迁移 `0028_invocation_observability.sql`：纯增量增加 `attempt_id` / `audit_status` / `usage_state` / `duration_ms` 与一个 `(run_id, started_at)` 索引，不改写既有行。
+- `crates/novel-domain/src/observability.rs`：新增 `InvocationOutcome`（9 种结果）与 `InvocationUsageState`（`known` / `unknown` / `unbilled`）契约。这是**确定性错误归类**，不参与重试、暂停或质量政策判断。
+- `RunUsageView` 拆出 `knownCalls` / `unknownCalls` / `unbilledCalls`，`promptTokens` 只累加已确认用量。
+- 导演台在 `unknownCalls > 0` 时显示「`N` 次调用费用未知」。
+
+### 15.2 对 §7 两处结论的修正
+
+**（a）§7.4 认为 `durationMs` 不必新加列。** 落地时加了 `duration_ms`，理由不是精度，而是**语义隔离**：`finished_at - started_at` 在结构化路径上包含本地 JSON 校验与证据核验时间，不是纯请求耗时；显式列避免下游误读为网络延迟。
+
+**（b）§7.4 未讨论取消的计费归属，本轮给出裁决：取消按 `unknown` 处理，不是 `unbilled`。**
+
+原实现不为取消写记录。问题在于 `LlmError::Cancelled` 只在客户端侧产生，无法证明上游没有收到请求并计费；归为 `unbilled` 会让费用汇总系统性偏低。这条裁决改写了既有测试契约（`p8_director_loop` 中 4 个用例），已同步更新。
+
+### 15.3 §7.5「SQLite 无限增长」仍未解决（保持 S1）
+
+本轮**没有**引入 payload 全文持久化，因此没有放大 §7.5 的风险；但 §7.5 本身的问题仍在：
+
+- `workflow_artifact.payload_json` 存全量 context prompt，无长度上限
+- `chapter_candidate.content` 每次 draft 与 bounded_repair 各存一份全文
+
+本轮的立场与本报告一致：在引入任何载荷表之前，必须先设计保留策略（`retentionDays` + `maxMb` 双上限）。这是一项独立工作，不在本轮范围内。
+
+### 15.4 仍未做的观测项
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| `first_token_ms` | 未做 | 需先改 `sse.rs` 让 `consume_sse` 返回 metrics，属独立改动 |
+| `chain_id` / `parent_invocation_id` | 未做 | 本轮用 `attempt_id` 关联，足够定位同一次步骤尝试；显式调用链是后续增强 |
+| `error.rs` 失败分类携带 httpStatus | 未做 | 这是能力档案的前置条件（见 §14 第三优先第 4 项），与记账正交 |
+| `estimated_cost_micros` / `usage_ledger` 死结构 | 未清理 | 保持原样，标注为未启用比静默删除更安全 |
+
+### 15.5 实现细节索引
+
+| 位置 | 作用 |
+| --- | --- |
+| `crates/novel-domain/src/observability.rs` | 结果分类与用量状态契约及其单元测试 |
+| `crates/novel-application/src/worker.rs` | `invocation()` / `record_usage_before_stop` / `record_failed_invocation` / `record_repair_invocation` / `invocation_outcome_for_error` |
+| `crates/novel-storage-sqlite/src/workflow.rs` | `insert_invocation` 写入新列；`run_usage` 按 `usage_state` 分组聚合 |
+| `migrations/0028_invocation_observability.sql` | 纯增量 schema |
+| `docs/wiki/workflows/llm-invocation-accounting.md` | 长期规则与失败模式 |
+
+### 15.6 验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo fmt --all --check` | PASS |
+| `cargo clippy --workspace --all-targets` | PASS（新增代码 0 warning） |
+| `cargo test --workspace` | PASS，102 个测试二进制，0 失败 |
+| 新增测试 | 6 个记账用例 + 1 个历史库升级用例（真实 0027 schema 起点） |
+| Client typecheck | 改动前后同为 119 个既有错误，改动文件零新增 |
+| Client 单测 / Tauri bundle / E2E | NOT_RUN（UI 验收交由维护者） |
+
+历史库升级覆盖：旧记录不丢、新列带默认值、重复打开幂等、无用量旧行不被当成 0 计费。
+
+### 15.7 与 Beta-A3 的冲突评估
+
+本分支基于 `0a51abc0`。Beta-A3 同期前进到 `8e8486a3`，新增内容只有 `docs/acceptance/BETA-A3-REVIEW-AND-DESKTOP-VALIDATION.md`，与本分支文件集交集为空。
+
+与 `beta` 的合并冲突仅发生在 `docs/architecture/UPSTREAM-SYNC-A1-AUDIT.md`（两轮审计同路径），已通过「保留第一轮正文 + 追加本轮落地记录」解决；`worker_validation.rs` 的围栏 JSON 提取修复与本轮改动无重叠，自动合并成功。
