@@ -186,9 +186,14 @@ fn classify_llm_error(error: &LlmError) -> (String, String, bool) {
             error.to_string(),
             error.retryable_without_new_charge(),
         ),
-        LlmError::InvalidResponse(_)
-        | LlmError::StructuredOutput(_)
-        | LlmError::EndpointRejected(_) => ("INVALID_RESPONSE".into(), error.to_string(), false),
+        LlmError::InvalidResponse(_) => ("INVALID_RESPONSE".into(), error.to_string(), false),
+        // 流已经建立后破损：给用户一个可区分的说明，便于判断是网络还是上游。
+        LlmError::StreamCorrupted(_) => ("MODEL_STREAM_CORRUPTED".into(), error.to_string(), false),
+        // 上游主动下发 error 事件：不是本地解析问题。
+        LlmError::ProviderError(_) => ("MODEL_PROVIDER_ERROR".into(), error.to_string(), false),
+        LlmError::StructuredOutput(_) | LlmError::EndpointRejected(_) => {
+            ("INVALID_RESPONSE".into(), error.to_string(), false)
+        }
         LlmError::BudgetExceeded(_) => ("BUDGET_EXCEEDED".into(), error.to_string(), false),
     }
 }

@@ -1,8 +1,9 @@
 //! Upstream-Sync-A1：调用观测字段的历史库升级与回读兼容。
 //!
-//! 迁移 0028 只新增列与索引，不改写既有行。用真实历史起点（0027）建库，
+//! 迁移 0028 只新增列与索引，不改写既有行；0029 负责把历史行的
+//! `usage_state` 回填成与真实用量一致的分类。用真实历史起点（0027）建库，
 //! 写入旧结构下的调用记录，再升级到当前 schema，验证：
-//! 旧记录仍可读、旧行不会被当成「已计费 0 用量」、迁移可重复打开。
+//! 旧记录仍可读、无用量旧行不会被当成「已确认计费」、迁移可重复打开。
 
 #![cfg(feature = "test-harness")]
 
@@ -53,14 +54,14 @@ async fn legacy_invocations_survive_observability_upgrade() {
         .unwrap();
     assert_eq!(rows, 2, "升级不能丢历史调用记录");
 
-    // 4. 旧行的 audit_status 回落到 succeeded，usage_state 回落到 known；
-    //    没有用量的旧行仍是未知，不会被算成 0 计费。
+    // 4. 旧行的 audit_status 回落到 succeeded。usage_state 由 0029 回填：
+    //    只有完整用量的行是 known，没有用量的旧行归为未知，不会被算成 0 计费。
     let usage = WorkflowRepository::run_usage(&upgraded, "legacy-run")
         .await
         .unwrap();
     assert_eq!(usage.calls, 2);
-    assert_eq!(usage.known_calls, 2);
-    assert_eq!(usage.unknown_calls, 0);
+    assert_eq!(usage.known_calls, 1);
+    assert_eq!(usage.unknown_calls, 1);
     // 汇总额来自那一行真的有用量的记录。
     assert_eq!(usage.prompt_tokens, 30);
     assert_eq!(usage.completion_tokens, 12);
