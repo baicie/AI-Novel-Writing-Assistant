@@ -2775,7 +2775,9 @@ fn invocation(
 /// 把 Provider 错误映射成调用结果分类。
 ///
 /// 只做计费语义归类，不参与重试、暂停或质量政策判断。
-fn invocation_outcome_for_error(error: &novel_llm::LlmError) -> InvocationOutcome {
+/// 分类来自错误**变体**（即错误产生的阶段），而不是错误文本：
+/// 同样的文案出现在 HTTP 阶段与流解析阶段，计费结论不同。
+pub fn invocation_outcome_for_error(error: &novel_llm::LlmError) -> InvocationOutcome {
     match error {
         novel_llm::LlmError::RateLimit => InvocationOutcome::RateLimited,
         novel_llm::LlmError::Timeout => InvocationOutcome::TimedOut,
@@ -2789,8 +2791,13 @@ fn invocation_outcome_for_error(error: &novel_llm::LlmError) -> InvocationOutcom
                 InvocationOutcome::Rejected
             }
         }
+        // 以下三种都发生在请求已经发出之后，服务端可能已经计费：
+        // HTTP 状态码不可处理、流中 JSON 破损、上游 error 事件。
         novel_llm::LlmError::InvalidResponse(_)
-        | novel_llm::LlmError::EndpointRejected(_)
+        | novel_llm::LlmError::StreamCorrupted(_)
+        | novel_llm::LlmError::ProviderError(_) => InvocationOutcome::ProviderFailed,
+        // 以下三种是发出前或结果已明确，不产生费用。
+        novel_llm::LlmError::EndpointRejected(_)
         | novel_llm::LlmError::StructuredOutput(_)
         | novel_llm::LlmError::BudgetExceeded(_) => InvocationOutcome::Rejected,
     }

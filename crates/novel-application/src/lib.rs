@@ -113,3 +113,6 @@ pub use structured_memory::{
 pub use tasks::TaskCenterService;
 pub use usecase::{ChapterUseCases, NovelUseCases, PromoteOutcomeDto, RunUseCases};
 pub use worker::{ConcurrencyGate, TickOutcome, Worker};
+// 计费语义映射对外开放给集成测试，保证「错误阶段 → 费用可见性」的契约可被锁定。
+#[doc(hidden)]
+pub use worker::invocation_outcome_for_error;

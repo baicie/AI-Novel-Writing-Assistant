@@ -12,8 +12,16 @@ pub enum LlmError {
     Unauthorized,
     #[error("{reason}")]
     Unavailable { billed: bool, reason: String },
+    /// HTTP 层返回了未被专门处理的状态码。请求已经到达服务端，可能已计费。
     #[error("{0}")]
     InvalidResponse(String),
+    /// SSE 流已经开始，但某一行无法解析。服务端必然处理过这次请求。
+    #[error("{0}")]
+    StreamCorrupted(String),
+    /// 服务端在流中下发了 error 事件。服务端已经受理并计费。
+    #[error("{0}")]
+    ProviderError(String),
+    /// 请求在发出前就被拒绝（端点策略、参数校验）。
     #[error("{0}")]
     EndpointRejected(String),
     #[error("{0}")]
@@ -33,6 +41,8 @@ impl LlmError {
             Self::Cancelled
             | Self::Unauthorized
             | Self::InvalidResponse(_)
+            | Self::StreamCorrupted(_)
+            | Self::ProviderError(_)
             | Self::EndpointRejected(_)
             | Self::StructuredOutput(_)
             | Self::BudgetExceeded(_) => false,

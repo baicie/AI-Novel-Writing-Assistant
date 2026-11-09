@@ -646,7 +646,12 @@ export default function TauriDirectorPage() {
               {detail?.pauseReason ? <p className="mt-2 text-sm text-destructive">暂停原因：{detail.pauseReason}</p> : null}
               {detail?.failureReason ? <p className="mt-2 text-sm text-destructive">错误：{detail.failureReason}</p> : null}
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <span className="rounded-full bg-background px-2 py-1">{detail?.usage.calls ?? 0} 次模型调用</span>
+                <span
+                  className="rounded-full bg-background px-2 py-1"
+                  title="按每次生成或修复请求计数；模型服务内部自动重发不单独计数"
+                >
+                  {detail?.usage.calls ?? 0} 次模型调用
+                </span>
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.promptTokens ?? 0} 输入 tokens</span>
                 <span className="rounded-full bg-background px-2 py-1">{detail?.usage.completionTokens ?? 0} 输出 tokens</span>
                 {detail?.usage.unknownCalls ? (

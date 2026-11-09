@@ -28,13 +28,13 @@ pub fn parse_sse_line(line: &str) -> Result<SsePiece, LlmError> {
         return Ok(SsePiece::Done);
     }
     let value: Value = serde_json::from_str(data)
-        .map_err(|_| LlmError::InvalidResponse("模型流不是 JSON".into()))?;
+        .map_err(|_| LlmError::StreamCorrupted("模型流不是 JSON".into()))?;
     if let Some(error) = value.get("error").filter(|error| !error.is_null()) {
         let message = error
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("模型服务返回错误事件");
-        return Err(LlmError::InvalidResponse(message.to_string()));
+        return Err(LlmError::ProviderError(message.to_string()));
     }
     if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
         return Ok(SsePiece::Usage(read_usage(usage)));
@@ -205,7 +205,10 @@ mod tests {
     #[test]
     fn explicit_error_event_is_not_ignored() {
         let error = parse_sse_line(r#"data: {"error":{"message":"upstream failed"}}"#).unwrap_err();
-        assert!(matches!(error, LlmError::InvalidResponse(_)));
+        assert!(
+            matches!(error, LlmError::ProviderError(_)),
+            "服务端 error 事件说明请求已被受理"
+        );
     }
 
     #[tokio::test]
