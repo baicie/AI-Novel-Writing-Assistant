@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use novel_domain::{
-    ArtifactView, ControlEvent, CreationExperience, FirstNovelOnboarding, Genre, RunControl,
-    StoryMode, World,
+    ArtifactView, ControlEvent, CreationExperience, FirstNovelOnboarding, Genre, InvocationOutcome,
+    InvocationUsageState, RunControl, StoryMode, World,
 };
 use novel_workflow::AttemptView;
 
@@ -402,6 +402,12 @@ pub struct NewInvocation {
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
     pub status: String,
+    /// 该记录归属的工作流尝试；结构化修复会复用首次请求的 attempt。
+    pub attempt_id: Option<String>,
+    /// 这次物理调用的结果分类，用于区分成功、修复失败与各类失败。
+    pub outcome: InvocationOutcome,
+    /// 费用可见性。`Unknown` 表示可能已计费，不能当 0 汇总。
+    pub usage_state: InvocationUsageState,
 }
 
 #[derive(Debug, Clone)]

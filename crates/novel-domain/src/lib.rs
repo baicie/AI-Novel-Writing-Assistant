@@ -4,6 +4,7 @@
 mod chapter;
 mod entities;
 mod error;
+mod observability;
 mod provider;
 mod run;
 mod setup;
@@ -15,6 +16,7 @@ pub use entities::{
     WorkflowStep, WorkflowStepType, WorldSetting,
 };
 pub use error::DomainError;
+pub use observability::{InvocationOutcome, InvocationUsageState};
 pub use provider::{
     CapabilityField, CapabilityValue, CredentialKind, CredentialReference, DiscoveryErrorCode,
     Modality, ModelBinding, ModelCapabilities, ModelDiscoveryOutcome, ModelProfile, ModelSource,

@@ -257,7 +257,15 @@ pub struct RunCandidateView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunUsageView {
+    /// 物理调用条数（含结构化修复与失败的请求）。
     pub calls: i64,
+    /// 用量已确认的调用条数。
+    pub known_calls: i64,
+    /// 可能已计费但结果未知的调用条数；这部分费用无法从本地推断。
+    pub unknown_calls: i64,
+    /// 明确没有产生费用的调用条数。
+    pub unbilled_calls: i64,
+    /// 仅统计用量已确认的调用，未知调用不会被当成 0 混入。
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
 }

@@ -537,3 +537,82 @@ cargo clippy -p novel-application --lib -- -D warnings   通过
 4. Ghost Text、诊断段落标记等数据源补齐后再做
 
 A1 必须先于 A3/A5：上游的专注模式与查找替换都依赖「编辑器实例不重建」。
+
+---
+
+## 15. 第二轮落地记录：物理调用独立记账（2026-11-09）
+
+本节记录本报告 §7.4「值得做（S1）」第 1–3 项的**实际落地结果**，以及落地过程中对 §7 部分结论的修正。实现分支 `feat/upstream-sync-a1-invocation-observability`，独立 worktree 完成，未触碰 Beta-A3 工作区与 `main`。
+
+### 15.1 已落地的内容
+
+本报告 §7.4 列出的四项 P0/P1 缺陷，本轮已全部修复：
+
+| §7.2 缺陷 | 修复方式 |
+| --- | --- |
+| （1）粒度为「步骤尝试」而非「物理请求」 | 首次请求与修复请求各自写入独立 `llm_invocation` 行，各自持有自己的 `request_id` |
+| （2）修复 usage 被合并进首次请求 | 删除 `accumulate_usage(&mut usage, ...)`；两行各记各的用量 |
+| （3）`status` 硬编码 `"succeeded"` | 改为由 `InvocationOutcome` 驱动，失败路径不再标成功 |
+| （4）传输失败不写行 | 新增 `record_failed_invocation`，draft / bounded_repair / 结构化三条路径的失败与取消都补写记录 |
+
+实现要点：
+
+- 迁移 `0028_invocation_observability.sql`：纯增量增加 `attempt_id` / `audit_status` / `usage_state` / `duration_ms` 与一个 `(run_id, started_at)` 索引，不改写既有行。
+- `crates/novel-domain/src/observability.rs`：新增 `InvocationOutcome`（9 种结果）与 `InvocationUsageState`（`known` / `unknown` / `unbilled`）契约。这是**确定性错误归类**，不参与重试、暂停或质量政策判断。
+- `RunUsageView` 拆出 `knownCalls` / `unknownCalls` / `unbilledCalls`，`promptTokens` 只累加已确认用量。
+- 导演台在 `unknownCalls > 0` 时显示「`N` 次调用费用未知」。
+
+### 15.2 对 §7 两处结论的修正
+
+**（a）§7.4 认为 `durationMs` 不必新加列。** 落地时加了 `duration_ms`，理由不是精度，而是**语义隔离**：`finished_at - started_at` 在结构化路径上包含本地 JSON 校验与证据核验时间，不是纯请求耗时；显式列避免下游误读为网络延迟。
+
+**（b）§7.4 未讨论取消的计费归属，本轮给出裁决：取消按 `unknown` 处理，不是 `unbilled`。**
+
+原实现不为取消写记录。问题在于 `LlmError::Cancelled` 只在客户端侧产生，无法证明上游没有收到请求并计费；归为 `unbilled` 会让费用汇总系统性偏低。这条裁决改写了既有测试契约（`p8_director_loop` 中 4 个用例），已同步更新。
+
+### 15.3 §7.5「SQLite 无限增长」仍未解决（保持 S1）
+
+本轮**没有**引入 payload 全文持久化，因此没有放大 §7.5 的风险；但 §7.5 本身的问题仍在：
+
+- `workflow_artifact.payload_json` 存全量 context prompt，无长度上限
+- `chapter_candidate.content` 每次 draft 与 bounded_repair 各存一份全文
+
+本轮的立场与本报告一致：在引入任何载荷表之前，必须先设计保留策略（`retentionDays` + `maxMb` 双上限）。这是一项独立工作，不在本轮范围内。
+
+### 15.4 仍未做的观测项
+
+| 项 | 状态 | 说明 |
+| --- | --- | --- |
+| `first_token_ms` | 未做 | 需先改 `sse.rs` 让 `consume_sse` 返回 metrics，属独立改动 |
+| `chain_id` / `parent_invocation_id` | 未做 | 本轮用 `attempt_id` 关联，足够定位同一次步骤尝试；显式调用链是后续增强 |
+| `error.rs` 失败分类携带 httpStatus | 未做 | 这是能力档案的前置条件（见 §14 第三优先第 4 项），与记账正交 |
+| `estimated_cost_micros` / `usage_ledger` 死结构 | 未清理 | 保持原样，标注为未启用比静默删除更安全 |
+
+### 15.5 实现细节索引
+
+| 位置 | 作用 |
+| --- | --- |
+| `crates/novel-domain/src/observability.rs` | 结果分类与用量状态契约及其单元测试 |
+| `crates/novel-application/src/worker.rs` | `invocation()` / `record_usage_before_stop` / `record_failed_invocation` / `record_repair_invocation` / `invocation_outcome_for_error` |
+| `crates/novel-storage-sqlite/src/workflow.rs` | `insert_invocation` 写入新列；`run_usage` 按 `usage_state` 分组聚合 |
+| `migrations/0028_invocation_observability.sql` | 纯增量 schema |
+| `docs/wiki/workflows/llm-invocation-accounting.md` | 长期规则与失败模式 |
+
+### 15.6 验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| `cargo fmt --all --check` | PASS |
+| `cargo clippy --workspace --all-targets` | PASS（新增代码 0 warning） |
+| `cargo test --workspace` | PASS，102 个测试二进制，0 失败 |
+| 新增测试 | 6 个记账用例 + 1 个历史库升级用例（真实 0027 schema 起点） |
+| Client typecheck | 改动前后同为 119 个既有错误，改动文件零新增 |
+| Client 单测 / Tauri bundle / E2E | NOT_RUN（UI 验收交由维护者） |
+
+历史库升级覆盖：旧记录不丢、新列带默认值、重复打开幂等、无用量旧行不被当成 0 计费。
+
+### 15.7 与 Beta-A3 的冲突评估
+
+本分支基于 `0a51abc0`。Beta-A3 同期前进到 `8e8486a3`，新增内容只有 `docs/acceptance/BETA-A3-REVIEW-AND-DESKTOP-VALIDATION.md`，与本分支文件集交集为空。
+
+与 `beta` 的合并冲突仅发生在 `docs/architecture/UPSTREAM-SYNC-A1-AUDIT.md`（两轮审计同路径），已通过「保留第一轮正文 + 追加本轮落地记录」解决；`worker_validation.rs` 的围栏 JSON 提取修复与本轮改动无重叠，自动合并成功。
