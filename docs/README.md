@@ -55,6 +55,7 @@
 承接横切架构说明与工程约定（不改变根目录对外入口）。
 
 - [Backend testing](./architecture/testing.md)：后端 `node:test` 脚本的运行方式与目录约定。
+- [上游同步审计 A1](./architecture/UPSTREAM-SYNC-A1-AUDIT.md)：与上游 118 个提交的全量差异盘点、S0–S3 分级与本轮移植。
 
 ### `docs/wiki`
 
